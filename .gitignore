@@ -218,3 +218,7 @@ __marimo__/
 *.edr
 *.out
 *.err
+
+# Intermediate folders
+results/
+test/
