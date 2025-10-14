@@ -6,8 +6,9 @@ echo -e "Protein\nSystem\n" | gmx trjconv -s step5_1.tpr -f step5_1.xtc -o step5
 echo -e "Backbone\nSystem\n" | gmx trjconv -s step5_1.tpr -f step5_1_center.xtc -o step5_1_fit.xtc -fit rot+trans
 
 # Generate index file for protein-ligand complex
-gmx make_ndx -f step5_1.gro -o index.ndx <<EOF
+gmx make_ndx -f step5_1.tpr -o index.ndx <<EOF
 1 | 13
+name 17 complex
 q
 EOF
 
