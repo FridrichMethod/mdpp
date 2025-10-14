@@ -5,9 +5,11 @@ ml cmake/3.31.4
 ml make/4.4
 ml cuda/12.6.1
 
+GMX_VERSION="2025.2"
+GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
 
-tar -xzvf gromacs-2025.2.tar.gz
-cd gromacs-2025.2 || exit
+tar -xzvf gromacs-${GMX_VERSION}.tar.gz
+cd gromacs-${GMX_VERSION} || exit
 mkdir build
 cd build || exit
 cmake .. \
@@ -19,7 +21,7 @@ cmake .. \
     -DGMX_MPI=OFF \
     -DGMX_THREAD_MPI=ON \
     -DREGRESSIONTEST_DOWNLOAD=ON \
-    -DCMAKE_INSTALL_PREFIX="/home/groups/ayting/gromacs-2025.2"
+    -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
 make -j16
 make check
 make install
