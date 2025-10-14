@@ -209,15 +209,21 @@ __marimo__/
 # gromacs files
 # *.mdp
 # *.pdb
-*.xtc
-*.tpr
-*.ndx
-*.gro
-*.top
 *.cpt
 *.edr
-*.out
+*.eps
 *.err
+*.gro
+*.ndx
+*.npy
+*.out
+*.top
+*.tpr
+*.trr
+*.xpm
+*.xtc
+*.xvg
+\#*\#
 
 # Intermediate folders
 results/
