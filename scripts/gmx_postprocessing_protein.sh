@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Center the trajectory
 echo -e "Protein\nSystem\n" | gmx trjconv -s step5_1.tpr -f step5_1.xtc -o step5_1_center.xtc -center -pbc mol -ur compact
 # Fit the trajectory

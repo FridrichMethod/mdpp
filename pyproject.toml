@@ -15,8 +15,10 @@ dependencies = [
   "matplotlib",
   "mdanalysis",
   "mdtraj",
+  "nglview",
   "numpy",
   "pandas",
+  "py3dmol",
   "scipy",
   "seaborn",
 ]

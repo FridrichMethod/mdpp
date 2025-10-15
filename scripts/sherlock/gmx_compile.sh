@@ -2,15 +2,13 @@
 
 set -euo pipefail
 
-for compiler in g++ cmake make gcc nvcc; do
-    if ! command -v $compiler >/dev/null 2>&1; then
-        echo "$compiler could not be found"
-        exit 1
-    fi
-done
+ml gcc/12.4.0
+ml cmake/3.31.4
+ml make/4.4
+ml cuda/12.6.1
 
-GMX_VERSION="2025.3"
-nproc=$(nproc)
+GMX_VERSION="2025.2"
+GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
 cd gromacs-${GMX_VERSION} || exit
@@ -25,6 +23,7 @@ cmake .. \
     -DGMX_MPI=OFF \
     -DGMX_THREAD_MPI=ON \
     -DREGRESSIONTEST_DOWNLOAD=ON \
-    make -j"${nproc}"
-make check -j"${nproc}"
+    -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
+make -j16
+make check
 make install
