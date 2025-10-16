@@ -70,8 +70,20 @@ gmx mdrun \
 
 # If you want to extend the simulation time by 200 ns (200000 ps)
 # uncomment the following line
-# gmx convert-tpr -s step5_1.tpr -extend 200000 -o step5_1.tpr
+# gmx convert-tpr \
+#     -s step5_1.tpr \
+#     -extend 200000 \
+#     -o step5_1.tpr
 
 # If you want to restart the production run from a checkpoint file
 # uncomment the following line
-# gmx mdrun -v -deffnm step5_1 -pin on -pmefft gpu -bonded gpu -pme gpu -nb gpu -update gpu -cpi step5_1.cpt
+# gmx mdrun \
+#     -v \
+#     -deffnm step5_1 \
+#     -pin on \
+#     -pmefft gpu \
+#     -bonded gpu \
+#     -pme gpu \
+#     -nb gpu \
+#     -update gpu \
+#     -cpi step5_1.cpt
