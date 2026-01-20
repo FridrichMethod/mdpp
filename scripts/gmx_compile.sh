@@ -9,13 +9,14 @@ for compiler in g++ cmake make gcc nvcc; do
     fi
 done
 
-GMX_VERSION="2025.3"
-nproc=$(nproc)
+GMX_VERSION="2025.2"
+GMX_PREFIX="/apps/${GMX_VERSION}"
+NPROC=$(nproc)
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
-cd gromacs-${GMX_VERSION} || exit
+cd gromacs-${GMX_VERSION}
 mkdir build
-cd build || exit
+cd build
 cmake .. \
     -DCMAKE_C_COMPILER=gcc \
     -DCMAKE_CXX_COMPILER=g++ \
@@ -25,6 +26,7 @@ cmake .. \
     -DGMX_MPI=OFF \
     -DGMX_THREAD_MPI=ON \
     -DREGRESSIONTEST_DOWNLOAD=ON \
-    make -j"${nproc}"
-make check -j"${nproc}"
+    -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
+make -j"${NPROC}"
+make check -j"${NPROC}"
 make install

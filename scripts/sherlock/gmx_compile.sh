@@ -11,9 +11,9 @@ GMX_VERSION="2025.2"
 GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
-cd gromacs-${GMX_VERSION} || exit
+cd gromacs-${GMX_VERSION}
 mkdir build
-cd build || exit
+cd build
 cmake .. \
     -DCMAKE_C_COMPILER=gcc \
     -DCMAKE_CXX_COMPILER=g++ \
