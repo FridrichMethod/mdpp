@@ -1,9 +1,9 @@
-title                   = nvt
+title                   = npt
 ;
 define                  = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
 integrator              = md
-dt                      = 0.001
-nsteps                  = 125000
+dt                      = 0.002
+nsteps                  = 250000
 nstxout-compressed      = 5000
 nstxout                 = 0
 nstvout                 = 0
@@ -30,6 +30,13 @@ tc_grps                 = SOLU SOLV
 tau_t                   = 1.0 1.0
 ref_t                   = 310.15 310.15
 ;
+pcoupl                  = C-rescale
+pcoupltype              = isotropic
+compressibility         = 4.5e-5
+tau_p                   = 5.0
+ref_p                   = 1.0
+refcoord_scaling        = com
+;
 constraints             = h-bonds
 constraint_algorithm    = lincs
 lincs_order             = 4
@@ -39,6 +46,5 @@ nstcomm                 = 100
 comm_mode               = linear
 comm_grps               = SOLU SOLV
 ;
-gen-vel                 = yes
-gen-temp                = 310.15
-gen-seed                = -1
+continuation            = yes
+gen-vel                 = no
