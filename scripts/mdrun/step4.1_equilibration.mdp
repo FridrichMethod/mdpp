@@ -20,13 +20,16 @@ rvdw                    = 1.2
 coulombtype             = PME
 rcoulomb                = 1.2
 ;
-tcoupl                  = v-rescale
+pbc                     = xyz
+DispCorr                = no
+;
+tcoupl                  = V-rescale
 tc_grps                 = SOLU SOLV
 tau_t                   = 1.0 1.0
 ref_t                   = 310.15 310.15
 ;
 constraints             = h-bonds
-constraint_algorithm    = LINCS
+constraint_algorithm    = lincs
 ;
 nstcomm                 = 100
 comm_mode               = linear
