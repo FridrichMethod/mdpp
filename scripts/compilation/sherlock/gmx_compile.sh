@@ -2,10 +2,12 @@
 
 set -euo pipefail
 
-ml gcc/14.2.0
+ml gcc/12.4.0
 ml cmake/3.31.4
 ml make/4.4
-ml cuda/12.8.0
+ml cuda/12.6.1
+ml openmpi/5.0.5
+ml python/3.12.1
 
 GMX_VERSION="2026.0"
 GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
