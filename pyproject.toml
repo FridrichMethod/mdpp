@@ -18,6 +18,7 @@ dependencies = [
   "nglview",
   "numpy",
   "pandas",
+  "pdb-tools",
   "py3dmol",
   "scipy",
   "seaborn",
