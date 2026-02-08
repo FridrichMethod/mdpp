@@ -2,16 +2,15 @@
 
 set -euo pipefail
 
-for compiler in g++ cmake make gcc nvcc; do
-    if ! command -v $compiler >/dev/null 2>&1; then
-        echo "$compiler could not be found"
-        exit 1
-    fi
-done
+ml gcc/12.4.0
+ml cmake/3.31.4
+ml make/4.4
+ml cuda/12.6.1
+ml openmpi/5.0.5
+ml python/3.12.1
 
 GMX_VERSION="2026.0"
-GMX_PREFIX="/apps/gromacs-${GMX_VERSION}"
-NPROC=$(nproc)
+GMX_PREFIX="/home/groups/ayting/gromacs_mpi-${GMX_VERSION}"
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
 cd gromacs-${GMX_VERSION}
@@ -23,10 +22,10 @@ cmake .. \
     -DGMX_GPU=CUDA \
     -DGMX_FFT_LIBRARY=fftw3 \
     -DGMX_BUILD_OWN_FFTW=ON \
-    -DGMX_MPI=OFF \
-    -DGMX_THREAD_MPI=ON \
+    -DGMX_MPI=ON \
+    -DGMX_THREAD_MPI=OFF \
     -DREGRESSIONTEST_DOWNLOAD=ON \
     -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
-make -j"${NPROC}"
-make check -j"${NPROC}"
+make -j16
+make check
 make install
