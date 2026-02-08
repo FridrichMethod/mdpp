@@ -10,7 +10,7 @@ ml openmpi/5.0.5
 ml python/3.12.1
 
 GMX_VERSION="2026.0"
-GMX_PREFIX="/home/groups/ayting/gromacs_mpi-${GMX_VERSION}"
+GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
 cd gromacs-${GMX_VERSION}
