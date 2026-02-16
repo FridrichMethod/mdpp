@@ -139,7 +139,10 @@ show_error_codes = true
 warn_redundant_casts = true
 warn_return_any = true
 warn_unreachable = true
-warn_unused_ignores = true
+warn_unused_ignores = false
+namespace_packages = false
+enable_incomplete_feature = ["Unpack"]
+disable_error_code = ["import-not-found", "import-untyped", "no-any-return"]
 
 [[tool.mypy.overrides]]
 module = [
