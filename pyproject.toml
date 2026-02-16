@@ -11,27 +11,27 @@ readme = "README.md"
 description = "MD simulation pre- and post-processing"
 requires-python = ">=3.12"
 dependencies = [
-  "ParmEd",
-  "biopython",
-  "biotite",
-  "deeptime",
-  "jupyter",
-  "matplotlib",
-  "mdanalysis",
-  "mdtraj",
-  "nglview",
-  "numpy",
-  "pandas",
-  "pdb-tools",
-  "plotly",
-  "polars",
-  "prody",
-  "py3dmol",
-  "rdkit",
-  "scikit-learn",
-  "scipy",
-  "seaborn",
-  "uv",
+    "ParmEd",
+    "biopython",
+    "biotite",
+    "deeptime",
+    "jupyter",
+    "matplotlib",
+    "mdanalysis",
+    "mdtraj",
+    "nglview",
+    "numpy",
+    "pandas",
+    "pdb-tools",
+    "plotly",
+    "polars",
+    "prody",
+    "py3dmol",
+    "rdkit",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+    "uv",
 ]
 
 [tool.setuptools.dynamic]
@@ -39,76 +39,77 @@ version = { attr = "mdpp.__version__" }
 
 [project.optional-dependencies]
 dev = [
-  "pre-commit",
-  "pytest",
-  "pytest-cov",
-  "pytest-env",
-  "pytest-timeout",
-  "pytest-xdist",
-  "ruff",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-env",
+    "pytest-timeout",
+    "pytest-xdist",
+    "ruff",
 ]
 mypy = [
-  "mypy",
-  "types-aiofiles",
-  "types-cachetools",
-  "types-python-dateutil",
-  "types-python-slugify",
-  "types-pytz",
-  "types-PyYAML",
-  "types-redis",
-  "types-requests",
-  "types-six",
-  "types-tabulate",
-  "types-toml",
+    "mypy",
+    "types-aiofiles",
+    "types-cachetools",
+    "types-python-dateutil",
+    "types-python-slugify",
+    "types-pytz",
+    "types-PyYAML",
+    "types-redis",
+    "types-requests",
+    "types-six",
+    "types-tabulate",
+    "types-toml",
 ]
 
 [tool.ruff]
 target-version = "py312"
-preview = false
+preview = true
 src = ["src"]
 line-length = 100
 force-exclude = true
 extend-exclude = [
-  ".git",
-  ".hg",
-  ".mypy_cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  ".svn",
-  ".tox",
-  ".venv",
-  "_build",
-  "buck-out",
-  "build",
-  "dist",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
 ]
 
 [tool.ruff.lint]
 # Check https://beta.ruff.rs/docs/rules/ for full list of rules
 select = [
-  "A",    # flake8-builtins
-  "ARG",  # flake8-unused-arguments
-  "B",    # flake8-bugbear
-  "C4",   # flake8-comprehensions
-  "C90",  # mccabe
-  "E",    # pycodestyle
-  "F",    # Pyflakes
-  "I",    # isort
-  "NPY",  # numpy
-  "PD",   # pandas-vet
-  "PERF", # perflint
-  "PLE",  # pylint-error
-  "RUF",  # ruff
-  "SIM",  # flake8-simplify
-  "TID",  # flake8-tidy-imports
-  "UP",   # pyupgrade
+    "A",    # flake8-builtins
+    "ARG",  # flake8-unused-arguments
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "C90",  # mccabe
+    "E",    # pycodestyle
+    "F",    # Pyflakes
+    "I",    # isort
+    "NPY",  # numpy
+    "PD",   # pandas-vet
+    "PERF", # perflint
+    "PLE",  # pylint-error
+    "RUF",  # ruff
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "UP",   # pyupgrade
 ]
 extend-select = [
-  "D",   # pydocstyle
-  "W",   # pycodestyle
-  "PLW", # pylint-warning
+    "D",   # pydocstyle
+    "W",   # pycodestyle
+    "PLW", # pylint-warning
 ]
 ignore = ["B905", "E203", "E501", "E741", "UP037"]
+explicit-preview-rules = true
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -146,24 +147,24 @@ disable_error_code = ["import-not-found", "import-untyped", "no-any-return"]
 
 [[tool.mypy.overrides]]
 module = [
-  "Bio.*",
-  "git.*",
-  "hydra.*",
-  "IPython.*",
-  "matplotlib.*",
-  "mdtraj.*",
-  "numpy.*",
-  "openmm.*",
-  "tqdm.*",
-  "torch.*",
-  "torch_geometric.*",
-  "torch_scatter.*",
-  "pandas.*",
-  "pdbfixer.*",
-  "pytest.*",
-  "omegaconf.*",
-  "scipy.*",
-  "sklearn.*",
+    "Bio.*",
+    "git.*",
+    "hydra.*",
+    "IPython.*",
+    "matplotlib.*",
+    "mdtraj.*",
+    "numpy.*",
+    "openmm.*",
+    "tqdm.*",
+    "torch.*",
+    "torch_geometric.*",
+    "torch_scatter.*",
+    "pandas.*",
+    "pdbfixer.*",
+    "pytest.*",
+    "omegaconf.*",
+    "scipy.*",
+    "sklearn.*",
 ]
 ignore_missing_imports = true
 
