@@ -15,6 +15,7 @@ dependencies = [
   "biopython",
   "biotite",
   "deeptime",
+  "jupyter",
   "matplotlib",
   "mdanalysis",
   "mdtraj",
