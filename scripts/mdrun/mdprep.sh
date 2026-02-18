@@ -23,6 +23,11 @@ if [[ -s "${PRODUCTION}".cpt ]]; then
     exit 0
 fi
 
+if ! command -v gracebat >/dev/null 2>&1; then
+    echo "gracebat is not installed."
+    exit 1
+fi
+
 # Minimization
 gmx grompp \
     -f "${MINIMIZATION}".mdp \
@@ -35,6 +40,14 @@ gmx mdrun \
     -deffnm "${MINIMIZATION}" \
     "${MDRUN_FLAGS[@]}"
 
+echo -e "Potential\n\n" | gmx energy \
+    -f "${MINIMIZATION}".edr \
+    -o "${MINIMIZATION}_potential.xvg"
+gracebat \
+    -nxy "${MINIMIZATION}_potential.xvg" \
+    -hdevice PNG \
+    -printfile "${MINIMIZATION}_potential.png"
+
 # Equilibration NVT
 gmx grompp \
     -f "${EQUILIBRATION_NVT}".mdp \
@@ -46,6 +59,14 @@ gmx grompp \
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NVT}" \
     "${MDRUN_FLAGS[@]}"
+
+echo -e "Temperature\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NVT}".edr \
+    -o "${EQUILIBRATION_NVT}_temperature.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NVT}_temperature.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NVT}_temperature.png"
 
 # Equilibration NPT
 # Start from the checkpoint file of the NVT equilibration
@@ -60,6 +81,21 @@ gmx grompp \
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT}" \
     "${MDRUN_FLAGS[@]}"
+
+echo -e "Pressure\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT}".edr \
+    -o "${EQUILIBRATION_NPT}_pressure.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT}_pressure.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT}_pressure.png"
+echo -e "Density\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT}".edr \
+    -o "${EQUILIBRATION_NPT}_density.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT}_density.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT}_density.png"
 
 # Production
 # Start from the checkpoint file of the NPT equilibration
