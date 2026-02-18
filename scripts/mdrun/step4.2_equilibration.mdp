@@ -3,7 +3,7 @@ title                   = npt
 define                  = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
 integrator              = md
 dt                      = 0.002
-nsteps                  = 250000
+nsteps                  = 500000
 nstxout-compressed      = 5000
 nstxout                 = 0
 nstvout                 = 0
