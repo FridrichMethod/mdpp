@@ -41,6 +41,7 @@ constraints             = h-bonds
 constraint_algorithm    = lincs
 lincs_order             = 4
 lincs_iter              = 1
+mass-repartition-factor = 3
 ;
 nstcomm                 = 100
 comm_mode               = linear

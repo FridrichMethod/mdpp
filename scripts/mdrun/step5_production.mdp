@@ -1,15 +1,15 @@
 title                   = production
 ;
 integrator              = md
-dt                      = 0.002
-nsteps                  = 100000000
-nstxout-compressed      = 5000
+dt                      = 0.004  ; HMR
+nsteps                  = 500000000  ; 2000 ns
+nstxout-compressed      = 2500  ; 10 ps
 nstxout                 = 0
 nstvout                 = 0
 nstfout                 = 0
-nstcalcenergy           = 1000
-nstenergy               = 5000
-nstlog                  = 5000
+nstcalcenergy           = 500  ; 2 ps
+nstenergy               = 2500  ; 10 ps
+nstlog                  = 2500  ; 10 ps
 ;
 cutoff-scheme           = Verlet
 nstlist                 = 20
@@ -39,6 +39,7 @@ constraints             = h-bonds
 constraint_algorithm    = lincs
 lincs_order             = 4
 lincs_iter              = 1
+mass-repartition-factor = 3
 ;
 nstcomm                 = 100
 comm_mode               = linear
