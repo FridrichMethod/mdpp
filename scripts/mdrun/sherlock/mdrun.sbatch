@@ -9,6 +9,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gpus=1
+#SBATCH --constraint="GPU_GEN:VLT|GPU_GEN:AMP|GPU_GEN:ADA|GPU_GEN:HOP"
 #SBATCH --mem=16G
 #SBATCH --time=2-00:00:00
 
