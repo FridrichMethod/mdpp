@@ -3,7 +3,7 @@ title                   = nvt
 define                  = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
 integrator              = md
 dt                      = 0.001
-nsteps                  = 125000
+nsteps                  = 100000
 nstxout-compressed      = 5000
 nstxout                 = 0
 nstvout                 = 0
