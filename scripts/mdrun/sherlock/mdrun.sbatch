@@ -22,5 +22,4 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
 # If the checkpoint file for production exists, will skip the pre-processing step
 # and continue from the checkpoint file
-bash mdprep.sh
-bash mdrun.sh
+bash mdprep.sh && bash mdrun.sh
