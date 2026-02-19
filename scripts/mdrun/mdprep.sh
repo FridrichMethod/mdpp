@@ -8,16 +8,6 @@ EQUILIBRATION_NVT=step4.1_equilibration
 EQUILIBRATION_NPT=step4.2_equilibration
 PRODUCTION=step5_production
 
-MDRUN_FLAGS=(
-    -v
-    -pin on
-    -pmefft gpu
-    -bonded gpu
-    -pme gpu
-    -nb gpu
-    -update gpu
-)
-
 if [[ -s "${PRODUCTION}".cpt ]]; then
     echo "Checkpoint file for production exists. Skipping pre-processing step."
     exit 0
@@ -38,7 +28,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${MINIMIZATION}" \
-    "${MDRUN_FLAGS[@]}"
+    -v
 
 echo -e "Potential\n\n" | gmx energy \
     -f "${MINIMIZATION}".edr \
@@ -58,7 +48,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NVT}" \
-    "${MDRUN_FLAGS[@]}"
+    -v
 
 echo -e "Temperature\n\n" | gmx energy \
     -f "${EQUILIBRATION_NVT}".edr \
@@ -80,7 +70,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT}" \
-    "${MDRUN_FLAGS[@]}"
+    -v
 
 echo -e "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
