@@ -31,13 +31,13 @@ gmx mdrun \
     -deffnm "${MINIMIZATION}" \
     -v
 
-printf "Potential\nKinetic-En.\nTotal-Energy\n\n" | gmx energy \
+printf "Potential\n\n" | gmx energy \
     -f "${MINIMIZATION}".edr \
-    -o "${MINIMIZATION}_energy.xvg"
+    -o "${MINIMIZATION}_potential.xvg"
 gracebat \
-    -nxy "${MINIMIZATION}_energy.xvg" \
+    -nxy "${MINIMIZATION}_potential.xvg" \
     -hdevice PNG \
-    -printfile "${MINIMIZATION}_energy.png"
+    -printfile "${MINIMIZATION}_potential.png"
 
 # Equilibration NVT
 gmx grompp \
