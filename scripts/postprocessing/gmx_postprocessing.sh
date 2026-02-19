@@ -50,3 +50,9 @@ printf "SOLU\n" | gmx trjconv \
     -o "${PRODUCTION}_complex.pdb" \
     -n index.ndx \
     -dump 0
+
+# Create a solute-only TPR for use with the extracted complex trajectory
+printf "SOLU\n" | gmx convert-tpr \
+    -s "${PRODUCTION}".tpr \
+    -o "${PRODUCTION}_complex.tpr" \
+    -n index.ndx
