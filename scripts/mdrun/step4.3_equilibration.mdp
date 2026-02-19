@@ -1,4 +1,4 @@
-title                   = npt no restraints
+title                   = npt_no_restraints
 ;
 integrator              = md
 dt                      = 0.002
