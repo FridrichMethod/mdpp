@@ -6,6 +6,7 @@ INPUT=step3_input
 MINIMIZATION=step4.0_minimization
 EQUILIBRATION_NVT=step4.1_equilibration
 EQUILIBRATION_NPT=step4.2_equilibration
+EQUILIBRATION_NVT_NO_RESTRAINTS=step4.3_equilibration
 PRODUCTION=step5_production
 
 if [[ -s "${PRODUCTION}".cpt ]]; then
@@ -87,13 +88,42 @@ gracebat \
     -hdevice PNG \
     -printfile "${EQUILIBRATION_NPT}_density.png"
 
-# Production
+# Equilibration NPT no restraints
 # Start from the checkpoint file of the NPT equilibration
+gmx grompp \
+    -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".mdp \
+    -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}".tpr \
+    -c "${EQUILIBRATION_NPT}".gro \
+    -r "${EQUILIBRATION_NPT}".gro \
+    -t "${EQUILIBRATION_NPT}".cpt \
+    -p topol.top \
+    -n index.ndx
+gmx mdrun \
+    -deffnm "${EQUILIBRATION_NPT_NO_RESTRAINTS}" \
+    -v
+
+echo -e "Pressure\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
+    -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.png"
+echo -e "Density\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
+    -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.png"
+
+# Production
+# Start from the checkpoint file of the NPT equilibration no restraints
 # No restraints are applied in production
 gmx grompp \
     -f "${PRODUCTION}".mdp \
     -o "${PRODUCTION}".tpr \
-    -c "${EQUILIBRATION_NPT}".gro \
-    -t "${EQUILIBRATION_NPT}".cpt \
+    -c "${EQUILIBRATION_NPT_NO_RESTRAINTS}".gro \
+    -t "${EQUILIBRATION_NPT_NO_RESTRAINTS}".cpt \
     -p topol.top \
     -n index.ndx

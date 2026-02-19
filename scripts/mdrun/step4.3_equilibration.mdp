@@ -1,0 +1,49 @@
+title                   = npt no restraints
+;
+integrator              = md
+dt                      = 0.002
+nsteps                  = 250000
+nstxout-compressed      = 5000
+nstxout                 = 0
+nstvout                 = 0
+nstfout                 = 0
+nstcalcenergy           = 100
+nstenergy               = 1000
+nstlog                  = 1000
+;
+cutoff-scheme           = Verlet
+nstlist                 = 20
+rlist                   = 1.2
+vdwtype                 = Cut-off
+vdw-modifier            = Force-switch
+rvdw_switch             = 1.0
+rvdw                    = 1.2
+coulombtype             = PME
+rcoulomb                = 1.2
+;
+pbc                     = xyz
+DispCorr                = no
+;
+tcoupl                  = V-rescale
+tc_grps                 = SOLU SOLV
+tau_t                   = 1.0 1.0
+ref_t                   = 310.15 310.15
+;
+pcoupl                  = C-rescale
+pcoupltype              = isotropic
+compressibility         = 4.5e-5
+tau_p                   = 5.0
+ref_p                   = 1.0
+;
+constraints             = h-bonds
+constraint_algorithm    = lincs
+lincs_order             = 4
+lincs_iter              = 1
+mass-repartition-factor = 3
+;
+nstcomm                 = 100
+comm_mode               = linear
+comm_grps               = SOLU SOLV
+;
+continuation            = yes
+gen-vel                 = no
