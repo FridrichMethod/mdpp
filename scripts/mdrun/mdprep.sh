@@ -6,7 +6,7 @@ INPUT=step3_input
 MINIMIZATION=step4.0_minimization
 EQUILIBRATION_NVT=step4.1_equilibration
 EQUILIBRATION_NPT=step4.2_equilibration
-EQUILIBRATION_NVT_NO_RESTRAINTS=step4.3_equilibration
+EQUILIBRATION_NPT_NO_RESTRAINTS=step4.3_equilibration
 PRODUCTION=step5_production
 
 if [[ -s "${PRODUCTION}".cpt ]]; then
@@ -90,11 +90,11 @@ gracebat \
 
 # Equilibration NPT no restraints
 # Start from the checkpoint file of the NPT equilibration
+# No restraints are applied in production
 gmx grompp \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".mdp \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}".tpr \
     -c "${EQUILIBRATION_NPT}".gro \
-    -r "${EQUILIBRATION_NPT}".gro \
     -t "${EQUILIBRATION_NPT}".cpt \
     -p topol.top \
     -n index.ndx
@@ -119,7 +119,7 @@ gracebat \
 
 # Production
 # Start from the checkpoint file of the NPT equilibration no restraints
-# No restraints are applied in production
+# Use 4 fs timestep in production with HMR
 gmx grompp \
     -f "${PRODUCTION}".mdp \
     -o "${PRODUCTION}".tpr \
