@@ -31,13 +31,13 @@ gmx mdrun \
     -deffnm "${MINIMIZATION}" \
     -v
 
-echo -e "Potential\n\n" | gmx energy \
+printf "Potential\nKinetic-En.\nTotal-Energy\n\n" | gmx energy \
     -f "${MINIMIZATION}".edr \
-    -o "${MINIMIZATION}_potential.xvg"
+    -o "${MINIMIZATION}_energy.xvg"
 gracebat \
-    -nxy "${MINIMIZATION}_potential.xvg" \
+    -nxy "${MINIMIZATION}_energy.xvg" \
     -hdevice PNG \
-    -printfile "${MINIMIZATION}_potential.png"
+    -printfile "${MINIMIZATION}_energy.png"
 
 # Equilibration NVT
 gmx grompp \
@@ -51,7 +51,7 @@ gmx mdrun \
     -deffnm "${EQUILIBRATION_NVT}" \
     -v
 
-echo -e "Temperature\n\n" | gmx energy \
+printf "Temperature\n\n" | gmx energy \
     -f "${EQUILIBRATION_NVT}".edr \
     -o "${EQUILIBRATION_NVT}_temperature.xvg"
 gracebat \
@@ -73,14 +73,21 @@ gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT}" \
     -v
 
-echo -e "Pressure\n\n" | gmx energy \
+printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
     -o "${EQUILIBRATION_NPT}_pressure.xvg"
 gracebat \
     -nxy "${EQUILIBRATION_NPT}_pressure.xvg" \
     -hdevice PNG \
     -printfile "${EQUILIBRATION_NPT}_pressure.png"
-echo -e "Density\n\n" | gmx energy \
+printf "Volume\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT}".edr \
+    -o "${EQUILIBRATION_NPT}_volume.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT}_volume.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT}_volume.png"
+printf "Density\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
     -o "${EQUILIBRATION_NPT}_density.xvg"
 gracebat \
@@ -102,14 +109,21 @@ gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT_NO_RESTRAINTS}" \
     -v
 
-echo -e "Pressure\n\n" | gmx energy \
+printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg"
 gracebat \
     -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg" \
     -hdevice PNG \
     -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.png"
-echo -e "Density\n\n" | gmx energy \
+printf "Volume\n\n" | gmx energy \
+    -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
+    -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.xvg"
+gracebat \
+    -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.xvg" \
+    -hdevice PNG \
+    -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.png"
+printf "Density\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.xvg"
 gracebat \
