@@ -7,7 +7,7 @@ nstxout-compressed      = 2500  ; 10 ps
 nstxout                 = 0
 nstvout                 = 0
 nstfout                 = 0
-nstcalcenergy           = 500  ; 2 ps
+nstcalcenergy           = 100  ; 0.4 ps = nstcomm
 nstenergy               = 2500  ; 10 ps
 nstlog                  = 2500  ; 10 ps
 ;
@@ -41,7 +41,7 @@ lincs_order             = 4
 lincs_iter              = 1
 mass-repartition-factor = 3
 ;
-nstcomm                 = 100
+nstcomm                 = 100  ; 0.4 ps = nstcalcenergy
 comm_mode               = linear
 comm_grps               = SOLU SOLV
 ;
