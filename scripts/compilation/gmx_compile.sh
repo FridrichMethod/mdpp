@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-for compiler in g++ cmake make gcc nvcc; do
+for compiler in cmake make gcc g++ nvcc; do
     if ! command -v $compiler >/dev/null 2>&1; then
         echo "$compiler could not be found"
         exit 1
@@ -11,7 +11,7 @@ done
 
 GMX_VERSION="2026.0"
 GMX_PREFIX="/apps/gromacs-${GMX_VERSION}"
-NPROC=$(nproc)
+NPROC="${1:-$(nproc)}"
 
 tar -xzvf gromacs-${GMX_VERSION}.tar.gz
 cd gromacs-${GMX_VERSION}
