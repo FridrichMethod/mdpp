@@ -10,9 +10,9 @@ gmx select \
     -s "${PRODUCTION}".tpr \
     -on index_protein_chain_A.ndx \
     -select '
-        "System" group "System"
+        "System" group "System";
         "Chain_A" (group "Protein" and molecule 1);
-        "Chain_A_BB" (group "Backbone" and molecule 1);
+        "Chain_A_BB" (group "Backbone" and molecule 1)
     '
 
 # Center the trajectory
