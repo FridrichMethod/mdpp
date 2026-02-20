@@ -7,8 +7,7 @@ PRODUCTION=step5_production
 # Potential, kinetic, and total energy
 printf "Potential\nKinetic-En.\nTotal-Energy\n\n" | gmx energy \
     -f "${PRODUCTION}".edr \
-    -o "${PRODUCTION}_energy.xvg" \
-    -tu ns
+    -o "${PRODUCTION}_energy.xvg"
 
 gracebat \
     -nxy "${PRODUCTION}_energy.xvg" \
@@ -18,8 +17,7 @@ gracebat \
 # Temperature
 printf "Temperature\n\n" | gmx energy \
     -f "${PRODUCTION}".edr \
-    -o "${PRODUCTION}_temperature.xvg" \
-    -tu ns
+    -o "${PRODUCTION}_temperature.xvg"
 
 gracebat \
     -nxy "${PRODUCTION}_temperature.xvg" \
@@ -29,8 +27,7 @@ gracebat \
 # Pressure
 printf "Pressure\n\n" | gmx energy \
     -f "${PRODUCTION}".edr \
-    -o "${PRODUCTION}_pressure.xvg" \
-    -tu ns
+    -o "${PRODUCTION}_pressure.xvg"
 
 gracebat \
     -nxy "${PRODUCTION}_pressure.xvg" \
@@ -40,8 +37,7 @@ gracebat \
 # Volume
 printf "Volume\n\n" | gmx energy \
     -f "${PRODUCTION}".edr \
-    -o "${PRODUCTION}_volume.xvg" \
-    -tu ns
+    -o "${PRODUCTION}_volume.xvg"
 
 gracebat \
     -nxy "${PRODUCTION}_volume.xvg" \
@@ -51,8 +47,7 @@ gracebat \
 # Density
 printf "Density\n\n" | gmx energy \
     -f "${PRODUCTION}".edr \
-    -o "${PRODUCTION}_density.xvg" \
-    -tu ns
+    -o "${PRODUCTION}_density.xvg"
 
 gracebat \
     -nxy "${PRODUCTION}_density.xvg" \
