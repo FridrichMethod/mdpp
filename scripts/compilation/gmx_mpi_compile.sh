@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-for compiler in cmake make gcc g++ nvcc; do
+for compiler in cmake make gcc g++ nvcc mpicc; do
     if ! command -v $compiler >/dev/null 2>&1; then
         echo "$compiler could not be found"
         exit 1
