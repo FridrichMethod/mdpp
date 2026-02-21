@@ -4,9 +4,11 @@ set -euo pipefail
 
 PRODUCTION=step5_production
 
-# -ntmpi 1 -ntomp ${OMP_NUM_THREADS} are set automatically by the scheduler
+# Set the number of (thread) MPT explicitly to avoid conflicting demands
 MDRUN_FLAGS=(
     -v
+    -ntmpi 1
+    -ntomp "${OMP_NUM_THREADS}"
     -pin on # pin threads to cores
     -pmefft gpu
     -bonded gpu

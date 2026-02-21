@@ -9,6 +9,13 @@ EQUILIBRATION_NPT=step4.2_equilibration
 EQUILIBRATION_NPT_NO_RESTRAINTS=step4.3_equilibration
 PRODUCTION=step5_production
 
+# Set the number of (thread) MPT explicitly to avoid conflicting demands
+MDPREP_FLAGS=(
+    -v
+    -ntmpi 1
+    -ntomp "${OMP_NUM_THREADS}"
+)
+
 if [[ -s "${PRODUCTION}".cpt ]]; then
     echo "Checkpoint file for production exists. Skipping pre-processing step."
     exit 0
@@ -29,7 +36,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${MINIMIZATION}" \
-    -v
+    "${MDPREP_FLAGS[@]}"
 
 printf "Potential\n\n" | gmx energy \
     -f "${MINIMIZATION}".edr \
@@ -51,7 +58,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NVT}" \
-    -v
+    "${MDPREP_FLAGS[@]}"
 
 printf "Temperature\n\n" | gmx energy \
     -f "${EQUILIBRATION_NVT}".edr \
@@ -75,7 +82,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT}" \
-    -v
+    "${MDPREP_FLAGS[@]}"
 
 printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
@@ -117,7 +124,7 @@ gmx grompp \
     -n index.ndx
 gmx mdrun \
     -deffnm "${EQUILIBRATION_NPT_NO_RESTRAINTS}" \
-    -v
+    "${MDPREP_FLAGS[@]}"
 
 printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
