@@ -6,8 +6,8 @@ PRODUCTION=step5_production
 
 # Cluster the trajectory using GROMOS clustering algorithm
 printf "Backbone\nSystem\n" | gmx cluster \
-    -s "${PRODUCTION}_complex.tpr" \
-    -f "${PRODUCTION}_complex.xtc" \
+    -s "${PRODUCTION}_complex_fit.tpr" \
+    -f "${PRODUCTION}_complex_fit.xtc" \
     -cl "${PRODUCTION}_cluster.pdb" \
     -clid "${PRODUCTION}_clid.xvg" \
     -dist "${PRODUCTION}_dist.xvg" \

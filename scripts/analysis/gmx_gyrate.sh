@@ -6,8 +6,8 @@ PRODUCTION=step5_production
 
 # Radius of gyration
 printf "Protein\n" | gmx gyrate \
-    -s "${PRODUCTION}_complex.tpr" \
-    -f "${PRODUCTION}_complex.xtc" \
+    -s "${PRODUCTION}_complex_fit.tpr" \
+    -f "${PRODUCTION}_complex_fit.xtc" \
     -o "${PRODUCTION}_gyrate.xvg" \
     -tu ns
 
