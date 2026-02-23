@@ -56,3 +56,10 @@ printf "SOLU\n" | gmx convert-tpr \
     -s "${PRODUCTION}".tpr \
     -o "${PRODUCTION}_complex_fit.tpr" \
     -n index.ndx
+
+# Smooth the trajectory
+gmx filter \
+    -s "${PRODUCTION}_complex_fit.pdb" \
+    -f "${PRODUCTION}_complex_fit.xtc" \
+    -ol "${PRODUCTION}_complex_fit_smoothed.xtc" \
+    -nf 10
