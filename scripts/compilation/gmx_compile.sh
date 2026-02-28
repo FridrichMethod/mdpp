@@ -10,7 +10,7 @@ for compiler in cmake make gcc g++ nvcc; do
 done
 
 GMX_VERSION="2026.0"
-GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}"
+GMX_PREFIX="/usr/local/gromacs-${GMX_VERSION}"
 GMX_TGZ_URL="https://ftp.gromacs.org/gromacs/gromacs-${GMX_VERSION}.tar.gz"
 NPROC="${1:-$(nproc)}"
 
