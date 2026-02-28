@@ -10,6 +10,7 @@ ml openmpi/5.0.5
 ml fftw/3.3.9
 ml gsl/2.7
 ml openblas/0.3.28
+ml ucx/1.17.0
 ml python/3.12.1
 
 GMX_VERSION="2026.0"
@@ -38,4 +39,4 @@ cmake .. \
     -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
 make -j"${NPROC}"
 make check -j"${NPROC}"
-make install -j"${NPROC}"
+make install

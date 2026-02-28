@@ -37,4 +37,4 @@ cmake .. \
     -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
 make -j"${NPROC}"
 make check -j"${NPROC}"
-make install -j"${NPROC}"
+make install
