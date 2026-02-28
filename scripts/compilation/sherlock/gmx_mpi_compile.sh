@@ -7,14 +7,23 @@ ml cmake/3.31.4
 ml make/4.4
 ml cuda/12.6.1
 ml openmpi/5.0.5
+ml fftw/3.3.9
+ml gsl/2.7
+ml openblas/0.3.28
 ml python/3.12.1
 
 GMX_VERSION="2026.0"
-GMX_PREFIX="/home/groups/ayting/gromacs-${GMX_VERSION}"
+GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}"
+GMX_TGZ_URL="https://ftp.gromacs.org/gromacs/gromacs-${GMX_VERSION}.tar.gz"
 NPROC="${1:-$(nproc)}"
 
-tar -xzvf gromacs-${GMX_VERSION}.tar.gz
-cd gromacs-${GMX_VERSION}
+if [[ ! -f "gromacs-${GMX_VERSION}.tar.gz" ]]; then
+    echo "Downloading GROMACS ${GMX_VERSION}"
+    curl -fL --retry 5 --retry-delay 2 -o "gromacs-${GMX_VERSION}.tar.gz" "${GMX_TGZ_URL}"
+fi
+
+tar -xzvf "gromacs-${GMX_VERSION}.tar.gz"
+cd "gromacs-${GMX_VERSION}"
 mkdir build
 cd build
 cmake .. \
@@ -29,4 +38,4 @@ cmake .. \
     -DCMAKE_INSTALL_PREFIX="${GMX_PREFIX}"
 make -j"${NPROC}"
 make check -j"${NPROC}"
-make install
+make install -j"${NPROC}"
