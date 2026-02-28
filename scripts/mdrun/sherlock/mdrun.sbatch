@@ -7,7 +7,7 @@
 #SBATCH --partition=btrippe,stat,bioe,gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=6
 #SBATCH --gpus=1
 #SBATCH --constraint="GPU_GEN:AMP|GPU_GEN:HPR|GPU_GEN:LOV|GPU_GEN:VLT"
 #SBATCH --prefer="GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S"
