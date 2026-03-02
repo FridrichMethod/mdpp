@@ -4,15 +4,15 @@
 #SBATCH --error=mdrun_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhaoyangli@stanford.edu
-#SBATCH --partition=btrippe,stat,bioe
+#SBATCH --partition=gpu,owners
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=4
 #SBATCH --gpus-per-task=1
-#SBATCH --constraint="GPU_GEN:AMP|GPU_GEN:HPR|GPU_GEN:LOV"
+#SBATCH --constraint="GPU_GEN:AMP|GPU_GEN:HPR|GPU_GEN:LOV|GPU_GEN:VLT"
 #SBATCH --prefer="GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S"
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=7-00:00:00
+#SBATCH --time=2-00:00:00
 
 ml gcc/12.4.0
 ml cmake/3.31.4

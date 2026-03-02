@@ -4,7 +4,7 @@
 #SBATCH --error=mdrun_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhaoyangli@stanford.edu
-#SBATCH --partition=btrippe,stat,bioe,gpu
+#SBATCH --partition=gpu,owners
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=6
