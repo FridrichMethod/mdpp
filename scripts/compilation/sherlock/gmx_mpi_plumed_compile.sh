@@ -15,27 +15,15 @@ ml python/3.12.1
 
 PLUMED_VERSION="2.10.0"
 GMX_VERSION="2025.0"
-
 GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}-plumed-${PLUMED_VERSION}"
-SRC_BASE="${GROUP_SCRATCH}/gromacs-plumed"
-mkdir -p "${GMX_PREFIX}" "${SRC_BASE}"
-
 GMX_TGZ_URL="https://ftp.gromacs.org/gromacs/gromacs-${GMX_VERSION}.tar.gz"
-
 NPROC="${1:-$(nproc)}"
 
-# Download sources
-
-cd "${SRC_BASE}"
 if [[ ! -f "gromacs-${GMX_VERSION}.tar.gz" ]]; then
     echo "Downloading GROMACS ${GMX_VERSION}"
     curl -fL --retry 5 --retry-delay 2 -o "gromacs-${GMX_VERSION}.tar.gz" "${GMX_TGZ_URL}"
 fi
 
-# Build & install patched GROMACS
-
-cd "${SRC_BASE}"
-rm -rf "gromacs-${GMX_VERSION}"
 tar -xzvf "gromacs-${GMX_VERSION}.tar.gz"
 cd "gromacs-${GMX_VERSION}"
 
@@ -44,7 +32,6 @@ plumed patch -p --runtime <<EOF
 4
 EOF
 
-rm -rf build
 mkdir build
 cd build
 cmake .. \

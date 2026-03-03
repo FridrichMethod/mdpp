@@ -14,29 +14,16 @@ ml ucx/1.17.0
 ml python/3.12.1
 
 PLUMED_VERSION="2.10.0"
-
 PLUMED_PREFIX="${GROUP_HOME}/plumed-${PLUMED_VERSION}"
-SRC_BASE="${GROUP_SCRATCH}/plumed"
-mkdir -p "${PLUMED_PREFIX}" "${SRC_BASE}"
-
 PLUMED_TGZ_URL="https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-src-${PLUMED_VERSION}.tgz"
-
 NPROC="${1:-$(nproc)}"
 
-# Download sources
-
-cd "${SRC_BASE}"
 if [[ ! -f "plumed-src-${PLUMED_VERSION}.tgz" ]]; then
     echo "Downloading PLUMED ${PLUMED_VERSION}"
     curl -fL --retry 5 --retry-delay 2 -o "plumed-src-${PLUMED_VERSION}.tgz" "${PLUMED_TGZ_URL}"
 fi
 
-# Build & install PLUMED
-
-cd "${SRC_BASE}"
-rm -rf "plumed-${PLUMED_VERSION}"
 tar -xzvf "plumed-src-${PLUMED_VERSION}.tgz"
-
 cd "plumed-${PLUMED_VERSION}"
 ./configure --prefix="${PLUMED_PREFIX}" \
     --enable-mpi \
