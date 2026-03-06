@@ -11,10 +11,11 @@ MDRUN_FLAGS=(
     -ntomp "${OMP_NUM_THREADS}"
     -pin on # pin threads to cores
     -pmefft gpu
-    -bonded gpu
+    -bonded cpu # reduce GPU state copy time
     -pme gpu
     -nb gpu
-    -update gpu # update will partially be done on CPUs by default
+    -update gpu  # update will partially be done on CPUs by default
+    -nstlist 100 # adjust larger for faster pair search
 )
 
 # If the checkpoint file exists, restart the production run from the checkpoint file
