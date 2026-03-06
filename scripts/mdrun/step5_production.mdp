@@ -2,7 +2,7 @@ title                   = production
 ;
 integrator              = md
 dt                      = 0.004  ; HMR
-nsteps                  = 250000000  ; 1 us
+nsteps                  = 500000000  ; 2 us
 nstxout-compressed      = 2500  ; 10 ps
 nstxout                 = 0
 nstvout                 = 0
