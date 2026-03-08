@@ -4,6 +4,13 @@ set -euo pipefail
 
 PRODUCTION=step5_production
 
+# gmx select \
+#     -s "${PRODUCTION}".tpr \
+#     -on index.ndx \
+#     -select '
+#         "SOLU" (group 1 or group 13 or group 14)  # choose the group you want to extract
+#     '
+
 # Select the protein chain A and its backbone
 # CHARMM-GUI predefines the protein chain A as molecule 1
 gmx select \
@@ -59,7 +66,7 @@ printf "SOLU\n" | gmx convert-tpr \
 
 # Smooth the trajectory
 gmx filter \
-    -s "${PRODUCTION}_complex_fit.pdb" \
+    -s "${PRODUCTION}_complex_fit.tpr" \
     -f "${PRODUCTION}_complex_fit.xtc" \
     -ol "${PRODUCTION}_complex_fit_smoothed.xtc" \
     -nf 10
