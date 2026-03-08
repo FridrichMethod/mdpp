@@ -29,4 +29,25 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
 # If the checkpoint file for production exists, will skip the pre-processing step
 # and continue from the checkpoint file
-bash mdprep.sh && bash mdrun.sh
+attempt=0
+max_restarts=3
+
+while true; do
+  attempt=$((attempt + 1))
+  bash mdprep.sh && bash mdrun.sh
+  status=$?
+
+  if [[ $status -eq 134 || $status -eq 139 ]]; then
+    echo "mdrun.sh failed with exit code ${status} on attempt ${attempt} at $(date). Restarting..." >&2
+
+    if [[ $attempt -lt $max_restarts ]]; then
+      sleep 60
+      continue
+    else
+      echo "mdrun.sh reached maximum restart attempts (${max_restarts}). Exiting with status ${status}." >&2
+      exit "${status}"
+    fi
+  else
+    exit "${status}"
+  fi
+done
