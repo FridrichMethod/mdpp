@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from sklearn.decomposition import PCA
 
-from mdpp.analysis.io import select_atom_indices
+from mdpp.analysis.trajectory import select_atom_indices
 
 
 @dataclass(frozen=True, slots=True)

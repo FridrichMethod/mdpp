@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
-from mdpp.analysis.io import trajectory_time_ps
+from mdpp.analysis.trajectory import trajectory_time_ps
 
 
 @dataclass(frozen=True, slots=True)

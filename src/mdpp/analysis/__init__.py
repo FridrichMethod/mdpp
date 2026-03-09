@@ -10,14 +10,6 @@ from mdpp.analysis.decomposition import (
 )
 from mdpp.analysis.fes import FES2DResult, compute_fes_2d, compute_fes_from_projection
 from mdpp.analysis.hbond import HBondResult, compute_hbonds, format_hbond_triplets
-from mdpp.analysis.io import (
-    align_trajectory,
-    load_trajectories,
-    load_trajectory,
-    residue_ids_from_indices,
-    select_atom_indices,
-    trajectory_time_ps,
-)
 from mdpp.analysis.metrics import (
     DCCMResult,
     RadiusOfGyrationResult,
@@ -29,6 +21,14 @@ from mdpp.analysis.metrics import (
     compute_rmsd,
     compute_rmsf,
     compute_sasa,
+)
+from mdpp.analysis.trajectory import (
+    align_trajectory,
+    load_trajectories,
+    load_trajectory,
+    residue_ids_from_indices,
+    select_atom_indices,
+    trajectory_time_ps,
 )
 
 __all__ = [
