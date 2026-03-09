@@ -9,10 +9,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mdpp.analysis import (
+from mdpp.analysis.fes import compute_fes_2d
+from mdpp.analysis.hbond import compute_hbonds
+from mdpp.analysis.metrics import (
     compute_dccm,
-    compute_fes_2d,
-    compute_hbonds,
     compute_rmsd,
     compute_rmsf,
     compute_sasa,

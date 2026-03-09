@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mdpp.analysis import compute_pca, compute_tica
+from mdpp.analysis.decomposition import compute_pca, compute_tica
 
 
 def test_compute_pca_identifies_dominant_axis() -> None:

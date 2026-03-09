@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mdpp.analysis import compute_fes_2d, compute_fes_from_projection
+from mdpp.analysis.fes import compute_fes_2d, compute_fes_from_projection
 
 
 def test_compute_fes_2d_sets_minimum_to_zero() -> None:

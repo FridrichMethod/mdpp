@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mdpp.analysis import compute_hbonds, format_hbond_triplets
+from mdpp.analysis.hbond import compute_hbonds, format_hbond_triplets
 
 
 def test_compute_hbonds_baker_hubbard_counts(hbond_trajectory) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mdpp.analysis import (
+from mdpp.analysis.metrics import (
     compute_dccm,
     compute_radius_of_gyration,
     compute_rmsd,
