@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,24 +15,21 @@ dependencies = [
     "biopython",
     "biotite",
     "deeptime",
-    "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
-    "gmxvg",
-    "jupyter",
     "matplotlib",
     "mdanalysis",
     "mdtraj",
-    "nglview",
+    "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "numpy",
     "pandas",
     "pdb-tools",
     "plotly",
     "polars",
     "prody",
-    "py3dmol",
     "rdkit",
     "scikit-learn",
     "scipy",
     "seaborn",
+    "tqdm",
     "uv",
 ]
 
@@ -40,6 +37,7 @@ dependencies = [
 version = { attr = "mdpp.__version__" }
 
 [project.optional-dependencies]
+viz = ["gmxvg", "jupyter", "py3dmol", "nglview"]
 dev = [
     "pre-commit",
     "pytest",
@@ -49,9 +47,8 @@ dev = [
     "pytest-xdist",
     "ruff",
 ]
-mypy = [
-    "mypy",
-]
+mypy = ["mypy"]
+openmm = ["openmm[cuda12]"]
 
 [tool.ruff]
 target-version = "py312"
@@ -139,21 +136,15 @@ disable_error_code = ["import-not-found", "import-untyped", "no-any-return"]
 [[tool.mypy.overrides]]
 module = [
     "Bio.*",
-    "git.*",
-    "hydra.*",
     "IPython.*",
     "matplotlib.*",
     "mdtraj.*",
     "numpy.*",
     "openmm.*",
     "tqdm.*",
-    "torch.*",
-    "torch_geometric.*",
-    "torch_scatter.*",
     "pandas.*",
     "pdbfixer.*",
     "pytest.*",
-    "omegaconf.*",
     "scipy.*",
     "sklearn.*",
 ]
