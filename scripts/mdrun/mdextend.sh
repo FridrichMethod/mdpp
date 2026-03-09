@@ -4,9 +4,12 @@ set -euo pipefail
 
 PRODUCTION=step5_production
 
-# Extend the simulation time
-EXTEND_TIME=${1:?Usage: mdextend.sh <time_in_ps>} # in ps
+if [[ "$#" -eq 0 ]]; then
+    echo "Usage: $(basename "$0") [gmx convert-tpr options, e.g. -extend 100000]"
+    exit 1
+fi
+
 gmx convert-tpr \
-    -s "${PRODUCTION}".tpr \
-    -extend "${EXTEND_TIME}" \
-    -o "${PRODUCTION}".tpr
+    -s "${PRODUCTION}.tpr" \
+    -o "${PRODUCTION}.tpr" \
+    "$@"
