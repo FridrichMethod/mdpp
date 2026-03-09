@@ -15,6 +15,7 @@ dependencies = [
     "biopython",
     "biotite",
     "deeptime",
+    "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "gmxvg",
     "jupyter",
     "matplotlib",
