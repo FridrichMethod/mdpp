@@ -22,8 +22,10 @@ ml gsl/2.7
 ml openblas/0.3.28
 ml python/3.12.1
 
-GMXRC="/home/groups/ayting/gromacs-2025.2/bin/GMXRC"
-source "${GMXRC}"
+GMX_VERSION="2025.2"
+GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}"
+
+source "${GMX_PREFIX}/bin/GMXRC"
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
@@ -33,21 +35,21 @@ attempt=0
 max_restarts=3
 
 while true; do
-  attempt=$((attempt + 1))
-  bash mdprep.sh && bash mdrun.sh
-  status=$?
+    attempt=$((attempt + 1))
+    bash mdprep.sh && bash mdrun.sh
+    status=$?
 
-  if [[ $status -eq 134 || $status -eq 139 ]]; then
-    echo "mdrun.sh failed with exit code ${status} on attempt ${attempt} at $(date). Restarting..." >&2
+    if [[ $status -eq 134 || $status -eq 139 ]]; then
+        echo "mdrun.sh failed with exit code ${status} on attempt ${attempt} at $(date). Restarting..." >&2
 
-    if [[ $attempt -lt $max_restarts ]]; then
-      sleep 60
-      continue
+        if [[ $attempt -lt $max_restarts ]]; then
+            sleep 60
+            continue
+        else
+            echo "mdrun.sh reached maximum restart attempts (${max_restarts}). Exiting with status ${status}." >&2
+            exit "${status}"
+        fi
     else
-      echo "mdrun.sh reached maximum restart attempts (${max_restarts}). Exiting with status ${status}." >&2
-      exit "${status}"
+        exit "${status}"
     fi
-  else
-    exit "${status}"
-  fi
 done

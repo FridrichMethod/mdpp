@@ -24,13 +24,17 @@ ml openblas/0.3.28
 ml ucx/1.17.0
 ml python/3.12.1
 
-PLUMED_PREFIX="/home/groups/ayting/plumed-2.10.0"
+PLUMED_VERSION="2.10.0"
+PLUMED_PREFIX="${GROUP_HOME}/plumed-${PLUMED_VERSION}"
+
 export PLUMED_KERNEL="${PLUMED_PREFIX}/lib/libplumedKernel.so"
 export PATH="$PLUMED_PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$PLUMED_PREFIX/lib:$LD_LIBRARY_PATH"
 
-GMXRC="/home/groups/ayting/gromacs-2025.0/bin/GMXRC"
-source "${GMXRC}"
+GMX_VERSION="2025.0"
+GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}"
+
+source "${GMX_PREFIX}/bin/GMXRC"
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
