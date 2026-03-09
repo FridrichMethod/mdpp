@@ -8,3 +8,4 @@
 - [GROMACS Tutorials](https://tutorials.gromacs.org/)
 - [MD Tutorial](https://mdtutorials.github.io/intermediate/1-nvt/index.html)
 - [Biobb Workflows](https://mmb.irbbarcelona.org/biobb/workflows/)
+- [LiveCoMS](https://livecomsjournal.org/index.php/livecoms/)
