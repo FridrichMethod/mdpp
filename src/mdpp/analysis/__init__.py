@@ -1,46 +1,35 @@
-"""MD simulation pre- and post-processing."""
+"""Analysis utilities for molecular dynamics trajectories."""
 
-from mdpp.analysis import (
-    DCCMResult,
-    FES2DResult,
-    HBondResult,
+from mdpp.analysis.decomposition import (
     PCAResult,
-    RadiusOfGyrationResult,
-    RMSDResult,
-    RMSFResult,
-    SASAResult,
     TICAResult,
     TorsionFeatures,
-    align_trajectory,
-    compute_dccm,
-    compute_fes_2d,
-    compute_fes_from_projection,
-    compute_hbonds,
     compute_pca,
-    compute_radius_of_gyration,
-    compute_rmsd,
-    compute_rmsf,
-    compute_sasa,
     compute_tica,
     featurize_backbone_torsions,
-    format_hbond_triplets,
+)
+from mdpp.analysis.fes import FES2DResult, compute_fes_2d, compute_fes_from_projection
+from mdpp.analysis.hbond import HBondResult, compute_hbonds, format_hbond_triplets
+from mdpp.analysis.io import (
+    align_trajectory,
     load_trajectories,
     load_trajectory,
     residue_ids_from_indices,
     select_atom_indices,
     trajectory_time_ps,
 )
-from mdpp.plotting import (
-    plot_dccm,
-    plot_fes,
-    plot_hbond_counts,
-    plot_hbond_occupancy,
-    plot_rmsd,
-    plot_rmsf,
-    plot_sasa,
+from mdpp.analysis.metrics import (
+    DCCMResult,
+    RadiusOfGyrationResult,
+    RMSDResult,
+    RMSFResult,
+    SASAResult,
+    compute_dccm,
+    compute_radius_of_gyration,
+    compute_rmsd,
+    compute_rmsf,
+    compute_sasa,
 )
-
-__version__ = "0.1.0"
 
 __all__ = [
     "DCCMResult",
@@ -68,13 +57,6 @@ __all__ = [
     "format_hbond_triplets",
     "load_trajectories",
     "load_trajectory",
-    "plot_dccm",
-    "plot_fes",
-    "plot_hbond_counts",
-    "plot_hbond_occupancy",
-    "plot_rmsd",
-    "plot_rmsf",
-    "plot_sasa",
     "residue_ids_from_indices",
     "select_atom_indices",
     "trajectory_time_ps",
