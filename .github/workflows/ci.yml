@@ -1,16 +1,50 @@
-name: ci
+name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  pre-commit:
+  setup:
+    name: Setup (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    defaults:
+      run:
+        shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: "3.12"
-      - uses: pre-commit/action@v3.0.1
+          activate-environment: mdpp
+          auto-activate-base: false
+          channels: conda-forge,defaults
+          channel-priority: strict
+          python-version: ${{ matrix.python-version }}
+          use-mamba: true
+
+      - name: Setup environment
+        run: |
+          bash setup.sh
+
+      - name: Run pre-commit hooks
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+
+      - name: Run tests
+        run: |
+          pytest -n auto
