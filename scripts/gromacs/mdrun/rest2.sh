@@ -22,7 +22,7 @@ while read line; do
 
     awk -v var1="$resid" -v var2="$aname" '$4 == var1 && $6 == var2 {print $1}' toppar/temp.1 >>toppar/temp.list
 
-    while read line; do
+    while read line; do # variable `line` shadowing?
         awk -v var1="$line" -v var2="$begline" -v var3="$endline" '$1 == var1 && $1 > var2 && $1 < var3 {$3=$3"_"}1' toppar/temp.1 >toppar/temp.2
         mv toppar/temp.2 toppar/temp.1
     done <toppar/temp.list
