@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
 
 import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
-PathLike = str | Path
+from mdpp._types import PathLike
 
 
 def select_atom_indices(topology: md.Topology, selection: str) -> NDArray[np.int_]:
@@ -91,6 +90,9 @@ def load_trajectory(
 
     Returns:
         Loaded (and optionally sliced) trajectory.
+
+    Raises:
+        ValueError: If ``stride`` is less than 1.
     """
     if stride < 1:
         raise ValueError("stride must be >= 1.")
