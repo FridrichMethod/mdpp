@@ -1,0 +1,15 @@
+---
+description: Testing conventions — fixtures, structure, patterns
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Testing Conventions
+
+- Tests mirror `src/mdpp/` layout: `tests/analysis/`, `tests/plots/`.
+- Shared fixtures live in `tests/conftest.py` (e.g. `two_atom_trajectory`, `correlated_ca_trajectory`).
+- Test functions are named `test_<function>_<behavior>`.
+- Use `pytest.approx` for floating-point comparisons.
+- Plotting tests use `matplotlib.use("Agg")` and call `plt.close(figure)` after assertions.
+- Import from public API paths (`from mdpp.analysis.metrics import compute_rmsd`).
+- No `__init__.py` files in test directories (pytest discovers without them).

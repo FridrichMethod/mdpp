@@ -1,0 +1,17 @@
+---
+description: Shell script conventions for GROMACS/AMBER/OpenFE workflows
+globs: scripts/**/*.sh
+alwaysApply: false
+---
+
+# Shell Script Conventions
+
+- All scripts start with `#!/bin/bash` and `set -euo pipefail`.
+- Indent with 4 spaces (enforced by shfmt via pre-commit).
+- Pass shellcheck at error severity.
+- Organize under `scripts/<engine>/<category>/`:
+  - `scripts/gromacs/mdrun/` — production run scripts and MDP files
+  - `scripts/gromacs/analysis/` — gmx analysis commands
+  - `scripts/amber/` — AMBER/AmberTools workflows
+  - `scripts/openfe/` — OpenFE RBFE workflows
+- Sherlock (SLURM) variants go in a `sherlock/` subdirectory with `.sbatch` extension.

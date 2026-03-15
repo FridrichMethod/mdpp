@@ -1,0 +1,42 @@
+---
+description: Patterns for plot modules — consistent Axes-returning plot functions
+globs: src/mdpp/plots/*.py
+alwaysApply: false
+---
+
+# Plotting Module Conventions
+
+## Function Signature
+
+```python
+def plot_example(
+    result: ExampleResult,
+    *,
+    ax: Axes | None = None,
+    label: str | None = None,
+    linewidth: float = 1.5,
+) -> Axes:
+    """Plot X as a function of time.
+
+    Args:
+        result: ExampleResult from ``compute_example``.
+        ax: Optional matplotlib axis.
+        label: Optional legend label.
+        linewidth: Line width.
+
+    Returns:
+        The matplotlib axis.
+    """
+    axis = get_axis(ax)
+    axis.plot(result.time_ns, result.values_angstrom, label=label, linewidth=linewidth)
+    axis.set_xlabel("Time (ns)")
+    axis.set_ylabel("Value (Å)")
+    if label is not None:
+        axis.legend()
+    return axis
+```
+
+- Always use `from mdpp.plots.utils import get_axis`.
+- Import result types from `mdpp.analysis.*`, not from plots.
+- Set axis labels with units. Use Å (not nm) and ns (not ps) for display.
+- When adding a new plot function, also add it to `plots/__init__.py` `__all__`.

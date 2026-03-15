@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
-    name: Setup (py${{ matrix.python-version }})
+  ci:
+    name: CI (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -37,14 +37,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           use-mamba: true
 
-      - name: Setup environment
-        run: |
-          bash setup.sh
+      - name: Install dependencies
+        run: bash setup.sh
 
       - name: Run pre-commit hooks
-        run: |
-          pre-commit run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --show-diff-on-failure
 
       - name: Run tests
-        run: |
-          pytest -n auto
+        run: pytest -n auto
+
+      - name: Build docs
+        run: mkdocs build --strict

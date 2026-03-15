@@ -1,0 +1,56 @@
+---
+description: mdpp project architecture, conventions, and coding standards
+alwaysApply: true
+---
+
+# mdpp — MD Simulation Pre- and Post-Processing
+
+## Architecture
+
+```
+src/mdpp/
+├── core/        # trajectory I/O (load_trajectory, align), file parsers (read_xvg, read_edr)
+├── analysis/    # compute_* functions returning frozen dataclass results
+├── plots/       # plot_* functions returning matplotlib Axes
+└── prep/        # system preparation (protein fixing, ligand topology, trajectory manipulation)
+```
+
+Tests mirror this layout under `tests/analysis/` and `tests/plots/`.
+Shell scripts for GROMACS, AMBER, OpenFE live in `scripts/`.
+
+## Coding Standards
+
+- Python >= 3.12. Use `type` statement for type aliases (not `TypeAlias`).
+- Google-style docstrings enforced by ruff `D` rules.
+- Absolute imports only (`ban-relative-imports = "all"`).
+- All first-party imports begin with `mdpp.` (e.g. `from mdpp.core.trajectory import ...`).
+- Line length: 100 chars. Formatter: ruff. Linter: ruff + mypy.
+- Never shadow Python builtins — `core/` not `io/`, `protein.py` not `pdb.py`, `_types.py` not `types.py`.
+- Helper modules within subpackages are named `utils.py` (not `_common.py` or `helpers.py`).
+
+## Analysis Module Patterns
+
+Every `compute_*` function follows this contract:
+
+1. First arg is `traj: md.Trajectory` (or a feature matrix for decomposition/FES).
+2. Remaining args are keyword-only.
+3. Returns a **frozen dataclass** with `slots=True`.
+4. Unit properties (e.g. `.time_ns`, `.rmsd_angstrom`) as `@property` on the dataclass.
+
+## Plotting Module Patterns
+
+Every `plot_*` function follows this contract:
+
+1. First arg is the analysis result dataclass (or a DataFrame for energy plots).
+2. `ax: Axes | None = None` keyword arg — return new or provided axis.
+3. Returns `matplotlib.axes.Axes`.
+4. Uses `mdpp.plots.utils.get_axis(ax)` internally.
+
+## Key Commands
+
+```bash
+bash setup.sh                      # install into conda env
+pytest                             # run tests (auto-parallelized)
+pre-commit run --all-files         # lint + format + type-check
+mkdocs serve                       # preview docs (needs pip install -e ".[docs]")
+```

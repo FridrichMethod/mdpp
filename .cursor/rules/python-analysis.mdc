@@ -1,0 +1,51 @@
+---
+description: Patterns for analysis modules — dataclass results, compute functions
+globs: src/mdpp/analysis/*.py
+alwaysApply: false
+---
+
+# Analysis Module Conventions
+
+## Result Dataclasses
+
+```python
+@dataclass(frozen=True, slots=True)
+class ExampleResult:
+    """One-line summary."""
+    time_ps: NDArray[np.float64]
+    values_nm: NDArray[np.float64]
+    atom_indices: NDArray[np.int_]
+
+    @property
+    def time_ns(self) -> NDArray[np.float64]:
+        return self.time_ps / 1000.0
+
+    @property
+    def values_angstrom(self) -> NDArray[np.float64]:
+        return self.values_nm * 10.0
+```
+
+## Compute Functions
+
+```python
+def compute_example(
+    traj: md.Trajectory,
+    *,
+    atom_selection: str = "backbone",
+    timestep_ps: float | None = None,
+) -> ExampleResult:
+    """Compute X from a trajectory.
+
+    Args:
+        traj: Input trajectory.
+        atom_selection: MDTraj selection string.
+        timestep_ps: Optional timestep override in ps.
+
+    Returns:
+        ExampleResult with per-frame values.
+    """
+```
+
+- Import trajectory helpers from `mdpp.core.trajectory`, never from `mdpp.analysis.trajectory`.
+- Validate inputs early (raise `ValueError` with descriptive messages).
+- Cast outputs to explicit dtypes: `np.asarray(..., dtype=np.float64)`.
