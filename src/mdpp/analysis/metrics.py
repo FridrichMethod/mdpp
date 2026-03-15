@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
-from mdpp.analysis.trajectory import (
+from mdpp.core.trajectory import (
     align_trajectory,
     residue_ids_from_indices,
     select_atom_indices,
