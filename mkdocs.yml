@@ -1,0 +1,60 @@
+site_name: mdpp
+site_description: MD simulation pre- and post-processing
+repo_url: https://github.com/FridrichMethod/mdpp
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            merge_init_into_class: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide:
+      - Core: guide/core.md
+      - Analysis: guide/analysis.md
+      - Plots: guide/plots.md
+      - Preparation: guide/prep.md
+  - API Reference:
+      - Core: api/core.md
+      - Analysis: api/analysis.md
+      - Plots: api/plots.md
+      - Preparation: api/prep.md
+  - Resources: resources.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true

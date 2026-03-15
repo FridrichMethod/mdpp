@@ -21,6 +21,7 @@ dependencies = [
     "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "numpy",
     "pandas",
+    "panedr",
     "pdb-tools",
     "plotly",
     "polars",
@@ -47,6 +48,7 @@ dev = [
     "pytest-xdist",
     "ruff",
 ]
+docs = ["mkdocs-material", "mkdocstrings[python]"]
 mypy = ["mypy"]
 openmm = ["openmm[cuda12]"]
 
@@ -146,6 +148,7 @@ module = [
     "pandas.*",
     "pdbfixer.*",
     "pytest.*",
+    "panedr.*",
     "scipy.*",
     "sklearn.*",
 ]
@@ -159,6 +162,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-v -s"
+addopts = "-v -s --tb=short --strict-markers --color=yes -n auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
 env = ["TQDM_DISABLE=1"]
