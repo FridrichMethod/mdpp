@@ -25,13 +25,13 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Setup Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           activate-environment: mdpp
-          auto-activate-base: false
+          auto-activate: true
           channels: conda-forge,defaults
           channel-priority: strict
           python-version: ${{ matrix.python-version }}

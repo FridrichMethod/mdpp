@@ -8,4 +8,4 @@ set -euo pipefail
 conda install -c conda-forge pdbfixer -y
 
 pip install uv
-uv pip install -e ".[viz,dev,mypy]"
+uv pip install -e ".[viz,dev,mypy,docs]"
