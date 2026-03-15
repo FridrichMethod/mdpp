@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.axes import Axes
 
 from mdpp.analysis.fes import FES2DResult
-from mdpp.plotting._common import get_axis
+from mdpp.plots.utils import get_axis
 
 
 def plot_fes(
@@ -18,7 +18,19 @@ def plot_fes(
     add_contours: bool = True,
     contour_levels: int = 12,
 ) -> Axes:
-    """Plot a 2D free-energy surface."""
+    """Plot a 2D free-energy surface.
+
+    Args:
+        result: FES2DResult from ``compute_fes_2d``.
+        ax: Optional matplotlib axis.
+        cmap: Colormap name.
+        add_colorbar: Whether to add a colorbar.
+        add_contours: Whether to overlay contour lines.
+        contour_levels: Number of contour levels.
+
+    Returns:
+        The matplotlib axis with the FES plot.
+    """
     axis = get_axis(ax)
     image = axis.imshow(
         result.free_energy_kj_mol.T,

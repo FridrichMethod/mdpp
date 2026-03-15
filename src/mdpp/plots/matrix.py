@@ -5,7 +5,7 @@ from __future__ import annotations
 from matplotlib.axes import Axes
 
 from mdpp.analysis.metrics import DCCMResult
-from mdpp.plotting._common import get_axis
+from mdpp.plots.utils import get_axis
 
 
 def plot_dccm(
@@ -17,7 +17,19 @@ def plot_dccm(
     cmap: str = "RdBu_r",
     add_colorbar: bool = True,
 ) -> Axes:
-    """Plot a DCCM heatmap."""
+    """Plot a dynamic cross-correlation matrix as a heatmap.
+
+    Args:
+        result: DCCMResult from ``compute_dccm``.
+        ax: Optional matplotlib axis.
+        vmin: Minimum value for the color scale.
+        vmax: Maximum value for the color scale.
+        cmap: Colormap name.
+        add_colorbar: Whether to add a colorbar.
+
+    Returns:
+        The matplotlib axis with the DCCM heatmap.
+    """
     axis = get_axis(ax)
     extent: tuple[float, float, float, float] | None = None
     if result.residue_ids is not None and result.residue_ids.size > 0:
