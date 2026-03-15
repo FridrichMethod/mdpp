@@ -17,7 +17,7 @@ from mdpp.analysis.metrics import (
     compute_rmsf,
     compute_sasa,
 )
-from mdpp.plotting import (
+from mdpp.plots import (
     plot_dccm,
     plot_fes,
     plot_hbond_counts,
