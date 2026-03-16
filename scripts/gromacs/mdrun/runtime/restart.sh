@@ -3,6 +3,7 @@ set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -33,7 +34,7 @@ for JOBID in "$@"; do
     )
 
     if [[ ${#MATCHES[@]} -eq 0 ]]; then
-        err "no files matching ${BOLD}mdrun_${JOBID}.*${NC} found under $START_DIR"
+        err "no files matching ${BOLD}mdrun_${JOBID}.*${NC} found under ${BLUE}$START_DIR${NC}"
     fi
 
     declare -A DIRS=()
@@ -57,15 +58,15 @@ for JOBID in "$@"; do
     SBATCH_FILE="${TARGET_DIR}/mdrun.sbatch"
 
     if [[ ! -f "$ERR_FILE" || ! -f "$OUT_FILE" ]]; then
-        err "expected both .err and .out in ${BOLD}$TARGET_DIR${NC}"
+        err "expected both .err and .out in ${BLUE}$TARGET_DIR${NC}"
     fi
 
     if [[ ! -f "$SBATCH_FILE" ]]; then
-        err "${BOLD}$SBATCH_FILE${NC} not found"
+        err "${BLUE}$SBATCH_FILE${NC} not found"
     fi
 
-    info "$JOBID" "Found job files in: ${BOLD}$TARGET_DIR${NC}"
-    info "$JOBID" "Submitting: ${BOLD}$SBATCH_FILE${NC}"
+    info "$JOBID" "Found job files in: ${BLUE}$TARGET_DIR${NC}"
+    info "$JOBID" "Submitting: ${BLUE}$SBATCH_FILE${NC}"
 
     sbatch --chdir "${TARGET_DIR}" "${SBATCH_FILE}"
 
