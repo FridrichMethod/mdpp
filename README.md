@@ -1,5 +1,3 @@
-<div align="center">
-
 # mdpp
 
 **Molecular Dynamics Pre- & Post-Processing**
@@ -12,11 +10,18 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy-lang.org/)
 
-[Documentation](https://mdpp.readthedocs.io) · [Getting Started](https://mdpp.readthedocs.io/en/latest/getting-started/) · [API Reference](https://mdpp.readthedocs.io/en/latest/api/core/)
+## Table of Contents
 
-</div>
-
-______________________________________________________________________
+- [Highlights](#highlights)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Package Structure](#package-structure)
+- [CLI](#cli)
+- [Design Philosophy](#design-philosophy)
+- [Dependencies](#dependencies)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Highlights
 
