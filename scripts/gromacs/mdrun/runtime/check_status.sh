@@ -5,10 +5,10 @@ set -euo pipefail
 # check_status.sh
 #
 # Status definitions:
-#   completed : current checkpoint time >= target time
-#   active    : exactly one matching Slurm job currently in squeue
-#   failed    : not complete and no matching active Slurm job
-#   error     : more than one matching active Slurm job for the same MD workdir
+#   completed : checkpoint time >= target time
+#   active    : not complete, matching Slurm job in squeue
+#   failed    : not complete, no matching Slurm job in squeue
+#   error     : missing/unparseable TPR, or multiple matching Slurm jobs
 #
 # Options:
 #   -j N    number of parallel workers (default: 8)
@@ -54,10 +54,6 @@ while getopts ":j:t:r:h" opt; do
     esac
 done
 
-command -v fd >/dev/null 2>&1 || {
-    echo "Error: fd not found in PATH" >&2
-    exit 1
-}
 command -v parallel >/dev/null 2>&1 || {
     echo "Error: GNU parallel not found in PATH" >&2
     exit 1
@@ -80,33 +76,24 @@ TMPDIR_MAIN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_MAIN"' EXIT
 
 ACTIVE_FILE="${TMPDIR_MAIN}/active_jobs.tsv"
-DIRS_FILE="${TMPDIR_MAIN}/simdirs.txt"
 
 # Build one cache of all active/pending jobs for this user.
-# %A = job id, %T = state, %o = command to be executed.
-# We normalize the command path where possible.
-squeue -h -u "${USER:-$(id -un)}" -o "%A|%T|%o" >"$ACTIVE_FILE.raw"
+# %A = job id, %T = state, %Z = working directory.
+build_active_jobs() {
+    squeue -h -u "${USER:-$(id -un)}" -o "%A|%T|%Z" | while IFS='|' read -r jobid state workdir; do
+        [[ -z "$jobid" || -z "$state" ]] && continue
+        workdir="$(realpath -m -- "$workdir" 2>/dev/null || true)"
+        printf '%s\t%s\t%s\n' "$jobid" "$state" "$workdir"
+    done
+}
 
-python3 - "$ACTIVE_FILE.raw" "$ACTIVE_FILE" <<'PY'
-import os, sys
-src, dst = sys.argv[1], sys.argv[2]
-with open(src) as fin, open(dst, "w") as fout:
-    for line in fin:
-        line = line.rstrip("\n")
-        if not line:
-            continue
-        parts = line.split("|", 2)
-        if len(parts) != 3:
-            continue
-        jobid, state, cmd = parts
-        cmd = cmd.strip()
-        # Keep raw command and also best-effort normalized path for its argv0.
-        argv0 = cmd.split()[0] if cmd else ""
-        norm = ""
-        if argv0:
-            norm = os.path.realpath(os.path.abspath(argv0))
-        fout.write(f"{jobid}\t{state}\t{cmd}\t{norm}\n")
-PY
+build_active_jobs >"$ACTIVE_FILE"
+
+find_sim_dirs() {
+    find "$1" -name 'step5_production.tpr' -type f |
+        sed 's#/step5_production\.tpr$##' |
+        sort -u
+}
 
 ps_to_ns() {
     awk -v ps="$1" 'BEGIN { printf "%.3f", ps/1000.0 }'
@@ -143,12 +130,19 @@ process_one_dir() {
     local active_tsv="$2"
     local target_ns_override="$3"
 
+    local c_green=$'\033[32m' c_blue=$'\033[34m'
+    local c_red=$'\033[31m' c_yellow=$'\033[33m' c_reset=$'\033[0m'
+
     local simdir_abs
     simdir_abs="$(cd "$simdir" && pwd -P)"
 
     local tpr="${simdir_abs}/step5_production.tpr"
     local cpt="${simdir_abs}/step5_production.cpt"
-    local mdrun_sbatch="${simdir_abs}/mdrun.sbatch"
+
+    if [[ ! -f "$tpr" ]]; then
+        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}error${c_reset}" "NA/NA" "missing step5_production.tpr"
+        return
+    fi
 
     local target_ps="" current_ps="" target_ns="" current_ns="" progress="NA/NA"
 
@@ -156,13 +150,9 @@ process_one_dir() {
         target_ns="$target_ns_override"
         target_ps="$(ns_to_ps "$target_ns_override")"
     else
-        if [[ ! -f "$tpr" ]]; then
-            printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "failed" "$progress" "missing step5_production.tpr"
-            return
-        fi
         target_ps="$(extract_target_ps_from_tpr "$tpr" || true)"
         if [[ -z "${target_ps:-}" ]]; then
-            printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "failed" "$progress" "could not parse target time from TPR"
+            printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}error${c_reset}" "$progress" "could not parse target time from TPR"
             return
         fi
         if [[ "$target_ps" == "INF" ]]; then
@@ -184,44 +174,21 @@ process_one_dir() {
 
     if [[ "$target_ps" != "INF" && -n "${current_ps:-}" ]]; then
         if awk -v cur="$current_ps" -v tgt="$target_ps" 'BEGIN{exit !(cur + 1e-3 >= tgt)}'; then
-            printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "completed" "$progress" "checkpoint reached target time"
+            printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_green}completed${c_reset}" "$progress" "checkpoint reached target time"
             return
         fi
     fi
 
-    # Match active jobs by command/script path.
-    # A job is considered matching if:
-    #   - its normalized argv0 is mdrun.sbatch in this simdir, OR
-    #   - its raw command starts with mdrun.sbatch and we assume it was submitted from this workdir
-    #
-    # Since squeue does not reliably expose submit cwd in all configurations,
-    # this uses the command path as the primary signal.
+    # Match active jobs whose working directory matches this simdir.
     local matches
-    matches="$(
-        awk -F '\t' -v sb="$mdrun_sbatch" -v sim="$simdir_abs" '
-            {
-                jobid=$1; state=$2; raw=$3; norm=$4;
-                if (norm == sb) {
-                    print jobid "\t" state
-                } else if (raw ~ /^mdrun\.sbatch([[:space:]]|$)/) {
-                    # Relative script name; cannot fully disambiguate from squeue alone.
-                    # Keep as a weak candidate only if script exists in this directory.
-                    print jobid "\t" state "\tREL"
-                }
-            }
-        ' "$active_tsv"
-    )"
+    matches="$(awk -F '\t' -v dir="$simdir_abs" '$3 == dir { print $1 "\t" $2 }' "$active_tsv")"
 
     local match_count=0
-    local rel_count=0
     local job_list=""
-    local line jobid state tag
+    local jobid state
 
-    while IFS=$'\t' read -r jobid state tag; do
+    while IFS=$'\t' read -r jobid state; do
         [[ -z "${jobid:-}" ]] && continue
-        if [[ "${tag:-}" == "REL" ]]; then
-            rel_count=$((rel_count + 1))
-        fi
         match_count=$((match_count + 1))
         if [[ -z "$job_list" ]]; then
             job_list="${jobid}:${state}"
@@ -231,24 +198,20 @@ process_one_dir() {
     done <<<"$matches"
 
     if ((match_count > 1)); then
-        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "error" "$progress" "multiple active jobs match this workdir: ${job_list}"
+        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_yellow}error${c_reset}" "$progress" "multiple active jobs match this workdir: ${job_list}"
         return
     fi
 
     if ((match_count == 1)); then
-        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "active" "$progress" "job in squeue: ${job_list}"
+        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_blue}active${c_reset}" "$progress" "job in squeue: ${job_list}"
         return
     fi
 
-    printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "failed" "$progress" "incomplete and no matching active job in squeue"
+    printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}failed${c_reset}" "$progress" "incomplete and no matching active job in squeue"
 }
 
 export -f ps_to_ns ns_to_ps extract_target_ps_from_tpr extract_current_ps_from_cpt process_one_dir
 
 printf "directory\tstatus\tprogress\tinfo\n"
 
-fd -u -a '^step5_production\.xtc$' "$ROOT" |
-    sed 's#/step5_production\.xtc$##' |
-    sort -u >"$DIRS_FILE"
-
-parallel -j "$JOBS" -k process_one_dir :::: "$DIRS_FILE" ::: "$ACTIVE_FILE" ::: "$TARGET_NS"
+find_sim_dirs "$ROOT" | parallel -j "$JOBS" -k process_one_dir {} "$ACTIVE_FILE" "$TARGET_NS"
