@@ -30,13 +30,22 @@ src/mdpp/
 │   ├── fes.py           # FES contour plot
 │   ├── scatter.py       # PCA/TICA projection, Ramachandran
 │   └── contacts.py      # contact map heatmap
-└── prep/            # system preparation
-    ├── protein.py       # fix_pdb, strip_solvent, extract_chain
-    ├── ligand.py        # assign_topology, constraint_minimization
-    └── topology.py      # merge, slice, subsample trajectories
+├── prep/            # system preparation
+│   ├── protein.py       # fix_pdb, strip_solvent, extract_chain
+│   ├── ligand.py        # assign_topology, constraint_minimization
+│   └── topology.py      # merge, slice, subsample trajectories
+├── data/            # bundled resource files (pip-installable)
+│   └── mdps/            # GROMACS MDP parameter templates
+└── scripts/         # bundled utility scripts (pip-installable)
+    ├── _resources.py    # importlib.resources helpers
+    ├── _cli.py          # `mdpp` CLI entry point
+    └── gromacs/         # analysis, compilation, mdenv, runtime, postprocessing, visualization
 
-tests/               # mirrors src/ layout (tests/analysis/, tests/plots/)
-scripts/             # shell scripts for GROMACS, AMBER, OpenFE workflows
+scripts/             # workflow scripts copied to MD working directories (NOT packaged)
+├── gromacs/mdrun/       # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
+└── openfe/              # quickrun.sh, quickrun.sbatch
+
+tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/scripts/)
 notebooks/           # Jupyter notebooks for interactive analysis
 docs/                # mkdocs documentation (guide/ and api/)
 ```
@@ -108,7 +117,8 @@ Every `plot_*` function:
 ### Shell Scripts
 
 - `set -euo pipefail`, 4-space indent, pass shellcheck.
-- Organized as `scripts/<engine>/<category>/`.
+- **Packaged utility scripts** in `src/mdpp/scripts/<engine>/<category>/` — distributed via pip, accessible via `mdpp.scripts` API and `mdpp` CLI.
+- **Workflow scripts** in top-level `scripts/<engine>/` — copied to MD working directories, run from terminal directly.
 - SLURM variants in `sherlock/` subdirectories.
 
 ## Dependencies

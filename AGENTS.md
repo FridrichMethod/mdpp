@@ -32,8 +32,12 @@ Source is under `src/mdpp/` using the src-layout convention:
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
 | `plots/` | Visualization | `plot_*(result, *, ax=None, ...) -> Axes` |
 | `prep/` | System preparation | `fix_pdb`, `strip_solvent`, ligand tools |
+| `data/` | MDP config templates | `list_mdp_templates`, `get_mdp_template`, `copy_mdp_files` |
+| `scripts/` | Bundled utility scripts | `list_scripts`, `get_script_path`, `copy_scripts` |
 
-Tests live in `tests/analysis/` and `tests/plots/`, mirroring the source tree.
+Workflow scripts that users copy to MD working directories live in the top-level `scripts/` directory (not packaged).
+
+Tests live in `tests/analysis/`, `tests/plots/`, and `tests/scripts/`, mirroring the source tree.
 
 ## Mandatory Conventions
 
@@ -51,8 +55,21 @@ Tests live in `tests/analysis/` and `tests/plots/`, mirroring the source tree.
 - Analysis modules: `src/mdpp/analysis/<topic>.py`
 - Plot modules: `src/mdpp/plots/<topic>.py`
 - Helper utilities within a subpackage: `utils.py`
-- Shell scripts: `scripts/<engine>/<category>/<script>.sh`
+- Packaged utility scripts: `src/mdpp/scripts/<engine>/<category>/<script>.sh`
+- MDP config templates: `src/mdpp/data/mdps/<step>.mdp`
+- Workflow scripts (not packaged): `scripts/<engine>/<category>/<script>.sh`
 - SLURM scripts: `scripts/<engine>/<category>/sherlock/<script>.sbatch`
+
+## CLI
+
+The `mdpp` CLI is installed via `pip install mdpp`:
+
+```bash
+mdpp list [prefix]            # list bundled utility scripts
+mdpp show <path>              # print script content to stdout
+mdpp copy <category> <dest>   # copy scripts to working directory
+mdpp mdps <dest>              # copy MDP templates to working directory
+```
 
 ## Adding a New Analysis
 
