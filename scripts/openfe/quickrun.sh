@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-PROJECT_ROOT_DIR=$(git rev-parse --show-toplevel)
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT_DIR="$(cd "${SCRIPTS_DIR}/../.." && pwd)"
 WORKING_DIR="${PROJECT_ROOT_DIR}/results/1x2h"
-SCRIPTS_DIR="${PROJECT_ROOT_DIR}/scripts"
 BATCH_SIZE=2
 
 TRANSFORMATION_DIR="${WORKING_DIR}/transformations"
