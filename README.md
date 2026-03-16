@@ -1,5 +1,10 @@
 # mdpp
 
+[![Documentation Status](https://readthedocs.org/projects/mdpp/badge/?version=latest)](https://mdpp.readthedocs.io/en/latest/?badge=latest)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/github/license/FridrichMethod/mdpp)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 **MD simulation pre- and post-processing.**
 
 mdpp provides Python utilities and shell scripts for molecular dynamics simulation workflows: trajectory loading, structural/dynamic analysis, visualization, system preparation, and GROMACS workflow automation.
