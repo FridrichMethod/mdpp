@@ -92,6 +92,8 @@ mkdocs serve
 - **Absolute imports only** — `from mdpp.core.trajectory import load_trajectory`.
 - **Line length**: 100 characters.
 - **No builtin shadowing** — the package uses `core/` (not `io/`), `protein.py` (not `pdb.py`), `_types.py` (not `types.py`).
+- **Type hints required** — every function (public and private) must have complete type annotations for all parameters and the return type. Use modern union syntax (`X | None` not `Optional[X]`).
+- **No special characters** — production code and comments must use only standard ASCII. No ligatures, emoji, Unicode arrows/symbols, or non-ASCII punctuation. Standard keyboard symbols (`!@#$%^&*()` etc.) are fine.
 
 ### Analysis Modules
 
