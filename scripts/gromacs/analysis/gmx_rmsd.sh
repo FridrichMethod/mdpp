@@ -10,8 +10,3 @@ printf "Backbone\nBackbone\n" | gmx rms \
     -f "${PRODUCTION}_complex_fit.xtc" \
     -o "${PRODUCTION}_rmsd.xvg" \
     -tu ns
-
-gracebat \
-    -nxy "${PRODUCTION}_rmsd.xvg" \
-    -hdevice PNG \
-    -printfile "${PRODUCTION}_rmsd.png"

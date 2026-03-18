@@ -12,8 +12,3 @@ printf "Backbone\n" | gmx rmsf \
     -o "${PRODUCTION}_rmsf.xvg" \
     -oq "${PRODUCTION}_rmsf.pdb" \
     -res
-
-gracebat \
-    -nxy "${PRODUCTION}_rmsf.xvg" \
-    -hdevice PNG \
-    -printfile "${PRODUCTION}_rmsf.png"

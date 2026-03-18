@@ -12,8 +12,3 @@ gmx dssp \
     -num "${PRODUCTION}_dssp.xvg" \
     -sel Protein \
     -tu ns
-
-gracebat \
-    -nxy "${PRODUCTION}_dssp.xvg" \
-    -hdevice PNG \
-    -printfile "${PRODUCTION}_dssp.png"

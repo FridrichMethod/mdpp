@@ -21,11 +21,6 @@ if [[ -s "${PRODUCTION}".cpt ]]; then
     exit 0
 fi
 
-HAS_GRACEBAT=false
-if command -v gracebat >/dev/null 2>&1; then
-    HAS_GRACEBAT=true
-fi
-
 # Minimization
 gmx grompp \
     -f "${MINIMIZATION}".mdp \
@@ -41,12 +36,6 @@ gmx mdrun \
 printf "Potential\n\n" | gmx energy \
     -f "${MINIMIZATION}".edr \
     -o "${MINIMIZATION}_potential.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${MINIMIZATION}_potential.xvg" \
-        -hdevice PNG \
-        -printfile "${MINIMIZATION}_potential.png"
-fi
 
 # Equilibration NVT
 gmx grompp \
@@ -63,12 +52,6 @@ gmx mdrun \
 printf "Temperature\n\n" | gmx energy \
     -f "${EQUILIBRATION_NVT}".edr \
     -o "${EQUILIBRATION_NVT}_temperature.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NVT}_temperature.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NVT}_temperature.png"
-fi
 
 # Equilibration NPT
 # Start from the checkpoint file of the NVT equilibration
@@ -87,30 +70,12 @@ gmx mdrun \
 printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
     -o "${EQUILIBRATION_NPT}_pressure.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT}_pressure.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT}_pressure.png"
-fi
 printf "Volume\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
     -o "${EQUILIBRATION_NPT}_volume.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT}_volume.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT}_volume.png"
-fi
 printf "Density\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT}".edr \
     -o "${EQUILIBRATION_NPT}_density.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT}_density.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT}_density.png"
-fi
 
 # Equilibration NPT no restraints
 # Start from the checkpoint file of the NPT equilibration
@@ -129,30 +94,12 @@ gmx mdrun \
 printf "Pressure\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_pressure.png"
-fi
 printf "Volume\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_volume.png"
-fi
 printf "Density\n\n" | gmx energy \
     -f "${EQUILIBRATION_NPT_NO_RESTRAINTS}".edr \
     -o "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.xvg"
-if $HAS_GRACEBAT; then
-    gracebat \
-        -nxy "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.xvg" \
-        -hdevice PNG \
-        -printfile "${EQUILIBRATION_NPT_NO_RESTRAINTS}_density.png"
-fi
 
 # Production
 # Start from the checkpoint file of the NPT equilibration no restraints

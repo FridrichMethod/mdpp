@@ -10,8 +10,3 @@ printf "Protein\n" | gmx gyrate \
     -f "${PRODUCTION}_complex_fit.xtc" \
     -o "${PRODUCTION}_gyrate.xvg" \
     -tu ns
-
-gracebat \
-    -nxy "${PRODUCTION}_gyrate.xvg" \
-    -hdevice PNG \
-    -printfile "${PRODUCTION}_gyrate.png"

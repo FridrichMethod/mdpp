@@ -12,8 +12,3 @@ gmx hbond \
     -r Protein \
     -t Protein \
     -tu ns
-
-gracebat \
-    -nxy "${PRODUCTION}_hbond.xvg" \
-    -hdevice PNG \
-    -printfile "${PRODUCTION}_hbond.png"
