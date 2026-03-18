@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # Configurations
-WORKDIR="."
+WORKDIR="tmp"
 LIG_RESNAME="LIG"
 NET_CHARGE="-1"
 IONIC_STRENGTH="0.150"
