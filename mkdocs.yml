@@ -47,7 +47,7 @@ nav:
       - Analysis: api/analysis.md
       - Plots: api/plots.md
       - Preparation: api/prep.md
-      - Scripts & Data: api/scripts.md
+      - Data: api/scripts.md
   - Resources: resources.md
 
 markdown_extensions:

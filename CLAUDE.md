@@ -34,15 +34,20 @@ src/mdpp/
 │   ├── protein.py       # fix_pdb, strip_solvent, extract_chain
 │   ├── ligand.py        # assign_topology, constraint_minimization
 │   └── topology.py      # merge, slice, subsample trajectories
-├── data/            # bundled resource files (pip-installable)
-│   └── mdps/            # GROMACS MDP parameter templates
-└── scripts/         # bundled utility scripts (pip-installable)
+├── _cli.py          # `mdpp` CLI entry point
+└── data/            # bundled resource files (pip-installable)
     ├── _resources.py    # importlib.resources helpers
-    ├── _cli.py          # `mdpp` CLI entry point
-    └── gromacs/         # analysis, compilation, mdenv, runtime, postprocessing, visualization
+    └── mdps/            # GROMACS MDP parameter templates
 
-scripts/             # workflow scripts copied to MD working directories (NOT packaged)
-├── gromacs/mdrun/       # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
+scripts/             # shell scripts (NOT packaged, copy to MD working directories)
+├── gromacs/
+│   ├── analysis/        # gmx_rmsd.sh, gmx_rmsf.sh, etc.
+│   ├── compilation/     # gmx_compile.sh, sherlock/ variants
+│   ├── mdenv/           # environment setup (sherlock/)
+│   ├── mdrun/           # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
+│   ├── postprocessing/  # gmx_postprocessing.sh
+│   ├── runtime/         # check_status.sh, restart.sh, mdextend.sh, mdexport.sh
+│   └── visualization/   # pymol_movie.pml
 └── openfe/              # quickrun.sh, quickrun.sbatch
 
 tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/scripts/)
@@ -117,8 +122,7 @@ Every `plot_*` function:
 ### Shell Scripts
 
 - `set -euo pipefail`, 4-space indent, pass shellcheck.
-- **Packaged utility scripts** in `src/mdpp/scripts/<engine>/<category>/` — distributed via pip, accessible via `mdpp.scripts` API and `mdpp` CLI.
-- **Workflow scripts** in top-level `scripts/<engine>/` — copied to MD working directories, run from terminal directly.
+- All shell scripts live in top-level `scripts/<engine>/<category>/` — not packaged, copy to MD working directories.
 - SLURM variants in `sherlock/` subdirectories.
 
 ## Dependencies

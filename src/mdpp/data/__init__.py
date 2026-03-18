@@ -21,13 +21,13 @@ Example::
 from pathlib import Path
 
 from mdpp._types import StrPath
-from mdpp.scripts._resources import (
+from mdpp.data._resources import (
     copy_tree as _copy_tree,
 )
-from mdpp.scripts._resources import (
+from mdpp.data._resources import (
     list_files as _list_files,
 )
-from mdpp.scripts._resources import (
+from mdpp.data._resources import (
     read_text as _read_text,
 )
 

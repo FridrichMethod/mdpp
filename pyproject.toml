@@ -35,7 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mdpp = "mdpp.scripts._cli:main"
+mdpp = "mdpp._cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "mdpp.__version__" }
@@ -119,7 +119,6 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "*.ipynb" = ["F401", "RUF059"]
-"src/mdpp/scripts/gromacs/**/__init__.py" = ["D104"]
 "src/mdpp/data/mdps/__init__.py" = ["D104"]
 "tests/**" = ["D102", "D104"]
 
@@ -168,7 +167,6 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mdpp.scripts" = ["**/*.sh", "**/*.pml"]
 "mdpp.data" = ["**/*.mdp"]
 
 [tool.pytest.ini_options]

@@ -9,8 +9,7 @@ from pathlib import Path
 
 from mdpp._types import StrPath
 
-# File extensions that are considered scripts (non-Python data files).
-_SCRIPT_EXTENSIONS = frozenset({".sh", ".sbatch", ".pml"})
+# File extensions for bundled data files.
 _DATA_EXTENSIONS = frozenset({".mdp"})
 
 
@@ -22,7 +21,7 @@ def _package_files(package: str) -> Traversable:
 def _iter_files(root: Traversable, *, prefix: str = "") -> list[str]:
     """Recursively list all data files under *root*.
 
-    Returns relative POSIX paths (``"gromacs/analysis/gmx_rmsd.sh"``).
+    Returns relative POSIX paths (``"mdps/step5_production.mdp"``).
     Skips ``__init__.py``, ``__pycache__``, and ``.pyc`` files.
     """
     result: list[str] = []
@@ -35,9 +34,9 @@ def _iter_files(root: Traversable, *, prefix: str = "") -> list[str]:
         elif item.is_file():
             if item.name == "__init__.py" or item.name.endswith(".pyc"):
                 continue
-            # Only include known data/script extensions.
+            # Only include known data extensions.
             suffix = Path(item.name).suffix
-            if suffix in _SCRIPT_EXTENSIONS | _DATA_EXTENSIONS:
+            if suffix in _DATA_EXTENSIONS:
                 result.append(rel)
     return result
 
@@ -46,7 +45,7 @@ def list_files(package: str, *, prefix: str = "") -> list[str]:
     """List all data files under *package*, optionally filtered by *prefix*.
 
     Args:
-        package: Dotted package name (e.g. ``"mdpp.scripts"``).
+        package: Dotted package name (e.g. ``"mdpp.data"``).
         prefix: Optional slash-separated prefix to filter by
             (e.g. ``"gromacs/analysis"``).
 
@@ -65,9 +64,9 @@ def get_resource_path(package: str, relative_path: str) -> Path:
     """Return an absolute filesystem ``Path`` to a bundled file.
 
     Args:
-        package: Dotted package name (e.g. ``"mdpp.scripts"``).
+        package: Dotted package name (e.g. ``"mdpp.data"``).
         relative_path: Slash-separated path relative to the package root
-            (e.g. ``"gromacs/runtime/restart.sh"``).
+            (e.g. ``"mdps/step5_production.mdp"``).
 
     Returns:
         Absolute path. For editable installs this points directly into the

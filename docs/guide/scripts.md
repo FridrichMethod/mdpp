@@ -1,48 +1,17 @@
 # Scripts & Data
 
-mdpp bundles GROMACS utility scripts and MDP parameter templates as package data. These are installed alongside the Python code via `pip install mdpp` and can be accessed programmatically or via the `mdpp` CLI.
+## MDP Templates
 
-## CLI Usage
+mdpp bundles GROMACS MDP parameter templates as package data, installed alongside the Python code via `pip install mdpp`.
+
+### CLI Usage
 
 ```bash
-# List all available utility scripts
-mdpp list
-
-# List scripts in a specific category
-mdpp list gromacs/analysis
-
-# View a script's content
-mdpp show gromacs/runtime/restart.sh
-
-# Copy scripts to a working directory
-mdpp copy gromacs/analysis ./my_simulation/
-
-# Copy MDP template files
+# Copy MDP template files to a working directory
 mdpp mdps ./my_simulation/
 ```
 
-## Python API
-
-### Scripts
-
-```python
-from mdpp.scripts import list_scripts, get_script_path, read_script, copy_scripts
-
-# Discover available scripts
-scripts = list_scripts()                          # all scripts
-scripts = list_scripts("gromacs/analysis")        # filter by category
-
-# Get filesystem path to a script
-path = get_script_path("gromacs/runtime/restart.sh")
-
-# Read script content as a string
-content = read_script("gromacs/runtime/restart.sh")
-
-# Copy an entire category to a directory
-copy_scripts("gromacs/analysis", "./my_simulation/")
-```
-
-### MDP Templates
+### Python API
 
 ```python
 from mdpp.data import list_mdp_templates, get_mdp_template, copy_mdp_files
@@ -57,9 +26,25 @@ content = get_mdp_template("step5_production")
 copy_mdp_files("./my_simulation/")
 ```
 
-## Available Scripts
+### Available Templates
 
-### Analysis (`gromacs/analysis/`)
+Five standard GROMACS simulation stages:
+
+| File | Stage |
+|---|---|
+| `step4.0_minimization.mdp` | Energy minimization |
+| `step4.1_equilibration.mdp` | NVT equilibration |
+| `step4.2_equilibration.mdp` | NPT equilibration |
+| `step4.3_equilibration.mdp` | Final equilibration |
+| `step5_production.mdp` | Production MD |
+
+## Scripts
+
+All shell scripts live in the top-level `scripts/` directory and are **not** included in the pip-installed package. Copy or symlink them into your MD working directories as needed.
+
+### GROMACS
+
+#### Analysis (`scripts/gromacs/analysis/`)
 
 | Script | Description |
 |---|---|
@@ -72,7 +57,7 @@ copy_mdp_files("./my_simulation/")
 | `gmx_sasa.sh` | Solvent accessible surface area |
 | `gmx_cluster.sh` | Conformational clustering |
 
-### Runtime (`gromacs/runtime/`)
+#### Runtime (`scripts/gromacs/runtime/`)
 
 | Script | Description |
 |---|---|
@@ -81,28 +66,32 @@ copy_mdp_files("./my_simulation/")
 | `mdextend.sh` | Extend simulation time |
 | `mdexport.sh` | Export trajectory |
 
-### Other Categories
+#### MD Run (`scripts/gromacs/mdrun/`)
 
-- **`gromacs/compilation/`** -- GROMACS build scripts (generic + Sherlock HPC)
-- **`gromacs/mdenv/`** -- Environment setup scripts (Sherlock)
-- **`gromacs/postprocessing/`** -- Trajectory postprocessing
-- **`gromacs/visualization/`** -- PyMOL movie generation
-
-## MDP Templates
-
-Five standard GROMACS simulation stages:
-
-| File | Stage |
+| Script | Description |
 |---|---|
-| `step4.0_minimization.mdp` | Energy minimization |
-| `step4.1_equilibration.mdp` | NVT equilibration |
-| `step4.2_equilibration.mdp` | NPT equilibration |
-| `step4.3_equilibration.mdp` | Final equilibration |
-| `step5_production.mdp` | Production MD |
+| `mdprep.sh` | Minimization & equilibration pipeline |
+| `mdrun.sh` | Production run (GPU-accelerated) |
+| `rest2/rest2.sh` | REST2 topology setup |
+| `rest2/mdrun_mpi_plumed.sh` | REST2 with PLUMED (multi-replica) |
 
-## Workflow Scripts (Not Packaged)
+#### Other Categories
 
-Scripts that are meant to be copied to MD working directories and run directly from the terminal live in the top-level `scripts/` directory and are **not** included in the pip-installed package:
+- **`scripts/gromacs/compilation/`** -- GROMACS build scripts (generic + Sherlock HPC)
+- **`scripts/gromacs/mdenv/`** -- Environment setup scripts (Sherlock)
+- **`scripts/gromacs/postprocessing/`** -- Trajectory postprocessing
+- **`scripts/gromacs/visualization/`** -- PyMOL movie generation
 
-- `scripts/gromacs/mdrun/` -- `mdprep.sh`, `mdrun.sh`, REST2 scripts, SLURM sbatch files
-- `scripts/openfe/` -- OpenFE quickrun scripts
+#### SLURM (Sherlock HPC)
+
+SLURM batch scripts are in `sherlock/` subdirectories within each category:
+
+- `scripts/gromacs/analysis/sherlock/`
+- `scripts/gromacs/compilation/sherlock/`
+- `scripts/gromacs/mdenv/sherlock/`
+- `scripts/gromacs/mdrun/sherlock/`
+
+### OpenFE
+
+- `scripts/openfe/quickrun.sh` -- Batch submission wrapper for OpenFE transformations
+- `scripts/openfe/quickrun.sbatch` -- Apptainer-based OpenFE execution on Sherlock

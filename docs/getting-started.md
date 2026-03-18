@@ -61,9 +61,9 @@ from mdpp.prep import fix_pdb
 fix_pdb("raw.pdb", "fixed.pdb", pH=7.4)
 ```
 
-## Bundled Scripts & Templates
+## MDP Templates
 
-mdpp ships with GROMACS utility scripts and MDP parameter templates.
+mdpp ships with GROMACS MDP parameter templates as package data.
 
 Copy MDP files to your simulation directory:
 
@@ -71,28 +71,19 @@ Copy MDP files to your simulation directory:
 mdpp mdps ./my_simulation/
 ```
 
-List and copy analysis scripts:
-
-```bash
-mdpp list gromacs/analysis
-mdpp copy gromacs/analysis ./my_simulation/
-```
-
 Or access them from Python:
 
 ```python
 from mdpp.data import get_mdp_template, copy_mdp_files
-from mdpp.scripts import list_scripts, copy_scripts
 
 # Read MDP content as a string
 content = get_mdp_template("step5_production")
 
 # Copy all MDP files to a directory
 copy_mdp_files("./my_simulation/")
-
-# Copy analysis scripts
-copy_scripts("gromacs/analysis", "./my_simulation/")
 ```
+
+Utility shell scripts (analysis wrappers, runtime helpers, etc.) live in the top-level `scripts/` directory and can be copied to your working directory as needed.
 
 ## Next Steps
 
