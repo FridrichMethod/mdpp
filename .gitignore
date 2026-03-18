@@ -238,3 +238,5 @@ __marimo__/
 .pre-commit-cache/
 results/
 test/
+.claude/
+.codex/
