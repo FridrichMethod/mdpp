@@ -240,3 +240,4 @@ results/
 test/
 .claude/
 .codex/
+tmp/
