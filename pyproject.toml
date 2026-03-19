@@ -26,6 +26,7 @@ dependencies = [
     "plotly",
     "polars",
     "prody",
+    "propka",
     "rdkit",
     "scikit-learn",
     "scipy",
