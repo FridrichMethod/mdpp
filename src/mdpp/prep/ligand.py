@@ -20,10 +20,14 @@ def assign_topology(mol: Chem.Mol, template_mol: Chem.Mol) -> Chem.Mol:
     Returns:
         A new molecule with assigned bond orders and added hydrogens.
     """
-    template = Chem.RemoveHs(template_mol)
-    Chem.SanitizeMol(template)
-    mol_templated = AllChem.AssignBondOrdersFromTemplate(template, mol)
+    # The template molecule should have no explicit hydrogens
+    # else the AssignBondOrdersFromTemplate algorithm will fail.
+    refmol = Chem.RemoveHs(template_mol)
+    Chem.SanitizeMol(refmol)
+
+    mol_templated = AllChem.AssignBondOrdersFromTemplate(refmol, mol)
     mol_fixed = Chem.AddHs(mol_templated, addCoords=True)
+
     return mol_fixed
 
 
@@ -45,4 +49,5 @@ def constraint_minimization(mol: Chem.Mol, *, max_iters: int = 5000) -> Chem.Mol
         if atom.GetAtomicNum() != 1:
             ff.AddFixedPoint(atom.GetIdx())
     ff.Minimize(maxIts=max_iters)
+
     return mol
