@@ -23,6 +23,7 @@ dependencies = [
     "pandas",
     "panedr",
     "pdb-tools",
+    "pdb2pqr",
     "plotly",
     "polars",
     "prody",
