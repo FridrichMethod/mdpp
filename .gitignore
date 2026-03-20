@@ -239,6 +239,7 @@ __marimo__/
 .codex/
 .pre-commit-cache/
 archive/
+notebooks/
 results/
 test/
 tmp/
