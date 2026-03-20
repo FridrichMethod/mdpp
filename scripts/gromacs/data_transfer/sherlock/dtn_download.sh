@@ -2,12 +2,26 @@
 
 set -euo pipefail
 
+usage() {
+    echo "Usage: ${0##*/} [-j <n>] REMOTE_DIR LOCAL_DIR" >&2
+    exit 1
+}
+
 LOGIN_HOST="sherlock-plain"
 DTN_HOST="sherlock-dtn"
-
-REMOTE_DIR="/scratch/groups/ayting/zyli2002/turboid/md/replica2"
-LOCAL_DIR="/data/data2/zyli2002/md/replica2"
 JOBS=8
+
+while getopts "j:" opt; do
+    case $opt in
+        j) JOBS="$OPTARG" ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+[[ $# -eq 2 ]] || usage
+
+REMOTE_DIR="$1"
+LOCAL_DIR="$2"
 
 mkdir -p "$LOCAL_DIR"
 
