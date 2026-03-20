@@ -4,6 +4,16 @@ set -euo pipefail
 
 PRODUCTION=step5_production
 
+mkdir -p tmp
+
+cp index.ndx tmp/
+cp "./*.xvg" tmp/
+cp "${PRODUCTION}".gro "${PRODUCTION}".edr "${PRODUCTION}".tpr tmp/
+
+ln -s "$(realpath "${PRODUCTION}.xtc")" tmp/
+
+cd tmp
+
 # gmx select \
 #     -s "${PRODUCTION}.tpr" \
 #     -on index.ndx \
