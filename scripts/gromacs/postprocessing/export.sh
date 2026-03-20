@@ -4,7 +4,7 @@ set -euo pipefail
 
 PRODUCTION=step5_production
 
-SKIP=${1:?Usage: mdexport.sh <skip>}
+SKIP=${1:?Usage: export.sh <skip>}
 
 mkdir -p tmp
 
