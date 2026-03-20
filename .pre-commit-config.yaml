@@ -6,6 +6,7 @@ repos:
         args: [--markdown-linebreak-ext=md]
         exclude: \.pdb$
       - id: end-of-file-fixer
+        exclude: \.pdb$
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-json
