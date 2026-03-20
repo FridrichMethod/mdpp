@@ -28,6 +28,10 @@ mkdir -p "$LOCAL_DIR"
 mapfile -t SUBDIRS < <(
     ssh -n "$LOGIN_HOST" "find \"$REMOTE_DIR\" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'" | sort
 )
+[[ ${#SUBDIRS[@]} -gt 0 ]] || {
+    echo "No subdirectories found in $REMOTE_DIR" >&2
+    exit 1
+}
 
 parallel -j "$JOBS" \
     rsync -ahP --append-verify \
