@@ -235,9 +235,10 @@ __marimo__/
 \#*\#
 
 # Intermediate folders
-.pre-commit-cache/
-results/
-test/
 .claude/
 .codex/
+.pre-commit-cache/
+archive/
+results/
+test/
 tmp/
