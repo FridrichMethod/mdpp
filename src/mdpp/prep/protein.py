@@ -5,10 +5,42 @@ from __future__ import annotations
 from pathlib import Path
 
 import mdtraj as md
+from Bio.PDB import Select
 from openmm.app import PDBFile
 from pdbfixer import PDBFixer
 
 from mdpp._types import StrPath
+
+
+class ChainSelect(Select):
+    """Biopython ``Select`` subclass that accepts only specified PDB chains.
+
+    Args:
+        chain_ids: One or more chain identifiers to keep.
+
+    Example::
+
+        from Bio.PDB import PDBIO, PDBParser
+        from mdpp.prep import ChainSelect
+
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure("complex", "complex.pdb")
+        io = PDBIO()
+        io.set_structure(structure)
+        io.save("protein.pdb", ChainSelect("A"))
+    """
+
+    def __init__(self, chain_ids: str | list[str]) -> None:
+        """Initialize the ChainSelect object.
+
+        Args:
+            chain_ids (str | list[str]): The chain IDs to keep.
+        """
+        self.chain_ids = {chain_ids} if isinstance(chain_ids, str) else set(chain_ids)
+
+    def accept_chain(self, chain) -> int:  # type: ignore[override]
+        """Return 1 if the chain should be kept, 0 otherwise."""
+        return int(chain.id in self.chain_ids)
 
 
 def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None:
