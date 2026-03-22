@@ -45,7 +45,7 @@ for subdir in "${TARGET_DIR}"/*/; do
     compgen -G "${subdir}"/*.xtc >/dev/null || continue
 
     if [[ ${MAX_JOBS} -gt 0 && ${RUNNING} -ge ${MAX_JOBS} ]]; then
-        wait -n "${PIDS[@]}" || true
+        wait -n || true
         RUNNING=$((RUNNING - 1))
     fi
 
