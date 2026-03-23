@@ -37,12 +37,14 @@ gmx select \
 # See https://gromacs.bioexcel.eu/t/protein-come-out-of-the-box-but-trjconv-command-didnt-fix-the-problem/3851/8
 printf "Chain_A\nSystem\n" | gmx trjconv \
     -s "${PRODUCTION}.tpr" \
-    -f "${PRODUCTION}".xtc \
+    -f "${PRODUCTION}.xtc" \
     -o "${PRODUCTION}_center.xtc" \
     -n index_protein_chain_A.ndx \
     -center \
     -pbc mol \
     -ur compact
+
+rm "${PRODUCTION}.xtc"
 
 # Fit the trajectory
 printf "Chain_A_BB\nSystem\n" | gmx trjconv \
@@ -51,6 +53,8 @@ printf "Chain_A_BB\nSystem\n" | gmx trjconv \
     -o "${PRODUCTION}_fit.xtc" \
     -n index_protein_chain_A.ndx \
     -fit rot+trans
+
+rm "${PRODUCTION}_center.xtc"
 
 # Extract the complex (solute)
 printf "SOLU\n" | gmx trjconv \

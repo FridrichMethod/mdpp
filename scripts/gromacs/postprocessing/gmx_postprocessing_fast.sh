@@ -60,6 +60,8 @@ printf "Chain_A\nSOLU\n" | gmx trjconv \
     -pbc mol \
     -ur compact
 
+rm "${PRODUCTION}.xtc"
+
 # Fit the trajectory
 printf "Chain_A_BB\nSystem\n" | gmx trjconv \
     -s "${PRODUCTION}_complex_fit.tpr" \
