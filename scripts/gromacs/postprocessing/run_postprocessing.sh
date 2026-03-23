@@ -39,35 +39,40 @@ PIDS=()
 SUBDIRS=()
 FAILED=()
 RUNNING=0
+declare -A WAITED
+declare -A PID_NAME
 
 for subdir in "${TARGET_DIR}"/*/; do
     [[ -d "${subdir}" ]] || continue
     compgen -G "${subdir}"/*.xtc >/dev/null || continue
 
-    if [[ ${MAX_JOBS} -gt 0 && ${RUNNING} -ge ${MAX_JOBS} ]]; then
-        wait -n || true
+    while [[ ${MAX_JOBS} -gt 0 && ${RUNNING} -ge ${MAX_JOBS} ]]; do
+        DONE_PID=""
+        if ! wait -n -p DONE_PID; then
+            [[ -n "${DONE_PID}" ]] && WAITED[${DONE_PID}]=1 && FAILED+=("${PID_NAME[${DONE_PID}]}")
+        else
+            [[ -n "${DONE_PID}" ]] && WAITED[${DONE_PID}]=1
+        fi
         RUNNING=$((RUNNING - 1))
-    fi
+    done
 
     (
         cd "${subdir}"
+        cp /home/fridrichmethod/data/research/flexid/mdpp/scripts/gromacs/postprocessing/gmx_postprocessing_fast.sh .
         echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${BLUE}Starting:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
-        bash gmx_postprocessing.sh
+        bash gmx_postprocessing_fast.sh
         echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${GREEN}Finished:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
     ) &
 
     PIDS+=($!)
     SUBDIRS+=("$(basename "${subdir}")")
+    PID_NAME[$!]="$(basename "${subdir}")"
+
     RUNNING=$((RUNNING + 1))
 done
 
-if [[ ${MAX_JOBS} -gt 0 ]]; then
-    echo -e "${BLUE}Launched ${#PIDS[@]} jobs (max ${MAX_JOBS} parallel)${RESET}"
-else
-    echo -e "${BLUE}Launched ${#PIDS[@]} jobs in parallel${RESET}"
-fi
-
 for i in "${!PIDS[@]}"; do
+    [[ -n "${WAITED[${PIDS[$i]}]+x}" ]] && continue
     if ! wait "${PIDS[$i]}"; then
         FAILED+=("${SUBDIRS[$i]}")
     fi

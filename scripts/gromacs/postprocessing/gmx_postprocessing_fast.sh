@@ -19,7 +19,6 @@ cd tmp
 #     -select '
 #         "System" (group "System");
 #         "SOLU" (group 1 or group 13 or group 14);  # choose the group you want to extract
-#         "SOLV" (group "System" and not "SOLU")
 #     '
 
 # Select the protein chain A and its backbone using default topology groups,
