@@ -14,7 +14,7 @@ MDRUN_FLAGS=(
     -bonded cpu # reduce GPU state copy time
     -pme gpu
     -nb gpu
-    -update gpu  # update will partially be done on CPUs by default
+    -update gpu  # update will partially be done on CPUs by default; virtual sites are not supported on GPUs
     -nstlist 100 # adjust larger for faster pair search
 )
 
