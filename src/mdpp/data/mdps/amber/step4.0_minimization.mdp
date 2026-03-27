@@ -8,12 +8,12 @@ nsteps                  = 50000
 ;
 cutoff-scheme           = Verlet
 nstlist                 = 10
-rlist                   = 1.0
+rlist                   = 0.9
 vdwtype                 = Cut-off
-vdw-modifier            = Potential-shift
-rvdw                    = 1.0
+vdw-modifier            = None
+rvdw                    = 0.9
 coulombtype             = PME
-rcoulomb                = 1.0
+rcoulomb                = 0.9
 ;
 pbc                     = xyz
 DispCorr                = EnerPres

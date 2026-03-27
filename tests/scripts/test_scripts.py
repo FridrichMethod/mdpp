@@ -60,7 +60,7 @@ class TestGetMdpTemplate:
     def test_amber_has_no_force_switch(self) -> None:
         content = get_mdp_template("step4.0_minimization", ff="amber")
         assert "Force-switch" not in content
-        assert "Potential-shift" in content
+        assert "vdw-modifier            = None" in content
 
 
 class TestCopyMdpFiles:
