@@ -12,8 +12,8 @@ def _cmd_mdps(args: argparse.Namespace) -> None:
     from mdpp.data import copy_mdp_files
 
     try:
-        written = copy_mdp_files(args.dest, overwrite=args.overwrite)
-    except (FileNotFoundError, FileExistsError) as exc:
+        written = copy_mdp_files(args.dest, ff=args.ff, overwrite=args.overwrite)
+    except (FileNotFoundError, FileExistsError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
     for path in written:
@@ -31,6 +31,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # mdpp mdps <dest>
     p_mdps = sub.add_parser("mdps", help="Copy MDP template files to a directory.")
     p_mdps.add_argument("dest", type=Path, help="Destination directory.")
+    p_mdps.add_argument(
+        "--ff",
+        default="charmm",
+        choices=["charmm", "amber"],
+        help="Force field (default: charmm).",
+    )
     p_mdps.add_argument("--overwrite", action="store_true", help="Overwrite existing files.")
 
     return parser

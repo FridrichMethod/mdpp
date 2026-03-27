@@ -1,0 +1,48 @@
+title                   = production
+;
+integrator              = md
+dt                      = 0.004  ; HMR
+nsteps                  = 500000000  ; 2 us
+nstxout-compressed      = 2500  ; 10 ps
+nstxout                 = 0
+nstvout                 = 0
+nstfout                 = 0
+nstcalcenergy           = 100  ; 0.4 ps = nstcomm
+nstenergy               = 2500  ; 10 ps
+nstlog                  = 2500  ; 10 ps
+;
+cutoff-scheme           = Verlet
+nstlist                 = 20
+rlist                   = 1.0
+vdwtype                 = Cut-off
+vdw-modifier            = Potential-shift
+rvdw                    = 1.0
+coulombtype             = PME
+rcoulomb                = 1.0
+;
+pbc                     = xyz
+DispCorr                = EnerPres
+;
+tcoupl                  = V-rescale
+tc_grps                 = SOLU SOLV
+tau_t                   = 1.0 1.0
+ref_t                   = 310.15 310.15
+;
+pcoupl                  = C-rescale
+pcoupltype              = isotropic
+compressibility         = 4.5e-5
+tau_p                   = 5.0
+ref_p                   = 1.0
+;
+constraints             = h-bonds
+constraint_algorithm    = lincs
+lincs_order             = 4
+lincs_iter              = 1
+mass-repartition-factor = 3
+;
+nstcomm                 = 100  ; 0.4 ps = nstcalcenergy
+comm_mode               = linear
+comm_grps               = SOLU SOLV
+;
+continuation            = yes
+gen-vel                 = no

@@ -1,0 +1,44 @@
+title                   = nvt
+;
+define                  = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
+integrator              = md
+dt                      = 0.001
+nsteps                  = 100000
+nstxout-compressed      = 5000
+nstxout                 = 0
+nstvout                 = 0
+nstfout                 = 0
+nstcalcenergy           = 100
+nstenergy               = 1000
+nstlog                  = 1000
+;
+cutoff-scheme           = Verlet
+nstlist                 = 20
+rlist                   = 1.0
+vdwtype                 = Cut-off
+vdw-modifier            = Potential-shift
+rvdw                    = 1.0
+coulombtype             = PME
+rcoulomb                = 1.0
+;
+pbc                     = xyz
+DispCorr                = EnerPres
+;
+tcoupl                  = V-rescale
+tc_grps                 = SOLU SOLV
+tau_t                   = 1.0 1.0
+ref_t                   = 310.15 310.15
+;
+constraints             = h-bonds
+constraint_algorithm    = lincs
+lincs_order             = 4
+lincs_iter              = 1
+mass-repartition-factor = 3
+;
+nstcomm                 = 100
+comm_mode               = linear
+comm_grps               = SOLU SOLV
+;
+gen-vel                 = yes
+gen-temp                = 310.15
+gen-seed                = -1
