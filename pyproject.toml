@@ -20,6 +20,7 @@ dependencies = [
     "mdtraj",
     "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "numpy",
+    "openbabel",
     "pandas",
     "panedr",
     "pdb-tools",
