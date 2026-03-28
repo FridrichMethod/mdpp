@@ -2,14 +2,108 @@
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import mdtraj as md
+import propka.run
 from Bio.PDB import Select
 from openmm.app import PDBFile
 from pdbfixer import PDBFixer
 
 from mdpp._types import StrPath
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PropkaResidue:
+    """PROPKA pKa prediction for a single titratable residue.
+
+    Attributes:
+        residue_type: Group label (e.g. ``ASP``, ``HIS``, ``N+``, ``C-``).
+        res_num: Residue sequence number.
+        chain_id: PDB chain identifier.
+        pka: PROPKA-predicted pKa value.
+        model_pka: Reference model pKa value.
+    """
+
+    residue_type: str
+    res_num: int
+    chain_id: str
+    pka: float
+    model_pka: float
+
+    @property
+    def label(self) -> str:
+        """Formatted residue label matching PROPKA output style."""
+        return f"{self.residue_type:>3s} {self.res_num:>4d} {self.chain_id}"
+
+    def is_protonated_at(self, pH: float) -> bool:
+        """Whether PROPKA predicts the residue to be protonated at the given pH."""
+        return self.pka > pH
+
+    def is_default_protonated_at(self, pH: float) -> bool:
+        """Whether the model pKa predicts the residue to be protonated at the given pH."""
+        return self.model_pka > pH
+
+
+@dataclass(frozen=True, slots=True)
+class PropkaResult:
+    """PROPKA pKa prediction results for all titratable residues.
+
+    Attributes:
+        residues: pKa predictions for each titratable residue.
+    """
+
+    residues: tuple[PropkaResidue, ...]
+
+    def get_nonstandard(self, pH: float) -> tuple[PropkaResidue, ...]:
+        """Return residues where PROPKA and model pKa disagree on protonation state.
+
+        A residue is "non-standard" when ``pKa > pH`` and ``model_pKa <= pH``
+        (or vice versa), meaning PDBFixer would assign a different protonation
+        state than what PROPKA predicts.
+
+        Args:
+            pH: pH value for protonation state comparison.
+
+        Returns:
+            Residues with non-standard predicted protonation.
+        """
+        return tuple(
+            r for r in self.residues if r.is_protonated_at(pH) != r.is_default_protonated_at(pH)
+        )
+
+
+def run_propka(pdb_path: StrPath) -> PropkaResult:
+    """Run PROPKA to predict pKa values for titratable protein residues.
+
+    Args:
+        pdb_path: Path to the input PDB file.
+
+    Returns:
+        pKa predictions for all titratable residues found.
+    """
+    mol = propka.run.single(str(pdb_path), write_pka=False)
+    conf = next(iter(mol.conformations.values()))
+
+    residues: list[PropkaResidue] = []
+    for group in conf.get_titratable_groups():
+        if not group.model_pka_set:
+            continue
+        residues.append(
+            PropkaResidue(
+                residue_type=group.residue_type.strip(),
+                res_num=group.atom.res_num,
+                chain_id=group.atom.chain_id.strip(),
+                pka=group.pka_value,
+                model_pka=group.model_pka,
+            )
+        )
+
+    return PropkaResult(residues=tuple(residues))
 
 
 class ChainSelect(Select):
@@ -50,11 +144,32 @@ def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None
     residues and atoms, then adds them back along with hydrogens at the
     specified pH.
 
+    Runs PROPKA to check for residues whose environment-shifted pKa predicts
+    a different protonation state than the model-pKa default used by PDBFixer,
+    and logs a warning for each such residue.
+
     Args:
         pdb_path: Path to the input PDB file.
         fixed_pdb_path: Path where the fixed PDB will be written.
         pH: pH value for hydrogen placement.
     """
+    result = run_propka(pdb_path)
+    nonstandard = result.get_nonstandard(pH)
+    if nonstandard:
+        lines = "\n".join(
+            f"  {r.label}: pKa={r.pka:5.2f} (model={r.model_pka:5.2f})"
+            f" -> PROPKA: {'protonated' if r.is_protonated_at(pH) else 'deprotonated'}"
+            f", PDBFixer: {'protonated' if r.is_default_protonated_at(pH) else 'deprotonated'}"
+            for r in nonstandard
+        )
+        logger.warning(
+            "PROPKA predicts non-standard protonation for %d residue(s) at pH %.1f.\n"
+            "PDBFixer uses model pKa and will assign different protonation:\n%s",
+            len(nonstandard),
+            pH,
+            lines,
+        )
+
     fixer = PDBFixer(filename=str(pdb_path))
     fixer.removeHeterogens(keepWater=False)
     fixer.findMissingResidues()
