@@ -28,6 +28,7 @@ if [[ $# -ne 1 ]]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="$(realpath "$1")"
 
 if [[ ! -d "${TARGET_DIR}" ]]; then
@@ -58,7 +59,7 @@ for subdir in "${TARGET_DIR}"/*/; do
 
     (
         cd "${subdir}"
-        cp /home/fridrichmethod/data/research/flexid/mdpp/scripts/gromacs/postprocessing/gmx_postprocessing_fast.sh .
+        cp "${SCRIPT_DIR}/gmx_postprocessing_fast.sh" .
         echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${BLUE}Starting:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
         bash gmx_postprocessing_fast.sh
         echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${GREEN}Finished:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
