@@ -12,6 +12,7 @@ description = "MD simulation pre- and post-processing"
 requires-python = ">=3.12"
 dependencies = [
     "ParmEd",
+    "Pillow",
     "biopython",
     "biotite",
     "deeptime",
@@ -19,6 +20,7 @@ dependencies = [
     "mdanalysis",
     "mdtraj",
     "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
+    "numba",
     "numpy",
     "pandas",
     "panedr",
@@ -122,7 +124,7 @@ convention = "google"
 "__init__.py" = ["F401"]
 "*.ipynb" = ["F401", "RUF059"]
 "src/mdpp/data/mdps/__init__.py" = ["D104"]
-"tests/**" = ["D102", "D104"]
+"tests/**" = ["D101", "D102", "D103", "D104"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -147,8 +149,10 @@ disable_error_code = ["import-not-found", "import-untyped", "no-any-return"]
 module = [
     "Bio.*",
     "IPython.*",
+    "PIL.*",
     "matplotlib.*",
     "mdtraj.*",
+    "numba.*",
     "numpy.*",
     "openmm.*",
     "tqdm.*",
@@ -156,6 +160,7 @@ module = [
     "pdbfixer.*",
     "pytest.*",
     "panedr.*",
+    "rdkit.*",
     "scipy.*",
     "sklearn.*",
 ]

@@ -3,6 +3,7 @@
 from mdpp.plots.contacts import contact_frequency_to_matrix, plot_contact_map
 from mdpp.plots.fes import plot_fes
 from mdpp.plots.matrix import plot_dccm
+from mdpp.plots.molecules import draw_mol, draw_mols
 from mdpp.plots.scatter import plot_projection, plot_ramachandran
 from mdpp.plots.timeseries import (
     plot_distances,
@@ -18,6 +19,8 @@ from mdpp.plots.timeseries import (
 
 __all__ = [
     "contact_frequency_to_matrix",
+    "draw_mol",
+    "draw_mols",
     "plot_contact_map",
     "plot_dccm",
     "plot_distances",
