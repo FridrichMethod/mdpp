@@ -63,24 +63,11 @@ fix_pdb("raw.pdb", "fixed.pdb", pH=7.4)
 
 ## MDP Templates
 
-mdpp ships with GROMACS MDP parameter templates as package data.
-
-Copy MDP files to your simulation directory:
+The repository includes GROMACS MDP templates under `scripts/gromacs/mdps/`.
+Copy the force-field-specific files you need into your simulation directory:
 
 ```bash
-mdpp mdps ./my_simulation/
-```
-
-Or access them from Python:
-
-```python
-from mdpp.data import get_mdp_template, copy_mdp_files
-
-# Read MDP content as a string
-content = get_mdp_template("step5_production")
-
-# Copy all MDP files to a directory
-copy_mdp_files("./my_simulation/")
+cp scripts/gromacs/mdps/charmm/*.mdp ./my_simulation/
 ```
 
 Utility shell scripts (analysis wrappers, runtime helpers, etc.) live in the top-level `scripts/` directory and can be copied to your working directory as needed.
@@ -91,4 +78,4 @@ Utility shell scripts (analysis wrappers, runtime helpers, etc.) live in the top
 - [User Guide: Analysis](guide/analysis.md) -- structural and dynamic analysis
 - [User Guide: Plots](guide/plots.md) -- visualization
 - [User Guide: Preparation](guide/prep.md) -- system setup
-- [User Guide: Scripts & Data](guide/scripts.md) -- bundled scripts and MDP templates
+- [User Guide: Scripts](guide/scripts.md) -- repository scripts and MDP templates

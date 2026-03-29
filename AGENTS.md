@@ -32,11 +32,10 @@ Source is under `src/mdpp/` using the src-layout convention:
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
 | `plots/` | Visualization | `plot_*(result, *, ax=None, ...) -> Axes` |
 | `prep/` | System preparation | `fix_pdb`, `strip_solvent`, ligand tools |
-| `data/` | MDP config templates | `list_mdp_templates`, `get_mdp_template`, `copy_mdp_files` |
 
 Shell scripts (analysis wrappers, runtime helpers, build scripts, etc.) live in the top-level `scripts/` directory (not packaged).
 
-Tests live in `tests/analysis/`, `tests/plots/`, and `tests/scripts/`, mirroring the source tree.
+Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring the source tree.
 
 ## Mandatory Conventions
 
@@ -54,17 +53,9 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/scripts/`, mirroring
 - Analysis modules: `src/mdpp/analysis/<topic>.py`
 - Plot modules: `src/mdpp/plots/<topic>.py`
 - Helper utilities within a subpackage: `utils.py`
-- MDP config templates: `src/mdpp/data/mdps/<step>.mdp`
+- MDP config templates: `scripts/gromacs/mdps/<ff>/<step>.mdp`
 - Shell scripts (not packaged): `scripts/<engine>/<category>/<script>.sh`
 - SLURM scripts: `scripts/<engine>/<category>/sherlock/<script>.sbatch`
-
-## CLI
-
-The `mdpp` CLI is installed via `pip install mdpp`:
-
-```bash
-mdpp mdps <dest>              # copy MDP templates to working directory
-```
 
 ## Adding a New Analysis
 

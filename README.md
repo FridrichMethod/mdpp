@@ -16,7 +16,7 @@
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Package Structure](#package-structure)
-- [CLI](#cli)
+- [Scripts](#scripts)
 - [Design Philosophy](#design-philosophy)
 - [Dependencies](#dependencies)
 - [Documentation](#documentation)
@@ -30,7 +30,7 @@
 - **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
 - **System preparation** — PDB fixing (OpenMM), ligand parameterization (RDKit), trajectory merge/slice/subsample
-- **GROMACS automation** — bundled MDP templates, analysis wrappers, runtime monitoring scripts, and a CLI to manage them all
+- **GROMACS automation** — MDP templates plus analysis, runtime, and post-processing helpers in `scripts/gromacs/`
 - **Typed & tested** — full type annotations, frozen dataclass results, Google docstrings
 
 ## Installation
@@ -107,33 +107,30 @@ mdpp
 ├── analysis     RMSD · RMSF · DCCM · SASA · Rg · H-bonds · contacts · DSSP · PCA · TICA · FES · clustering
 ├── plots        Time series · heatmaps · FES contours · scatter · Ramachandran · contact maps
 ├── prep         PDB fixing · ligand topology · trajectory merge/slice/subsample
-├── data         GROMACS MDP parameter templates
-└── scripts      Analysis wrappers · runtime tools · compilation helpers
+└── scripts      Repository shell helpers and GROMACS MDP templates
 ```
 
-## CLI
+## Scripts
 
 ```bash
-mdpp list                               # list bundled utility scripts
-mdpp list gromacs/analysis              # filter by category
-mdpp show gromacs/runtime/restart.sh    # view a script
-mdpp copy gromacs/analysis ./sim/       # copy scripts to working dir
-mdpp mdps ./sim/                        # copy MDP templates
+cp scripts/gromacs/mdps/charmm/*.mdp ./sim/
+cp scripts/gromacs/mdrun/mdprep.sh ./sim/
+cp scripts/gromacs/mdrun/mdrun.sh ./sim/
 ```
 
-<details>
-<summary><b>Available script categories</b></summary>
+The GROMACS templates now live in the repository under `scripts/gromacs/mdps/amber/`
+and `scripts/gromacs/mdps/charmm/`. The shell helpers are also kept in `scripts/` and
+are not installed as part of the Python package.
 
 | Category | Contents |
 |---|---|
+| `gromacs/mdps` | Force-field-specific MDP templates for AMBER and CHARMM workflows |
 | `gromacs/analysis` | RMSD, RMSF, DSSP, H-bonds, energy, Rg, SASA, clustering |
 | `gromacs/runtime` | Job status monitor, restart, extend, export |
 | `gromacs/compilation` | GROMACS build scripts (generic + Sherlock HPC) |
 | `gromacs/mdenv` | Environment setup (Sherlock module loads) |
 | `gromacs/postprocessing` | Trajectory postprocessing |
 | `gromacs/visualization` | PyMOL movie generation |
-
-</details>
 
 ## Design Philosophy
 

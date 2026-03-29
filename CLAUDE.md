@@ -34,23 +34,19 @@ src/mdpp/
 │   ├── protein.py       # fix_pdb, strip_solvent, extract_chain
 │   ├── ligand.py        # assign_topology, constraint_minimization
 │   └── topology.py      # merge, slice, subsample trajectories
-├── _cli.py          # `mdpp` CLI entry point
-└── data/            # bundled resource files (pip-installable)
-    ├── _resources.py    # importlib.resources helpers
-    └── mdps/            # GROMACS MDP parameter templates
-
 scripts/             # shell scripts (NOT packaged, copy to MD working directories)
 ├── gromacs/
 │   ├── analysis/        # gmx_rmsd.sh, gmx_rmsf.sh, etc.
 │   ├── compilation/     # gmx_compile.sh, sherlock/ variants
+│   ├── mdps/            # force-field-specific GROMACS MDP templates
 │   ├── mdenv/           # environment setup (sherlock/)
 │   ├── mdrun/           # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
 │   ├── postprocessing/  # gmx_postprocessing.sh
-│   ├── runtime/         # check_status.sh, restart.sh, mdextend.sh, mdexport.sh
+│   ├── runtime/         # check_status.sh, restart.sh, extend.sh, export.sh
 │   └── visualization/   # pymol_movie.pml
 └── openfe/              # quickrun.sh, quickrun.sbatch
 
-tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/scripts/)
+tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/chem/)
 notebooks/           # Jupyter notebooks for interactive analysis
 docs/                # mkdocs documentation (guide/ and api/)
 ```

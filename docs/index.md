@@ -12,8 +12,7 @@ mdpp
 ├── analysis    # RMSD, RMSF, DCCM, SASA, contacts, DSSP, FES, PCA/TICA, clustering
 ├── plots       # Publication-ready plotting helpers
 ├── prep        # Protein fixing, ligand parameterization, trajectory manipulation
-├── data        # MDP config templates (bundled as package data)
-└── scripts     # Utility shell scripts (bundled, accessible via CLI)
+└── scripts     # Repository shell scripts and GROMACS MDP templates
 ```
 
 ## Quick Install
@@ -33,4 +32,4 @@ pip install -e ".[openmm]"
 - [Getting Started](getting-started.md)
 - [User Guide](guide/core.md)
 - [API Reference](api/core.md)
-- [Scripts & Data](guide/scripts.md)
+- [Scripts](guide/scripts.md)

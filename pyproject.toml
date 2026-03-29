@@ -38,9 +38,6 @@ dependencies = [
     "uv",
 ]
 
-[project.scripts]
-mdpp = "mdpp._cli:main"
-
 [tool.setuptools.dynamic]
 version = { attr = "mdpp.__version__" }
 
@@ -123,7 +120,6 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "*.ipynb" = ["F401", "RUF059"]
-"src/mdpp/data/mdps/__init__.py" = ["D104"]
 "tests/**" = ["D101", "D102", "D103", "D104"]
 
 [tool.ruff.format]
@@ -141,8 +137,8 @@ warn_redundant_casts = true
 warn_return_any = true
 warn_unreachable = true
 warn_unused_ignores = false
-namespace_packages = false
-enable_incomplete_feature = ["Unpack"]
+namespace_packages = true
+explicit_package_bases = true
 disable_error_code = ["import-not-found", "import-untyped", "no-any-return"]
 
 [[tool.mypy.overrides]]
@@ -172,9 +168,6 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"mdpp.data" = ["**/*.mdp"]
 
 [tool.pytest.ini_options]
 addopts = "-v -s --tb=short --strict-markers --color=yes -n auto"

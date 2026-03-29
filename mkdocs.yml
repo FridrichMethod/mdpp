@@ -41,13 +41,12 @@ nav:
       - Analysis: guide/analysis.md
       - Plots: guide/plots.md
       - Preparation: guide/prep.md
-      - Scripts & Data: guide/scripts.md
+      - Scripts: guide/scripts.md
   - API Reference:
       - Core: api/core.md
       - Analysis: api/analysis.md
       - Plots: api/plots.md
       - Preparation: api/prep.md
-      - Data: api/scripts.md
   - Resources: resources.md
 
 markdown_extensions:

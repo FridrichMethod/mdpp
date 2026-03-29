@@ -1,29 +1,16 @@
-# Scripts & Data
+# Scripts
 
 ## MDP Templates
 
-mdpp bundles GROMACS MDP parameter templates as package data, installed alongside the Python code via `pip install mdpp`.
-
-### CLI Usage
+The GROMACS MDP templates live in the repository under `scripts/gromacs/mdps/`.
+They are organized by force field:
 
 ```bash
-# Copy MDP template files to a working directory
-mdpp mdps ./my_simulation/
-```
+# CHARMM-style templates
+cp scripts/gromacs/mdps/charmm/*.mdp ./my_simulation/
 
-### Python API
-
-```python
-from mdpp.data import list_mdp_templates, get_mdp_template, copy_mdp_files
-
-# List available MDP files
-templates = list_mdp_templates()
-
-# Read MDP content (accepts short name, with/without extension)
-content = get_mdp_template("step5_production")
-
-# Copy all MDP files to a directory
-copy_mdp_files("./my_simulation/")
+# AMBER-style templates
+cp scripts/gromacs/mdps/amber/*.mdp ./my_simulation/
 ```
 
 ### Available Templates
@@ -40,7 +27,9 @@ Five standard GROMACS simulation stages:
 
 ## Scripts
 
-All shell scripts live in the top-level `scripts/` directory and are **not** included in the pip-installed package. Copy or symlink them into your MD working directories as needed.
+All shell scripts live in the top-level `scripts/` directory and are **not** included in
+the pip-installed package. Copy or symlink them into your MD working directories as
+needed.
 
 ### GROMACS
 
@@ -63,8 +52,8 @@ All shell scripts live in the top-level `scripts/` directory and are **not** inc
 |---|---|
 | `check_status.sh` | Monitor simulation job status |
 | `restart.sh` | Restart from checkpoint |
-| `mdextend.sh` | Extend simulation time |
-| `mdexport.sh` | Export trajectory |
+| `extend.sh` | Extend simulation time |
+| `export.sh` | Export trajectory |
 
 #### MD Run (`scripts/gromacs/mdrun/`)
 
@@ -77,6 +66,7 @@ All shell scripts live in the top-level `scripts/` directory and are **not** inc
 
 #### Other Categories
 
+- **`scripts/gromacs/mdps/`** -- force-field-specific MDP templates
 - **`scripts/gromacs/compilation/`** -- GROMACS build scripts (generic + Sherlock HPC)
 - **`scripts/gromacs/mdenv/`** -- Environment setup scripts (Sherlock)
 - **`scripts/gromacs/postprocessing/`** -- Trajectory postprocessing
