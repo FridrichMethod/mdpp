@@ -79,6 +79,14 @@ pip install -e ".[docs]"
 mkdocs serve
 ```
 
+## Post-Edit Validation
+
+After modifying code, always validate in the `mdpp` conda environment before considering the task complete.
+
+- Prefer `conda run -n mdpp ...` for non-interactive checks.
+- Run `conda run -n mdpp pre-commit run --all-files` as the standard post-edit gate. This is the default way to cover linting and type checking, rather than relying only on standalone `ruff` or `mypy`.
+- Also run the most relevant `pytest` scope for the files you changed. Use full `pytest` when the change affects multiple areas.
+
 ## Coding Conventions
 
 ### Python Style

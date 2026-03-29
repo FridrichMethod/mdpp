@@ -28,6 +28,12 @@ ruff format src/ tests/            # format
 pre-commit run --all-files         # full check suite
 ```
 
+After modifying code, always run validation before considering the task complete:
+
+- Use the `mdpp` conda environment for checks, preferably with `conda run -n mdpp ...`.
+- Run `conda run -n mdpp pre-commit run --all-files` as the standard post-edit gate. Treat this as the required lint/type-check check instead of running only standalone `ruff` or `mypy`.
+- Also run the most relevant `pytest` scope for the files you changed. Run full `pytest` when the change is broad or cross-cutting.
+
 ## Package Layout
 
 Source is under `src/mdpp/` using the src-layout convention:

@@ -54,3 +54,10 @@ pytest                             # run tests (auto-parallelized)
 pre-commit run --all-files         # lint + format + type-check
 mkdocs serve                       # preview docs (needs pip install -e ".[docs]")
 ```
+
+## Post-Edit Validation
+
+- After modifying code, always validate before considering the task complete.
+- Use the `mdpp` conda environment for checks; prefer `conda run -n mdpp ...` for non-interactive commands.
+- Run `conda run -n mdpp pre-commit run --all-files` as the standard post-edit gate. Treat this as the default lint/type-check step instead of running only standalone `ruff` or `mypy`.
+- Also run the most relevant `pytest` scope for the files you changed. Use full `pytest` when the change is broad.
