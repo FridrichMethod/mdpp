@@ -13,6 +13,12 @@ conda create -n mdpp python=3.12 -y && conda activate mdpp
 bash setup.sh
 ```
 
+## Environment Usage
+
+- Use the `mdpp` conda environment for any Python command that relies on project dependencies.
+- When running non-interactively, prefer `conda run -n mdpp ...` instead of creating a separate virtualenv or using `uv run`.
+- Treat the workspace `.venv/` and `uv.lock` as agent-created artifacts to avoid for this repository unless the user explicitly asks for `uv`.
+
 ## Verification
 
 ```bash

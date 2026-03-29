@@ -10,6 +10,30 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 
 
+def get_highlight_bonds(
+    mol: Chem.rdchem.Mol,
+    atoms: Sequence[int],
+    pattern: Chem.rdchem.Mol,
+) -> list[int]:
+    """Return molecule bond indices corresponding to a matched pattern.
+
+    Args:
+        mol: Molecule containing the matched substructure.
+        atoms: Molecule atom indices matching the pattern atom order.
+        pattern: Pattern whose bonds should be mapped onto ``mol``.
+
+    Returns:
+        Bond indices in ``mol`` corresponding to bonds in ``pattern``.
+    """
+    return [
+        mol.GetBondBetweenAtoms(
+            atoms[bond.GetBeginAtomIdx()],
+            atoms[bond.GetEndAtomIdx()],
+        ).GetIdx()
+        for bond in pattern.GetBonds()
+    ]
+
+
 def draw_mol(
     mol: Chem.rdchem.Mol,
     *,
@@ -30,28 +54,27 @@ def draw_mol(
     Returns:
         A PIL image.
     """
-    Chem.rdDepictor.SetPreferCoordGen(True)
+    drawable_mol = Chem.Mol(mol)
 
     highlight_atoms: list[int] = []
     highlight_bonds: list[int] = []
 
     if pattern is not None:
-        AllChem.Compute2DCoords(pattern)
-        if mol.HasSubstructMatch(pattern):
-            AllChem.GenerateDepictionMatching2DStructure(mol, pattern)
-            highlight_atoms = list(mol.GetSubstructMatch(pattern))
-            highlight_bonds = [
-                mol.GetBondBetweenAtoms(
-                    highlight_atoms[bond.GetBeginAtomIdx()],
-                    highlight_atoms[bond.GetEndAtomIdx()],
-                ).GetIdx()
-                for bond in pattern.GetBonds()
-            ]
+        drawable_pattern = Chem.Mol(pattern)
+        AllChem.Compute2DCoords(drawable_pattern)
+        if drawable_mol.HasSubstructMatch(drawable_pattern):
+            AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)
+            highlight_atoms = list(drawable_mol.GetSubstructMatch(drawable_pattern))
+            highlight_bonds = get_highlight_bonds(
+                drawable_mol,
+                highlight_atoms,
+                drawable_pattern,
+            )
         else:
             warn("The pattern is not found in the molecule.", stacklevel=2)
 
     return Draw.MolToImage(
-        mol,
+        drawable_mol,
         size=img_size,
         highlightAtoms=highlight_atoms if highlight else [],
         highlightBonds=highlight_bonds,
@@ -83,34 +106,31 @@ def draw_mols(
     Returns:
         A PIL image, or None if drawing fails due to layout constraints.
     """
-    Chem.rdDepictor.SetPreferCoordGen(True)
+    drawable_mols = [Chem.Mol(mol) for mol in mols]
 
     highlight_atom_lists: list[list[int]] | None = None
     highlight_bond_lists: list[list[int]] | None = None
 
     if pattern is not None:
-        AllChem.Compute2DCoords(pattern)
+        drawable_pattern = Chem.Mol(pattern)
+        AllChem.Compute2DCoords(drawable_pattern)
         highlight_atom_lists = []
         highlight_bond_lists = []
-        for mol in mols:
-            if mol.HasSubstructMatch(pattern):
-                AllChem.GenerateDepictionMatching2DStructure(mol, pattern)
-                atoms = list(mol.GetSubstructMatch(pattern))
+        for drawable_mol in drawable_mols:
+            if drawable_mol.HasSubstructMatch(drawable_pattern):
+                AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)
+                atoms = list(drawable_mol.GetSubstructMatch(drawable_pattern))
                 highlight_atom_lists.append(atoms)
-                highlight_bond_lists.append([
-                    mol.GetBondBetweenAtoms(
-                        atoms[bond.GetBeginAtomIdx()],
-                        atoms[bond.GetEndAtomIdx()],
-                    ).GetIdx()
-                    for bond in pattern.GetBonds()
-                ])
+                highlight_bond_lists.append(
+                    get_highlight_bonds(drawable_mol, atoms, drawable_pattern)
+                )
             else:
                 highlight_atom_lists.append([])
                 highlight_bond_lists.append([])
 
     try:
         img = Draw.MolsToGridImage(
-            mols,
+            drawable_mols,
             molsPerRow=mols_per_row,
             subImgSize=sub_img_size,
             legends=legends,
