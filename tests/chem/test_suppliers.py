@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from mdpp.chem.suppliers import MolSupplier
@@ -30,10 +32,11 @@ class TestMolSupplier:
         with pytest.raises(TypeError, match="Multithreading is not supported"):
             MolSupplier("molecules.mae", multithreaded=True)
 
-    def test_skips_empty_molecule(self, tmp_path):
+    def test_skips_empty_molecule(self, tmp_path, caplog):
         smi_file = tmp_path / "test.smi"
         smi_file.write_text("INVALID_SMILES\nCCO ethanol\n")
         supplier = MolSupplier(str(smi_file))
-        with pytest.warns(RuntimeWarning, match="Empty molecule is skipped"):
+        with caplog.at_level(logging.WARNING, logger="mdpp.chem.suppliers"):
             mol = next(supplier)
         assert mol is not None
+        assert "Empty molecule is skipped." in caplog.text

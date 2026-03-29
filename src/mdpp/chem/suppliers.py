@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import gzip
+import logging
 import os
 from typing import Any, Self
-from warnings import warn
 
 from rdkit import Chem
 
 from mdpp._types import StrPath
+
+logger = logging.getLogger(__name__)
 
 
 class MolSupplier:
@@ -114,4 +116,4 @@ class MolSupplier:
         while True:
             if (mol := next(self.mol_supplier)) is not None:
                 return mol
-            warn("Empty molecule is skipped.", RuntimeWarning, stacklevel=2)
+            logger.warning("Empty molecule is skipped.")

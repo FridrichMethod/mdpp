@@ -21,6 +21,8 @@ from mdpp.chem.similarity import (
     calc_similarities,
 )
 
+logger = logging.getLogger(__name__)
+
 FP_GENERATORS: dict[str, Callable[[Chem.rdchem.Mol], FingerPrint]] = {
     "morgan": AllChem.GetMorganGenerator(radius=2, fpSize=1024).GetFingerprint,
     "ecfp2": AllChem.GetMorganGenerator(radius=1, fpSize=1024).GetFingerprint,
@@ -124,12 +126,12 @@ def cluster_fps(
         clusters = tuple((i,) for i in range(n))
         return FingerprintClusteringResult(clusters=clusters, n_clusters=n)
 
-    logging.info("Calculating similarities...")
+    logger.info("Calculating similarities...")
     similarities = np.concatenate([
         calc_bulk_sim(fps[i], fps[:i], similarity_metric=similarity_metric) for i in trange(1, n)
     ])
 
-    logging.info("Clustering...")
+    logger.info("Clustering...")
     return _butina_cluster(1 - similarities, n, cutoff)
 
 
@@ -169,8 +171,8 @@ def cluster_fps_parallel(
         clusters = tuple((i,) for i in range(n))
         return FingerprintClusteringResult(clusters=clusters, n_clusters=n)
 
-    logging.info("Calculating similarities...")
+    logger.info("Calculating similarities...")
     similarities = calc_similarities(fps, PARALLEL_SIM_KERNELS[similarity_metric])
 
-    logging.info("Clustering...")
+    logger.info("Clustering...")
     return _butina_cluster(1 - similarities, n, cutoff)

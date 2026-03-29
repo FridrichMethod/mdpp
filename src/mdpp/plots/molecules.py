@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
-from warnings import warn
 
 from PIL import Image
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
+
+logger = logging.getLogger(__name__)
 
 
 def get_highlight_bonds(
@@ -71,7 +73,7 @@ def draw_mol(
                 drawable_pattern,
             )
         else:
-            warn("The pattern is not found in the molecule.", stacklevel=2)
+            logger.warning("The pattern is not found in the molecule.")
 
     return Draw.MolToImage(
         drawable_mol,
@@ -138,10 +140,8 @@ def draw_mols(
             highlightBondLists=highlight_bond_lists,
         )
     except RuntimeError:
-        warn(
-            "molsPerRow is too small to draw a large number of molecules, try to increase it.",
-            RuntimeWarning,
-            stacklevel=2,
+        logger.warning(
+            "molsPerRow is too small to draw a large number of molecules; try to increase it."
         )
         return None
 
