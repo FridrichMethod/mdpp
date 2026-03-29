@@ -5,6 +5,7 @@ from mdpp.plots.fes import plot_fes
 from mdpp.plots.matrix import plot_dccm
 from mdpp.plots.molecules import draw_mol, draw_mols, get_highlight_bonds
 from mdpp.plots.scatter import plot_projection, plot_ramachandran
+from mdpp.plots.three_d import make_atom_labels_3d, view_mol_3d, view_traj_3d
 from mdpp.plots.timeseries import (
     plot_distances,
     plot_energy,
@@ -22,6 +23,7 @@ __all__ = [
     "draw_mol",
     "draw_mols",
     "get_highlight_bonds",
+    "make_atom_labels_3d",
     "plot_contact_map",
     "plot_dccm",
     "plot_distances",
@@ -36,4 +38,6 @@ __all__ = [
     "plot_rmsd",
     "plot_rmsf",
     "plot_sasa",
+    "view_mol_3d",
+    "view_traj_3d",
 ]

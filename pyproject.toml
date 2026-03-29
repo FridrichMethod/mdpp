@@ -21,6 +21,7 @@ dependencies = [
     "mdtraj",
     "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "numba",
+    "nglview",
     "numpy",
     "pandas",
     "panedr",
@@ -30,6 +31,7 @@ dependencies = [
     "polars",
     "prody",
     "propka",
+    "py3dmol",
     "rdkit",
     "scikit-learn",
     "scipy",
@@ -42,7 +44,7 @@ dependencies = [
 version = { attr = "mdpp.__version__" }
 
 [project.optional-dependencies]
-viz = ["gmxvg", "jupyter", "py3dmol", "nglview"]
+viz = ["gmxvg", "jupyter"]
 dev = [
     "pre-commit",
     "pytest",
