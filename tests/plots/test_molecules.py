@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -11,6 +13,7 @@ from PIL import Image
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from mdpp.plots import molecules as molecules_module
 from mdpp.plots.molecules import draw_mol, draw_mols, get_highlight_bonds
 
 
@@ -50,9 +53,43 @@ class TestDrawMol:
         img = draw_mol(aspirin, pattern=pattern)
         assert isinstance(img, Image.Image)
 
-    def test_highlight_disabled(self, ethanol):
-        img = draw_mol(ethanol, highlight=False)
+    def test_highlight_disabled_with_pattern(self, aspirin):
+        pattern = Chem.MolFromSmarts("c1ccccc1")
+        img = draw_mol(aspirin, pattern=pattern, highlight=False)
         assert isinstance(img, Image.Image)
+
+    def test_highlight_disabled_still_aligns_to_pattern(self, aspirin, monkeypatch):
+        pattern = Chem.MolFromSmarts("c1ccccc1")
+        align_mock = Mock(wraps=AllChem.GenerateDepictionMatching2DStructure)
+        monkeypatch.setattr(AllChem, "GenerateDepictionMatching2DStructure", align_mock)
+
+        img = draw_mol(aspirin, pattern=pattern, highlight=False)
+
+        assert isinstance(img, Image.Image)
+        align_mock.assert_called_once()
+
+    def test_highlight_color_is_applied(self, aspirin, monkeypatch):
+        highlight_color = (1.0, 0.0, 0.0, 0.5)
+        captured: dict[str, object] = {}
+
+        class _FakeDrawOptions:
+            def setHighlightColour(self, color):
+                captured["color"] = color
+
+        def _fake_build_draw_options():
+            return _FakeDrawOptions()
+
+        monkeypatch.setattr(molecules_module, "build_draw_options", _fake_build_draw_options)
+
+        def _fake_mol_to_image(*_, **__):
+            return Image.new("RGB", (10, 10), "white")
+
+        monkeypatch.setattr(molecules_module.Draw, "MolToImage", _fake_mol_to_image)
+
+        img = draw_mol(aspirin, highlight_color=highlight_color)
+
+        assert isinstance(img, Image.Image)
+        assert captured["color"] == highlight_color
 
     def test_does_not_add_conformers_to_input(self, ethanol):
         assert ethanol.GetNumConformers() == 0
@@ -111,6 +148,21 @@ class TestDrawMols:
     def test_with_pattern(self, aspirin):
         pattern = Chem.MolFromSmarts("c1ccccc1")
         img = draw_mols([aspirin, aspirin], pattern=pattern)
+        assert isinstance(img, Image.Image)
+
+    def test_highlight_disabled_still_aligns_to_pattern(self, aspirin, monkeypatch):
+        pattern = Chem.MolFromSmarts("c1ccccc1")
+        align_mock = Mock(wraps=AllChem.GenerateDepictionMatching2DStructure)
+        monkeypatch.setattr(AllChem, "GenerateDepictionMatching2DStructure", align_mock)
+
+        img = draw_mols([aspirin, aspirin], pattern=pattern, highlight=False)
+
+        assert isinstance(img, Image.Image)
+        assert align_mock.call_count == 2
+
+    def test_unmatched_pattern_without_name_is_allowed(self, ethanol):
+        pattern = Chem.MolFromSmarts("c1ccccc1")
+        img = draw_mols([ethanol], pattern=pattern)
         assert isinstance(img, Image.Image)
 
     def test_does_not_modify_input_molecules(self, ethanol, aspirin):

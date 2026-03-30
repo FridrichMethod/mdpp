@@ -55,7 +55,7 @@ def draw_mol(
     pattern: Chem.rdchem.Mol | None = None,
     img_size: tuple[int, int] = (300, 300),
     highlight: bool = True,
-    alpha: float = 0.5,
+    highlight_color: tuple[float, float, float, float] = _DEFAULT_HIGHLIGHT_COLOR,
 ) -> Image.Image:
     """Draw a single molecule as a PIL image.
 
@@ -64,12 +64,13 @@ def draw_mol(
         pattern: SMARTS pattern to align and highlight as a substructure.
         img_size: Image dimensions in pixels ``(width, height)``.
         highlight: Highlight matched substructure atoms.
-        alpha: Transparency of the highlight colour.
+        highlight_color: RGBA highlight colour used for matched atoms and bonds.
 
     Returns:
         A PIL image.
     """
     drawable_mol = Chem.Mol(mol)
+    AllChem.Compute2DCoords(drawable_mol)
 
     highlight_atoms: list[int] = []
     highlight_bonds: list[int] = []
@@ -88,12 +89,15 @@ def draw_mol(
         else:
             logger.warning("The pattern is not found in the molecule.")
 
+    draw_options = build_draw_options()
+    draw_options.setHighlightColour(highlight_color)
     return Draw.MolToImage(
         drawable_mol,
         size=img_size,
+        fitImage=True,
+        options=draw_options,
         highlightAtoms=highlight_atoms if highlight else [],
-        highlightBonds=highlight_bonds,
-        highlightColor=(1, 0, 0, alpha),
+        highlightBonds=highlight_bonds if highlight else [],
     )
 
 
@@ -106,6 +110,7 @@ def draw_mols(
     mols_per_row: int = 8,
     sub_img_size: tuple[int, int] = (300, 300),
     highlight: bool = True,
+    highlight_color: tuple[float, float, float, float] = _DEFAULT_HIGHLIGHT_COLOR,
 ) -> Image.Image | None:
     """Draw a grid of molecules as a PIL image.
 
@@ -117,11 +122,14 @@ def draw_mols(
         mols_per_row: Number of molecules per grid row.
         sub_img_size: Size of each cell in pixels ``(width, height)``.
         highlight: Highlight matched substructure atoms.
+        highlight_color: RGBA highlight colour used for matched atoms and bonds.
 
     Returns:
         A PIL image, or None if drawing fails due to layout constraints.
     """
     drawable_mols = [Chem.Mol(mol) for mol in mols]
+    for drawable_mol in drawable_mols:
+        AllChem.Compute2DCoords(drawable_mol)
 
     highlight_atom_lists: list[list[int]] | None = None
     highlight_bond_lists: list[list[int]] | None = None
@@ -142,15 +150,19 @@ def draw_mols(
             else:
                 highlight_atom_lists.append([])
                 highlight_bond_lists.append([])
+                logger.warning("The pattern is not found in the molecule.")
 
+    draw_options = build_draw_options()
+    draw_options.setHighlightColour(highlight_color)
     try:
         img = Draw.MolsToGridImage(
             drawable_mols,
             molsPerRow=mols_per_row,
             subImgSize=sub_img_size,
             legends=legends,
+            drawOptions=draw_options,
             highlightAtomLists=highlight_atom_lists if highlight else None,
-            highlightBondLists=highlight_bond_lists,
+            highlightBondLists=highlight_bond_lists if highlight else None,
         )
     except RuntimeError:
         logger.warning(
