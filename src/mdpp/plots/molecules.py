@@ -8,8 +8,21 @@ from collections.abc import Sequence
 from PIL import Image
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
+from rdkit.Chem.Draw import rdMolDraw2D
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_HIGHLIGHT_COLOR = (0.0, 0.45, 0.85, 0.6)
+
+
+def build_draw_options() -> rdMolDraw2D.MolDrawOptions:
+    """Create ACS 1996-style drawing options for crisp medicinal chemistry figures."""
+    options = rdMolDraw2D.MolDrawOptions()
+    rdMolDraw2D.SetACS1996Mode(options, 1.5)
+    options.useBWAtomPalette()
+    options.bondLineWidth = 1.2
+
+    return options
 
 
 def get_highlight_bonds(
