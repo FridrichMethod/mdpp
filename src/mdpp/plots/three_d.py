@@ -10,14 +10,6 @@ import py3Dmol
 from rdkit import Chem
 
 _PY3DMOL_POSITION_KEYS = ("x", "y", "z")
-_DEFAULT_TRAJ_REPRESENTATIONS: tuple[dict[str, object], ...] = (
-    {
-        "type": "cartoon",
-        "selection": "protein",
-        "quality": "high",
-    },
-    {"type": "licorice", "selection": "not protein and not water"},
-)
 
 
 def _get_selected_conformer(
@@ -185,9 +177,9 @@ def view_traj_3d(
 
     Args:
         traj: MDTraj trajectory to visualize.
-        representations: Optional custom representations. If omitted, the
-            built-in defaults are used. If provided, they fully replace the
-            defaults.
+        representations: Optional custom representations. If omitted, nglview's
+            default display settings are used. If provided, they fully replace
+            the default display.
 
     Returns:
         A configured nglview widget.
@@ -196,15 +188,11 @@ def view_traj_3d(
         ValueError: If any representation dictionary is missing ``type``.
     """
     widget = nglview.show_mdtraj(traj)
-    widget.clear_representations()
+    if representations is None:
+        return widget
 
-    # Copy each representation dict so later customization cannot mutate the defaults.
-    selected_representations = (
-        [dict(representation) for representation in _DEFAULT_TRAJ_REPRESENTATIONS]
-        if representations is None
-        else [dict(representation) for representation in representations]
-    )
-    for representation in selected_representations:
+    widget.clear_representations()
+    for representation in representations:
         if "type" not in representation:
             raise ValueError("Each trajectory representation must include a 'type' field.")
 

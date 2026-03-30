@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import mdtraj as md
 import nglview
 import py3Dmol
@@ -113,6 +115,20 @@ class TestViewTraj3D:
     def test_returns_ngl_widget(self, two_atom_trajectory: md.Trajectory):
         widget = view_traj_3d(two_atom_trajectory)
         assert isinstance(widget, nglview.NGLWidget)
+
+    def test_uses_nglview_defaults_when_representations_omitted(
+        self,
+        two_atom_trajectory: md.Trajectory,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        fake_widget = Mock()
+        monkeypatch.setattr(nglview, "show_mdtraj", lambda _traj: fake_widget)
+
+        widget = view_traj_3d(two_atom_trajectory)
+
+        assert widget is fake_widget
+        fake_widget.clear_representations.assert_not_called()
+        fake_widget.add_representation.assert_not_called()
 
     def test_empty_representations_are_allowed(self, two_atom_trajectory: md.Trajectory):
         widget = view_traj_3d(two_atom_trajectory, representations=[])
