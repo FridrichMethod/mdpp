@@ -114,6 +114,10 @@ class TestViewTraj3D:
         widget = view_traj_3d(two_atom_trajectory)
         assert isinstance(widget, nglview.NGLWidget)
 
+    def test_empty_representations_are_allowed(self, two_atom_trajectory: md.Trajectory):
+        widget = view_traj_3d(two_atom_trajectory, representations=[])
+        assert isinstance(widget, nglview.NGLWidget)
+
     def test_accepts_custom_representations(self, two_atom_trajectory: md.Trajectory):
         widget = view_traj_3d(
             two_atom_trajectory,
