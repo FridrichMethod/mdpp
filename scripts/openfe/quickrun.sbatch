@@ -71,9 +71,9 @@ filename=$(basename "${FILE}" .json)
 run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${run_dir}"
 
-# Remove stale result JSON from previous failed runs so openfe can write to -o.
-# Checkpoint data in -d is preserved, allowing openfe to resume.
+# Remove stale result JSON so openfe can write to -o.
+# Checkpoint data in -d is preserved for --resume.
 rm -f "${run_dir}/${filename}.json"
 
 apptainer run --nv "${OPENFE_CONTAINER}" openfe quickrun \
-    "${FILE}" -o "${run_dir}/${filename}.json" -d "${run_dir}"
+    --resume "${FILE}" -o "${run_dir}/${filename}.json" -d "${run_dir}"
