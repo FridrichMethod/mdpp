@@ -4,7 +4,20 @@ set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKING_DIR="."
-BATCH_SIZE=1
+N_REPLICAS=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n | --n-replicas)
+            N_REPLICAS=$2
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 TRANSFORMATION_DIR="${WORKING_DIR}/transformations"
 RESULTS_DIR="${WORKING_DIR}/results"
@@ -14,24 +27,19 @@ if [[ ! -d "${TRANSFORMATION_DIR}" ]]; then
     exit 1
 fi
 
-mkdir -p "${RESULTS_DIR}"
+mkdir -p logs "${RESULTS_DIR}"
 
 shopt -s nullglob
 
-FILES=()
-for file in "${TRANSFORMATION_DIR}"/*.json; do
-    if ((BATCH_SIZE <= 0)); then
-        FILES+=("${file}")
-        continue
-    fi
+ARRAY_FLAG=(--array="0-$((N_REPLICAS - 1))")
 
-    FILES+=("${file}")
-    if ((${#FILES[@]} >= BATCH_SIZE)); then
-        sbatch "${SCRIPTS_DIR}/quickrun.sbatch" "${FILES[@]}" -o "${RESULTS_DIR}"
-        FILES=()
-    fi
+submitted=0
+for file in "${TRANSFORMATION_DIR}"/*.json; do
+    sbatch "${ARRAY_FLAG[@]}" "${SCRIPTS_DIR}/quickrun.sbatch" "${file}" -o "${RESULTS_DIR}" -n "${N_REPLICAS}"
+    submitted=$((submitted + 1))
 done
 
-if ((${#FILES[@]} > 0)); then
-    sbatch "${SCRIPTS_DIR}/quickrun.sbatch" "${FILES[@]}" -o "${RESULTS_DIR}"
+if ((submitted == 0)); then
+    echo "No .json files found in ${TRANSFORMATION_DIR}" >&2
+    exit 1
 fi

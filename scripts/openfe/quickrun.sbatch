@@ -13,17 +13,18 @@
 #SBATCH --constraint="GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S|GPU_SKU:V100_PCIE|GPU_SKU:V100S_PCIE|GPU_SKU:V100_SXM2"
 #SBATCH --time=2-00:00:00
 
-mkdir -p logs
+set -euo pipefail
 
 OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif
 
 usage() {
-    echo "Usage: sbatch $0 <transformation.json...> -o|--output-dir <results_dir>" >&2
+    echo "Usage: sbatch [--array=0-N] $0 <transformation.json> -o|--output-dir <results_dir> [-n|--n-replicas <N>]" >&2
     exit 1
 }
 
 RESULTS_DIR=""
-FILES=()
+N_REPLICAS=1
+FILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,38 +33,33 @@ while [[ $# -gt 0 ]]; do
             RESULTS_DIR=$2
             shift 2
             ;;
+        -n|--n-replicas)
+            [[ $# -lt 2 ]] && usage
+            N_REPLICAS=$2
+            shift 2
+            ;;
         *)
-            FILES+=("$1")
+            [[ -n "${FILE}" ]] && usage
+            FILE=$1
             shift
             ;;
     esac
 done
 
-[[ -z "${RESULTS_DIR}" || ${#FILES[@]} -eq 0 ]] && usage
+[[ -z "${RESULTS_DIR}" || -z "${FILE}" ]] && usage
 
-mkdir -p "${RESULTS_DIR}"
-
-export CUDA_MPS_PIPE_DIRECTORY="/tmp/nvidia-mps-${SLURM_JOB_ID:-$$}"
-export CUDA_MPS_LOG_DIRECTORY="/tmp/nvidia-mps-${SLURM_JOB_ID:-$$}"
-mkdir -p "${CUDA_MPS_PIPE_DIRECTORY}" "${CUDA_MPS_LOG_DIRECTORY}"
-if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
-    nvidia-cuda-mps-control -d
-    trap 'echo quit | nvidia-cuda-mps-control' EXIT
+if [[ ! -f "${FILE}" ]]; then
+    echo "Missing transformation: ${FILE}" >&2
+    exit 1
+fi
+if [[ "${FILE}" != *.json ]]; then
+    echo "Not a json file: ${FILE}" >&2
+    exit 1
 fi
 
-for file in "${FILES[@]}"; do
-    if [[ ! -f "${file}" ]]; then
-        echo "Missing transformation: ${file}" >&2
-        exit 1
-    fi
-    if [[ "${file}" != *.json ]]; then
-        echo "Not a json file: ${file}" >&2
-        exit 1
-    fi
-    filename=$(basename "${file}" .json)
-    mkdir -p "${RESULTS_DIR}/${filename}"
-    apptainer run --nv "${OPENFE_CONTAINER}" openfe quickrun \
-        "${file}" -o "${RESULTS_DIR}/${filename}/${filename}.json" -d "${RESULTS_DIR}/${filename}" &
-done
+filename=$(basename "${FILE}" .json)
+run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID}"
+mkdir -p "${run_dir}"
 
-wait
+apptainer run --nv "${OPENFE_CONTAINER}" openfe quickrun \
+    "${FILE}" -o "${run_dir}/${filename}.json" -d "${run_dir}"
