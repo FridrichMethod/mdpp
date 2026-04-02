@@ -3,9 +3,8 @@
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT_DIR="$(cd "${SCRIPTS_DIR}/../.." && pwd)"
-WORKING_DIR="${PROJECT_ROOT_DIR}/results/1x2h"
-BATCH_SIZE=2
+WORKING_DIR="."
+BATCH_SIZE=1
 
 TRANSFORMATION_DIR="${WORKING_DIR}/transformations"
 RESULTS_DIR="${WORKING_DIR}/results"

@@ -2,19 +2,20 @@
 #SBATCH --job-name=openfe
 #SBATCH --output=logs/openfe_%j.out
 #SBATCH --error=logs/openfe_%j.err
-#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-type=FAIL
 #SBATCH --mail-user=zhaoyangli@stanford.edu
-#SBATCH --partition=btrippe,stat,bioe,possu,gpu
+#SBATCH --partition=gpu,owners
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=6
 #SBATCH --gpus=1
+#SBATCH --mem=12G
+#SBATCH --constraint="GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S|GPU_SKU:V100_PCIE|GPU_SKU:V100S_PCIE|GPU_SKU:V100_SXM2"
 #SBATCH --time=2-00:00:00
 
 mkdir -p logs
 
-OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_1.8.1-apptainer.sif
+OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif
 
 usage() {
     echo "Usage: sbatch $0 <transformation.json...> -o|--output-dir <results_dir>" >&2
