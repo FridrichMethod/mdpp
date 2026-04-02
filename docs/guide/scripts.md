@@ -83,5 +83,39 @@ SLURM batch scripts are in `sherlock/` subdirectories within each category:
 
 ### OpenFE
 
-- `scripts/openfe/quickrun.sh` -- Batch submission wrapper for OpenFE transformations
-- `scripts/openfe/quickrun.sbatch` -- Apptainer-based OpenFE execution on Sherlock
+**Requires OpenFE >= 1.10.0** for checkpoint-based resumption (`--resume`).
+
+| Script | Description |
+|---|---|
+| `quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs |
+| `quickrun.sbatch` | SLURM batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
+| `restart.sh` | Resubmit only failed/incomplete replicas (skips queued jobs) |
+
+#### Quick start
+
+```bash
+# Copy scripts to your working directory (alongside transformations/)
+cp scripts/openfe/{quickrun.sh,quickrun.sbatch,restart.sh} /path/to/workdir/
+cd /path/to/workdir/
+
+# Submit with 3 independent repeats per transformation
+./quickrun.sh -r 3
+
+# After failures or preemption, resubmit only incomplete replicas
+./restart.sh
+```
+
+#### Output structure
+
+```
+results/<transformation_name>/replica_0/
+results/<transformation_name>/replica_1/
+results/<transformation_name>/replica_2/
+```
+
+#### Preemption handling
+
+Jobs on the `owners` partition are automatically requeued when preempted.
+`quickrun.sbatch` uses `--resume` so requeued jobs continue from the last
+checkpoint instead of starting over. CUDA MPS is started automatically to
+work around Sherlock's `Exclusive_Process` GPU mode.

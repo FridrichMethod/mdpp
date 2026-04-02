@@ -47,6 +47,21 @@ Source is under `src/mdpp/` using the src-layout convention:
 
 Shell scripts (analysis wrappers, runtime helpers, build scripts, etc.) live in the top-level `scripts/` directory (not packaged).
 
+### OpenFE Scripts (`scripts/openfe/`)
+
+SLURM submission scripts for running OpenFE RBFE transformations on Sherlock.
+**Requires OpenFE >= 1.10.0** for `--resume` checkpoint support.
+
+| Script | Purpose |
+|---|---|
+| `quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs (`-r N` for repeats) |
+| `quickrun.sbatch` | Batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
+| `restart.sh` | Resubmit only failed/incomplete replicas (skips queued jobs) |
+
+- CUDA MPS is required for Sherlock's `Exclusive_Process` GPU mode (openmmtools needs multiple CUDA contexts).
+- `--resume` enables checkpoint-based resumption after preemption on `owners` partition.
+- Output goes to `results/<name>/replica_<id>/`.
+
 Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring the source tree.
 
 ## Mandatory Conventions
