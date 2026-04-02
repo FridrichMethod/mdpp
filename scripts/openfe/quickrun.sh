@@ -35,7 +35,7 @@ ARRAY_FLAG=(--array="0-$((REPEATS - 1))")
 
 submitted=0
 for file in "${TRANSFORMATION_DIR}"/*.json; do
-    sbatch "${ARRAY_FLAG[@]}" "${SCRIPTS_DIR}/quickrun.sbatch" "${file}" -o "${RESULTS_DIR}" -r "${REPEATS}"
+    sbatch "${ARRAY_FLAG[@]}" "${SCRIPTS_DIR}/quickrun.sbatch" "${file}" -o "${RESULTS_DIR}"
     submitted=$((submitted + 1))
 done
 
