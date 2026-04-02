@@ -4,12 +4,12 @@ set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKING_DIR="."
-N_REPLICAS=1
+REPEATS=1
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -n | --n-replicas)
-            N_REPLICAS=$2
+        -r | --repeats)
+            REPEATS=$2
             shift 2
             ;;
         *)
@@ -31,11 +31,11 @@ mkdir -p logs "${RESULTS_DIR}"
 
 shopt -s nullglob
 
-ARRAY_FLAG=(--array="0-$((N_REPLICAS - 1))")
+ARRAY_FLAG=(--array="0-$((REPEATS - 1))")
 
 submitted=0
 for file in "${TRANSFORMATION_DIR}"/*.json; do
-    sbatch "${ARRAY_FLAG[@]}" "${SCRIPTS_DIR}/quickrun.sbatch" "${file}" -o "${RESULTS_DIR}" -n "${N_REPLICAS}"
+    sbatch "${ARRAY_FLAG[@]}" "${SCRIPTS_DIR}/quickrun.sbatch" "${file}" -o "${RESULTS_DIR}" -r "${REPEATS}"
     submitted=$((submitted + 1))
 done
 

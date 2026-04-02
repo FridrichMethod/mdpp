@@ -18,12 +18,12 @@ set -euo pipefail
 OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif
 
 usage() {
-    echo "Usage: sbatch [--array=0-N] $0 <transformation.json> -o|--output-dir <results_dir> [-n|--n-replicas <N>]" >&2
+    echo "Usage: sbatch [--array=0-N] $0 <transformation.json> -o|--output-dir <results_dir> [-r|--repeats <N>]" >&2
     exit 1
 }
 
 RESULTS_DIR=""
-N_REPLICAS=1
+REPEATS=1
 FILE=""
 
 while [[ $# -gt 0 ]]; do
@@ -33,9 +33,9 @@ while [[ $# -gt 0 ]]; do
             RESULTS_DIR=$2
             shift 2
             ;;
-        -n|--n-replicas)
+        -r|--repeats)
             [[ $# -lt 2 ]] && usage
-            N_REPLICAS=$2
+            REPEATS=$2
             shift 2
             ;;
         *)
