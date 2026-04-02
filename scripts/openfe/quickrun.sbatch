@@ -57,6 +57,16 @@ if [[ "${FILE}" != *.json ]]; then
     exit 1
 fi
 
+# Start CUDA MPS so that multiple CUDA contexts (needed by openmmtools
+# ContextCache) can coexist on Exclusive_Process mode GPUs.
+export CUDA_MPS_PIPE_DIRECTORY="/tmp/nvidia-mps-${SLURM_JOB_ID:-$$}"
+export CUDA_MPS_LOG_DIRECTORY="/tmp/nvidia-mps-${SLURM_JOB_ID:-$$}"
+mkdir -p "${CUDA_MPS_PIPE_DIRECTORY}" "${CUDA_MPS_LOG_DIRECTORY}"
+if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
+    nvidia-cuda-mps-control -d
+    trap 'echo quit | nvidia-cuda-mps-control' EXIT
+fi
+
 filename=$(basename "${FILE}" .json)
 run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${run_dir}"
