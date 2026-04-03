@@ -44,7 +44,7 @@ scripts/             # shell scripts (NOT packaged, copy to MD working directori
 │   ├── postprocessing/  # gmx_postprocessing.sh
 │   ├── runtime/         # check_status.sh, restart.sh, extend.sh, export.sh
 │   └── visualization/   # pymol_movie.pml
-└── openfe/              # quickrun.sh, quickrun.sbatch, restart.sh
+└── openfe/              # quickrun.sh, quickrun.sbatch, runtime/check_status.sh
 
 tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/chem/)
 notebooks/           # Jupyter notebooks for interactive analysis

@@ -89,20 +89,21 @@ SLURM batch scripts are in `sherlock/` subdirectories within each category:
 |---|---|
 | `quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs |
 | `quickrun.sbatch` | SLURM batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
-| `restart.sh` | Resubmit only failed/incomplete replicas (skips queued jobs) |
+| `runtime/check_status.sh` | Monitor transformation replicas and report completion status |
 
 #### Quick start
 
 ```bash
 # Copy scripts to your working directory (alongside transformations/)
-cp scripts/openfe/{quickrun.sh,quickrun.sbatch,restart.sh} /path/to/workdir/
+cp scripts/openfe/{quickrun.sh,quickrun.sbatch} /path/to/workdir/
+cp -r scripts/openfe/runtime /path/to/workdir/
 cd /path/to/workdir/
 
 # Submit with 3 independent repeats per transformation
 ./quickrun.sh -r 3
 
-# After failures or preemption, resubmit only incomplete replicas
-./restart.sh
+# Check status of all transformations
+./runtime/check_status.sh
 ```
 
 #### Output structure
