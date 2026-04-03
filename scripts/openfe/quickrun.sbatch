@@ -9,9 +9,13 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=6
 #SBATCH --gpus=1
+#SBATCH --gpu_cmode=shared
 #SBATCH --mem=12G
 #SBATCH --constraint="GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S|GPU_SKU:V100_PCIE|GPU_SKU:V100S_PCIE|GPU_SKU:V100_SXM2"
 #SBATCH --time=2-00:00:00
+
+# Here we enable default mode so that multiple contexts are allowed per device
+# See https://www.sherlock.stanford.edu/docs/user-guide/gpu/#gpu-compute-modes
 
 set -euo pipefail
 
