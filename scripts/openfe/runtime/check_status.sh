@@ -122,10 +122,10 @@ build_active_jobs() {
             printf '%s\t%s\n' "$ajid" "$tname"
         done >"$tmap"
 
-    # Join: transform_name \t task_id \t job_id \t state
+    # Join: transform_name \t task_id \t job_id \t state \t array_job_id
     awk -F'\t' '
         NR==FNR { map[$1]=$2; next }
-        { print map[$1] "\t" $2 "\t" $3 "\t" $4 }
+        { print map[$1] "\t" $2 "\t" $3 "\t" $4 "\t" $1 }
     ' "$tmap" "$raw"
 }
 
@@ -213,16 +213,17 @@ process_one() {
     # Match active Slurm jobs for this transformation + replica.
     local matches
     matches="$(awk -F'\t' -v tn="$tname" -v tid="$replica_id" \
-        '$1 == tn && $2 == tid { print $3 "\t" $4 }' "$active_tsv")"
+        '$1 == tn && $2 == tid { print $3 "\t" $4 "\t" $5 }' "$active_tsv")"
 
-    local count=0 joblist="" jid jst
-    while IFS=$'\t' read -r jid jst; do
+    local count=0 joblist="" jid jst ajid
+    while IFS=$'\t' read -r jid jst ajid; do
         [[ -z "${jid:-}" ]] && continue
         count=$((count + 1))
+        local entry="${jid} (${ajid}_${replica_id}):${jst}"
         if [[ -z "$joblist" ]]; then
-            joblist="${jid}:${jst}"
+            joblist="$entry"
         else
-            joblist="${joblist},${jid}:${jst}"
+            joblist="${joblist},${entry}"
         fi
     done <<<"$matches"
 
