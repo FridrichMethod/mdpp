@@ -195,8 +195,15 @@ process_one() {
     local replica_dir="${results_dir}/${tname}/replica_${replica_id}"
     local result_json="${replica_dir}/${tname}.json"
 
-    # Completed: non-empty result JSON exists.
+    # Completed: non-empty result JSON exists with valid estimates.
     if [[ -s "$result_json" ]]; then
+        if grep -q '"estimate": null' "$result_json" ||
+            grep -q '"uncertainty": null' "$result_json"; then
+            printf '%s\t%s\t%s\t%s\n' \
+                "$replica_dir" "${c_red}failed${c_reset}" "replica_${replica_id}" \
+                "result JSON has null estimate/uncertainty"
+            return
+        fi
         printf '%s\t%s\t%s\t%s\n' \
             "$replica_dir" "${c_green}completed${c_reset}" "replica_${replica_id}" \
             "result JSON found"
