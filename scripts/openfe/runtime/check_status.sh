@@ -16,29 +16,33 @@ set -euo pipefail
 #   -j N    number of parallel workers (default: 8)
 #   -n N    number of replicas per transformation (default: auto-detect)
 #   -r DIR  root directory to search (default: .)
+#   -R      restart failed replicas via sbatch
 #   -h      show help
 
 JOBS=8
 ROOT="."
 REPLICAS=""
+RESTART=false
 
 usage() {
     cat <<'EOF'
-Usage: check_status.sh [-j N] [-n REPLICAS] [-r ROOT]
+Usage: check_status.sh [-j N] [-n REPLICAS] [-r ROOT] [-R]
 
 Options:
     -j N        Number of parallel workers (default: 8)
     -n REPLICAS Number of replicas per transformation (default: auto-detect)
     -r ROOT     Root directory (default: .)
+    -R          Restart failed replicas via sbatch
     -h          Show this help
 EOF
 }
 
-while getopts ":j:n:r:h" opt; do
+while getopts ":j:n:r:Rh" opt; do
     case "$opt" in
         j) JOBS="$OPTARG" ;;
         n) REPLICAS="$OPTARG" ;;
         r) ROOT="$OPTARG" ;;
+        R) RESTART=true ;;
         h)
             usage
             exit 0
@@ -87,6 +91,8 @@ if [[ ! -d "$TRANSFORMS_DIR" ]]; then
 fi
 
 ACTIVE_FILE="${TMPDIR_MAIN}/active_jobs.tsv"
+RESTART_FILE="${TMPDIR_MAIN}/restart.tsv"
+export RESTART_FILE
 
 # Build one cache of all active jobs for this user at this working directory.
 # Uses scontrol SubmitLine to map each ArrayJobId to its transformation name.
@@ -202,6 +208,7 @@ process_one() {
             printf '%s\t%s\t%s\t%s\n' \
                 "$replica_dir" "${c_red}failed${c_reset}" "replica_${replica_id}" \
                 "result JSON has null estimate/uncertainty"
+            printf '%s\t%s\n' "$tname" "$replica_id" >>"$RESTART_FILE"
             return
         fi
         local est unc
@@ -246,6 +253,7 @@ process_one() {
     printf '%s\t%s\t%s\t%s\n' \
         "$replica_dir" "${c_red}failed${c_reset}" "replica_${replica_id}" \
         "incomplete and no matching active job"
+    printf '%s\t%s\n' "$tname" "$replica_id" >>"$RESTART_FILE"
 }
 
 export -f process_one
@@ -255,3 +263,26 @@ printf 'directory\tstatus\treplica\tinfo\n'
 # shellcheck disable=SC1083  # {1} {2} are GNU parallel placeholders
 parallel -j "$JOBS" -k --colsep '\t' \
     process_one {1} {2} "$RESULTS_DIR" "$ACTIVE_FILE" <"$WORK_FILE"
+
+# Restart failed replicas if -R was given.
+if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+    SBATCH_SCRIPT="${SCRIPT_DIR}/../quickrun.sbatch"
+
+    if [[ ! -f "$SBATCH_SCRIPT" ]]; then
+        echo "Error: quickrun.sbatch not found at ${SBATCH_SCRIPT}" >&2
+        exit 1
+    fi
+
+    echo ""
+    # Group replica ids by transformation, then submit one sbatch per transformation.
+    awk -F'\t' '
+        { replicas[$1] = (replicas[$1] ? replicas[$1] "," : "") $2 }
+        END { for (t in replicas) print t "\t" replicas[t] }
+    ' "$RESTART_FILE" | sort |
+        while IFS=$'\t' read -r tname replica_ids; do
+            tf_json="${TRANSFORMS_DIR}/${tname}.json"
+            echo "Resubmitting ${tname} replicas [${replica_ids}]"
+            sbatch --array="${replica_ids}" "$SBATCH_SCRIPT" "$tf_json" -o "$RESULTS_DIR"
+        done
+fi
