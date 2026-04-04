@@ -102,6 +102,71 @@ torsions = featurize_backbone_torsions(traj, periodic=False)
 ax = plot_ramachandran(torsions)
 ```
 
+## Molecule Drawing
+
+### Single molecule
+
+```python
+from mdpp.plots import draw_mol
+from rdkit import Chem
+
+mol = Chem.MolFromSmiles("c1ccc(NC(=O)c2ccccc2)cc1")
+img = draw_mol(mol, img_size=(400, 400))
+```
+
+### With substructure highlighting
+
+```python
+pattern = Chem.MolFromSmarts("c1ccccc1")
+img = draw_mol(mol, pattern=pattern, highlight=True)
+```
+
+### Grid of molecules
+
+```python
+from mdpp.plots import draw_mols
+
+mols = [Chem.MolFromSmiles(smi) for smi in smiles_list]
+img = draw_mols(mols, legends=names, mols_per_row=4, output_file="grid.png")
+```
+
+## 3D Visualization
+
+### Interactive molecule view (py3Dmol)
+
+```python
+from mdpp.plots import view_mol_3d
+
+viewer = view_mol_3d(mol_with_conformer, style={"stick": {}})
+```
+
+### Atom labels
+
+```python
+from mdpp.plots import make_atom_labels_3d, view_mol_3d
+
+labels = make_atom_labels_3d(
+    mol,
+    text_fn=lambda atom: atom.GetSymbol(),
+    base_style={"fontSize": 12, "fontColor": "black"},
+)
+viewer = view_mol_3d(mol, labels=labels)
+```
+
+### Trajectory viewer (nglview)
+
+```python
+from mdpp.plots import view_traj_3d
+
+widget = view_traj_3d(traj)
+
+# Custom representations
+widget = view_traj_3d(traj, representations=[
+    {"type": "cartoon", "selection": "protein", "color": "sstruc"},
+    {"type": "ball+stick", "selection": "ligand"},
+])
+```
+
 ## Multi-Panel Figures
 
 All plot functions work with matplotlib subplots:

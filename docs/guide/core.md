@@ -53,6 +53,16 @@ from mdpp.core import residue_ids_from_indices
 res_ids = residue_ids_from_indices(traj.topology, indices)
 ```
 
+## Time Extraction
+
+Get the raw time array in picoseconds:
+
+```python
+from mdpp.core import trajectory_time_ps
+
+time_ps = trajectory_time_ps(traj)
+```
+
 ## Trajectory Alignment
 
 Superpose all frames onto a reference frame:

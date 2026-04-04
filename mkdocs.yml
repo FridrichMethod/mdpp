@@ -39,12 +39,14 @@ nav:
   - User Guide:
       - Core: guide/core.md
       - Analysis: guide/analysis.md
+      - Cheminformatics: guide/chem.md
       - Plots: guide/plots.md
       - Preparation: guide/prep.md
       - Scripts: guide/scripts.md
   - API Reference:
       - Core: api/core.md
       - Analysis: api/analysis.md
+      - Cheminformatics: api/chem.md
       - Plots: api/plots.md
       - Preparation: api/prep.md
   - Resources: resources.md

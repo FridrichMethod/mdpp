@@ -46,6 +46,22 @@ from mdpp.prep import extract_chain
 chain_a = extract_chain(traj, chain_id=0)
 ```
 
+The `ChainSelect` helper (a `Bio.PDB.Select` subclass) is also available for advanced PDB chain filtering with BioPython.
+
+### Predict pKa values (PROPKA)
+
+Predict titratable residue pKa values:
+
+```python
+from mdpp.prep import run_propka
+
+result = run_propka("protein.pdb")
+for residue in result.residues:
+    print(f"{residue.residue_type} {residue.res_num}{residue.chain_id}: pKa={residue.pka:.2f}")
+```
+
+The `PropkaResult` and `PropkaResidue` frozen dataclasses hold the prediction output.
+
 ## Ligand Parameterization
 
 ### Assign bond orders from a template

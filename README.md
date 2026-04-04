@@ -2,7 +2,7 @@
 
 **Molecular Dynamics Pre- & Post-Processing**
 
-*A Python toolkit for MD simulation workflows — trajectory analysis, publication-ready plots, system preparation, and GROMACS automation.*
+*A Python toolkit for MD simulation workflows — trajectory analysis, cheminformatics, publication-ready plots, system preparation, and GROMACS/OpenFE automation.*
 
 [![Documentation](https://readthedocs.org/projects/mdpp/badge/?version=latest)](https://mdpp.readthedocs.io/en/latest/?badge=latest)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -28,9 +28,12 @@
 - **Trajectory analysis** — RMSD, RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
 - **Dimensionality reduction** — PCA, TICA, backbone torsion featurization, free energy surfaces
 - **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
+- **Cheminformatics** — molecular descriptors, PAINS filters, fingerprints (Morgan/ECFP), Tanimoto similarity, Butina clustering
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
-- **System preparation** — PDB fixing (OpenMM), ligand parameterization (RDKit), trajectory merge/slice/subsample
+- **2D/3D visualization** — molecule structure drawings (RDKit), interactive 3D views (py3Dmol, nglview)
+- **System preparation** — PDB fixing (OpenMM), pKa prediction (PROPKA), ligand parameterization (RDKit), trajectory merge/slice/subsample
 - **GROMACS automation** — MDP templates plus analysis, runtime, and post-processing helpers in `scripts/gromacs/`
+- **OpenFE automation** — RBFE workflow scripts with SLURM array jobs and checkpoint resumption
 - **Typed & tested** — full type annotations, frozen dataclass results, Google docstrings
 
 ## Installation
@@ -93,10 +96,22 @@ df = read_edr("ener.edr")          # binary EDR → pandas DataFrame
 ### Prepare a protein
 
 ```python
-from mdpp.prep import fix_pdb, strip_solvent
+from mdpp.prep import fix_pdb, strip_solvent, run_propka
 
 fix_pdb("raw.pdb", "fixed.pdb", pH=7.4)    # add missing atoms & hydrogens
 dry = strip_solvent(traj, keep_ions=True)    # remove water
+pka = run_propka("protein.pdb")             # predict titratable residue pKa values
+```
+
+### Cheminformatics
+
+```python
+from mdpp.chem import MolSupplier, calc_descs, gen_fp, calc_sim, is_pains
+
+for mol in MolSupplier("compounds.sdf"):
+    descs = calc_descs(mol)                 # molecular descriptors (MW, LogP, TPSA, ...)
+    fp = gen_fp(mol, method="ecfp4")        # ECFP4 fingerprint
+    print(f"PAINS: {is_pains(mol)}")        # structural alert filter
 ```
 
 ## Package Structure
@@ -105,9 +120,10 @@ dry = strip_solvent(traj, keep_ions=True)    # remove water
 mdpp
 ├── core         Trajectory I/O · XVG/EDR parsers · atom selection · alignment
 ├── analysis     RMSD · RMSF · DCCM · SASA · Rg · H-bonds · contacts · DSSP · PCA · TICA · FES · clustering
-├── plots        Time series · heatmaps · FES contours · scatter · Ramachandran · contact maps
-├── prep         PDB fixing · ligand topology · trajectory merge/slice/subsample
-└── scripts      Repository shell helpers and GROMACS MDP templates
+├── chem         Descriptors · PAINS filters · fingerprints · similarity · molecule file I/O
+├── plots        Time series · heatmaps · FES contours · scatter · contact maps · 2D/3D molecules
+├── prep         PDB fixing · pKa prediction · ligand topology · trajectory merge/slice/subsample
+└── scripts      Repository shell helpers for GROMACS, OpenFE, and BrownDye
 ```
 
 ## Scripts
@@ -118,9 +134,7 @@ cp scripts/gromacs/mdrun/mdprep.sh ./sim/
 cp scripts/gromacs/mdrun/mdrun.sh ./sim/
 ```
 
-The GROMACS templates now live in the repository under `scripts/gromacs/mdps/amber/`
-and `scripts/gromacs/mdps/charmm/`. The shell helpers are also kept in `scripts/` and
-are not installed as part of the Python package.
+Shell scripts live in `scripts/` and are not installed as part of the Python package.
 
 | Category | Contents |
 |---|---|
@@ -129,8 +143,10 @@ are not installed as part of the Python package.
 | `gromacs/runtime` | Job status monitor, restart, extend, export |
 | `gromacs/compilation` | GROMACS build scripts (generic + Sherlock HPC) |
 | `gromacs/mdenv` | Environment setup (Sherlock module loads) |
+| `gromacs/data_transfer` | DTN download scripts (Sherlock) |
 | `gromacs/postprocessing` | Trajectory postprocessing |
 | `gromacs/visualization` | PyMOL movie generation |
+| `openfe/` | RBFE SLURM submission (`quickrun.sh`, `quickrun.sbatch`) and runtime monitoring |
 
 ## Design Philosophy
 
@@ -156,8 +172,13 @@ Built on the scientific Python ecosystem:
 | [panedr](https://github.com/MDAnalysis/panedr) | GROMACS EDR parsing |
 | [scikit-learn](https://scikit-learn.org) | PCA, clustering |
 | [deeptime](https://deeptime-ml.github.io) | TICA |
-| [RDKit](https://rdkit.org) | Ligand topology |
-| [matplotlib](https://matplotlib.org) | Plotting |
+| [RDKit](https://rdkit.org) | Cheminformatics & ligand topology |
+| [Numba](https://numba.pydata.org) | Parallel similarity kernels |
+| [PROPKA](https://github.com/jensengroup/propka) | pKa prediction |
+| [BioPython](https://biopython.org) | PDB chain extraction |
+| [matplotlib](https://matplotlib.org) | Static 2D plotting |
+| [py3Dmol](https://3dmol.csb.pitt.edu) | Interactive 3D molecule views |
+| [nglview](https://nglviewer.org) | Interactive 3D trajectory views |
 
 ## Documentation
 

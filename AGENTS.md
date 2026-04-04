@@ -4,7 +4,7 @@ Instructions for AI coding agents (OpenAI Codex, etc.) working in this repositor
 
 ## What This Project Is
 
-**mdpp** — a Python 3.12+ library for molecular dynamics simulation pre- and post-processing. Supports GROMACS, AMBER, and OpenFE workflows.
+**mdpp** — a Python 3.12+ library for molecular dynamics simulation pre- and post-processing, plus small-molecule cheminformatics. Supports GROMACS, AMBER, OpenFE, and BrownDye workflows.
 
 ## Setup
 
@@ -40,12 +40,15 @@ Source is under `src/mdpp/` using the src-layout convention:
 
 | Subpackage | Purpose | Key patterns |
 |---|---|---|
-| `core/` | Trajectory I/O, file parsers | `load_trajectory`, `read_xvg`, `read_edr` |
+| `core/` | Trajectory I/O, file parsers | `load_trajectory`, `load_trajectories`, `read_xvg`, `read_edr` |
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
-| `plots/` | Visualization | `plot_*(result, *, ax=None, ...) -> Axes` |
-| `prep/` | System preparation | `fix_pdb`, `strip_solvent`, ligand tools |
+| `chem/` | Small-molecule cheminformatics | `MolSupplier`, `calc_descs`, `gen_fp`, `calc_sim`, `is_pains` |
+| `plots/` | Visualization (2D, 3D, molecules) | `plot_*(result, *, ax=None) -> Axes`, `draw_mol`, `view_mol_3d` |
+| `prep/` | System preparation | `fix_pdb`, `strip_solvent`, `run_propka`, ligand tools |
 
 Shell scripts (analysis wrappers, runtime helpers, build scripts, etc.) live in the top-level `scripts/` directory (not packaged).
+
+Examples (notebooks and data) live in `examples/` (GROMACS, OpenFE RBFE, BrownDye).
 
 ### OpenFE Scripts (`scripts/openfe/`)
 
@@ -74,6 +77,8 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 1. **Type aliases** — shared aliases live in `mdpp._types` (`StrPath`, `PathLike`).
 1. **Exports** — every `__init__.py` has an `__all__` list. New public functions must be added.
 1. **Units** — internal arrays use nm/ps (MDTraj convention); display properties convert to Å/ns.
+1. **Chem functions** — take `Chem.rdchem.Mol` or SMILES strings; fingerprint generators are in `FP_GENERATORS` dict.
+1. **3D visualization** — `plots/three_d.py` uses py3Dmol and nglview for notebook-based interactive views.
 
 ## File Naming
 
@@ -92,6 +97,13 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 1. Add exports to `src/mdpp/analysis/__init__.py`.
 1. If visual output makes sense, add `plot_*` in `src/mdpp/plots/` and export it.
 1. Write tests in `tests/analysis/`.
+
+## Adding a New Chem Function
+
+1. Create/extend a file in `src/mdpp/chem/`.
+1. Functions take `Chem.rdchem.Mol` or SMILES strings as input.
+1. Add exports to `src/mdpp/chem/__init__.py`.
+1. Write tests in `tests/chem/`.
 
 ## Important: Do Not
 

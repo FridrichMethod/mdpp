@@ -61,6 +61,21 @@ from mdpp.prep import fix_pdb
 fix_pdb("raw.pdb", "fixed.pdb", pH=7.4)
 ```
 
+## Cheminformatics
+
+Calculate molecular descriptors and check for PAINS alerts:
+
+```python
+from rdkit import Chem
+from mdpp.chem import calc_descs, is_pains, gen_fp, calc_sim
+
+mol = Chem.MolFromSmiles("c1ccc(NC(=O)c2ccccc2)cc1")
+descs = calc_descs(mol)  # (MW, LogP, HBA, HBD, Fsp3, RotBonds, Rings, TPSA, QED)
+print(f"PAINS: {is_pains(mol)}")
+
+fp = gen_fp(mol, fp_type="ecfp4")
+```
+
 ## MDP Templates
 
 The repository includes GROMACS MDP templates under `scripts/gromacs/mdps/`.
@@ -76,6 +91,7 @@ Utility shell scripts (analysis wrappers, runtime helpers, etc.) live in the top
 
 - [User Guide: Core](guide/core.md) -- trajectory loading and file parsing
 - [User Guide: Analysis](guide/analysis.md) -- structural and dynamic analysis
+- [User Guide: Cheminformatics](guide/chem.md) -- descriptors, fingerprints, similarity
 - [User Guide: Plots](guide/plots.md) -- visualization
 - [User Guide: Preparation](guide/prep.md) -- system setup
 - [User Guide: Scripts](guide/scripts.md) -- repository scripts and MDP templates

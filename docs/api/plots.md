@@ -20,6 +20,14 @@
 
 ::: mdpp.plots.contacts
 
+## Molecules (2D)
+
+::: mdpp.plots.molecules
+
+## 3D Visualization
+
+::: mdpp.plots.three_d
+
 ## Utilities
 
 ::: mdpp.plots.utils

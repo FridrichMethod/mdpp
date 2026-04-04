@@ -4,7 +4,7 @@ This file provides guidance for Claude Code (claude-code, claude terminal) when 
 
 ## Project Overview
 
-**mdpp** is a Python package for molecular dynamics (MD) simulation pre- and post-processing. It provides trajectory loading, structural/dynamic analysis, visualization, and system preparation utilities for GROMACS, AMBER, OpenFE, and other MD engines.
+**mdpp** is a Python package for molecular dynamics (MD) simulation pre- and post-processing. It provides trajectory loading, structural/dynamic analysis, cheminformatics, visualization, and system preparation utilities for GROMACS, AMBER, OpenFE, and other MD engines.
 
 ## Repository Structure
 
@@ -12,7 +12,8 @@ This file provides guidance for Claude Code (claude-code, claude terminal) when 
 src/mdpp/
 ├── _types.py        # shared type aliases (StrPath, PathLike)
 ├── core/            # trajectory I/O, XVG/EDR parsers
-│   ├── trajectory.py    # load_trajectory, align_trajectory, select_atom_indices
+│   ├── trajectory.py    # load_trajectory, load_trajectories, align_trajectory,
+│   │                     # select_atom_indices, residue_ids_from_indices, trajectory_time_ps
 │   └── parsers.py       # read_xvg, read_edr (thin wrappers around panedr/numpy)
 ├── analysis/        # compute_* functions returning frozen dataclass results
 │   ├── metrics.py       # RMSD, RMSF, DCCM, SASA, radius of gyration
@@ -23,31 +24,44 @@ src/mdpp/
 │   ├── decomposition.py # PCA, TICA, backbone torsion featurization
 │   ├── fes.py           # 2D free energy surfaces
 │   └── clustering.py    # RMSD matrix, GROMOS clustering
-├── plots/           # plot_* functions returning matplotlib Axes
+├── chem/            # small-molecule cheminformatics (RDKit-based)
+│   ├── descriptors.py   # molecular descriptor calculation and filtering
+│   ├── filters.py       # Murcko scaffold extraction, PAINS filters
+│   ├── fingerprints.py  # fingerprint generation (Morgan/ECFP), Butina clustering
+│   ├── similarity.py    # Tanimoto and other similarity metrics, Numba-parallel kernels
+│   └── suppliers.py     # MolSupplier: iterate molecules from SDF/SMILES/MOL2 files
+├── plots/           # plot_* / draw_* / view_* functions
 │   ├── utils.py         # get_axis helper
 │   ├── timeseries.py    # RMSD, RMSF, SASA, Rg, distances, energy, H-bonds, Q(t)
 │   ├── matrix.py        # DCCM heatmap
 │   ├── fes.py           # FES contour plot
 │   ├── scatter.py       # PCA/TICA projection, Ramachandran
-│   └── contacts.py      # contact map heatmap
+│   ├── contacts.py      # contact map heatmap
+│   ├── molecules.py     # 2D molecule drawing (draw_mol, draw_mols, get_highlight_bonds)
+│   └── three_d.py       # 3D visualization (view_mol_3d, view_traj_3d via py3Dmol/nglview)
 ├── prep/            # system preparation
-│   ├── protein.py       # fix_pdb, strip_solvent, extract_chain
+│   ├── protein.py       # fix_pdb, strip_solvent, extract_chain, run_propka,
+│   │                     # PropkaResult, PropkaResidue, ChainSelect
 │   ├── ligand.py        # assign_topology, constraint_minimization
 │   └── topology.py      # merge, slice, subsample trajectories
 scripts/             # shell scripts (NOT packaged, copy to MD working directories)
 ├── gromacs/
 │   ├── analysis/        # gmx_rmsd.sh, gmx_rmsf.sh, etc.
 │   ├── compilation/     # gmx_compile.sh, sherlock/ variants
+│   ├── data_transfer/   # sherlock/ DTN download scripts
 │   ├── mdps/            # force-field-specific GROMACS MDP templates
 │   ├── mdenv/           # environment setup (sherlock/)
 │   ├── mdrun/           # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
 │   ├── postprocessing/  # gmx_postprocessing.sh
 │   ├── runtime/         # check_status.sh, restart.sh, extend.sh, export.sh
 │   └── visualization/   # pymol_movie.pml
-└── openfe/              # quickrun.sh, quickrun.sbatch, runtime/check_status.sh
+├── openfe/              # quickrun.sh, quickrun.sbatch, runtime/check_status.sh
+examples/            # worked examples and notebooks
+├── gromacs/             # GROMACS analysis notebooks (RMSD, RMSF, DCCM, FES, I/O)
+├── openfe/              # OpenFE RBFE workflow notebook + input PDBs
+└── browndye/            # BrownDye2 complex PQR preparation
 
 tests/               # mirrors src/ layout (tests/analysis/, tests/plots/, tests/chem/)
-notebooks/           # Jupyter notebooks for interactive analysis
 docs/                # mkdocs documentation (guide/ and api/)
 ```
 
@@ -109,6 +123,15 @@ Every `compute_*` function:
 1. Provides unit-conversion properties (`.time_ns`, `.rmsd_angstrom`, etc.).
 1. Imports trajectory helpers from `mdpp.core.trajectory`.
 
+### Chem Modules
+
+The `chem/` subpackage provides RDKit-based cheminformatics utilities:
+
+- Functions take `Chem.rdchem.Mol` or SMILES strings as input.
+- `MolSupplier` provides an iterator over molecules from SDF/SMILES/MOL2 files.
+- Fingerprint generators are registered in the `FP_GENERATORS` dict.
+- Similarity kernels use Numba-parallel acceleration for bulk computation.
+
 ### Plot Modules
 
 Every `plot_*` function:
@@ -117,6 +140,9 @@ Every `plot_*` function:
 1. Accepts `ax: Axes | None = None` and returns `Axes`.
 1. Uses `from mdpp.plots.utils import get_axis`.
 1. Sets axis labels with display units (Å, ns).
+
+The `molecules.py` module provides 2D structure drawing (`draw_mol`, `draw_mols`).
+The `three_d.py` module provides interactive 3D visualization via py3Dmol and nglview.
 
 ### Tests
 
@@ -140,9 +166,24 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **panedr** — GROMACS EDR parsing
 - **scikit-learn** — PCA, clustering
 - **deeptime** — TICA
-- **rdkit** — ligand topology
+- **rdkit** — cheminformatics: ligand topology, descriptors, fingerprints, similarity
+- **numba** — parallel similarity kernels in `chem/similarity.py`
+- **biopython** — PDB chain extraction (`Bio.PDB.Select`)
+- **biotite** — structural bioinformatics utilities
+- **propka** — pKa prediction (`prep/protein.py`)
+- **pdb-tools / pdb2pqr** — PDB/PQR manipulation
+- **prody** — protein dynamics and structural analysis
+- **ParmEd** — parameter/topology file interconversion
 - **openmm + pdbfixer** — PDB fixing (optional, `[openmm]` extra)
-- **matplotlib** — all plotting
+- **matplotlib** — static 2D plotting
+- **mplplots** — custom matplotlib style/helpers
+- **seaborn** — statistical visualization
+- **plotly** — interactive plotting
+- **py3dmol** — 3D molecule visualization in notebooks
+- **nglview** — 3D trajectory visualization in notebooks
+- **Pillow** — image handling for molecule drawings
+- **numpy / scipy / pandas / polars** — numerical and data handling
+- **tqdm** — progress bars
 
 ## Adding New Features
 
@@ -155,6 +196,13 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 1. Add corresponding `plot_*` function in `plots/` if applicable.
 1. Add the plot re-export to `plots/__init__.py` and `__all__`.
 1. Write tests in `tests/analysis/`.
+
+### New cheminformatics function
+
+1. Create or extend a module in `src/mdpp/chem/`.
+1. Functions take `Chem.rdchem.Mol` or SMILES strings as input.
+1. Add re-export to `chem/__init__.py` and `__all__`.
+1. Write tests in `tests/chem/`.
 
 ### New parser
 

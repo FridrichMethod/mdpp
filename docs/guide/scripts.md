@@ -69,6 +69,7 @@ needed.
 - **`scripts/gromacs/mdps/`** -- force-field-specific MDP templates
 - **`scripts/gromacs/compilation/`** -- GROMACS build scripts (generic + Sherlock HPC)
 - **`scripts/gromacs/mdenv/`** -- Environment setup scripts (Sherlock)
+- **`scripts/gromacs/data_transfer/`** -- DTN download scripts (Sherlock)
 - **`scripts/gromacs/postprocessing/`** -- Trajectory postprocessing
 - **`scripts/gromacs/visualization/`** -- PyMOL movie generation
 
