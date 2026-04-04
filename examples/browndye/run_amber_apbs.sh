@@ -1,108 +1,98 @@
 #!/usr/bin/env bash
-# run_amber_apbs.sh - Steps 3-6 of BrownDye2 complex PQR preparation
+# run_amber_apbs.sh - AMBER parameterization + APBS electrostatics
 #
-# Expects in WORKDIR: complex.pdb, ligand.sdf, ligand.pdb
-# Produces: complex.prmtop, complex.rst7, complex.pqr, complex.in, complex.dx
+# Prerequisite: run complex_pqr.ipynb first to produce protein_fixed.pdb and ligand.sdf
+# in WORKDIR.
+#
+# Pipeline:
+#   1. pdb4amber   - strip H and water, fix residue names for tleap
+#   2. antechamber - assign GAFF2 atom types and AM1-BCC charges to ligand
+#   3. tleap       - combine protein + ligand, write AMBER topology
+#   4. ParmEd      - convert prmtop/rst7 to PQR (charges + mbondi3 radii)
+#   5. inputgen    - generate APBS input from PQR dimensions
+#   6. APBS        - solve linearized Poisson-Boltzmann equation
+#
+# Usage:
+#   conda activate ambertools
+#   cd examples/browndye && bash run_amber_apbs.sh
 
 set -euo pipefail
 
-# Configurations
+# ── Configuration ───────────────────────────────────────────────────────────
 WORKDIR="tmp"
 LIG_RESNAME="LIG"
 NET_CHARGE="-1"
 IONIC_STRENGTH="0.150"
 PROTEIN_FF="leaprc.protein.ff19SB"
 LIGAND_FF="leaprc.gaff2"
-
-# Check required commands
-for cmd in obabel antechamber parmchk2 tleap python3 inputgen apbs; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "ERROR: $cmd not found" >&2
-        exit 1
-    fi
-done
+PB_RADII="mbondi3"
 
 cd "$WORKDIR"
 
-for f in complex.pdb ligand.sdf ligand.pdb; do
-    if [[ ! -f "$f" ]]; then
-        echo "ERROR: required file not found: $WORKDIR/$f" >&2
-        exit 1
-    fi
-done
+# ── 1. pdb4amber ────────────────────────────────────────────────────────────
+echo "=== 1. pdb4amber ==="
+pdb4amber -i protein_fixed.pdb -o protein_amber.pdb -y -d --no-conect
 
-# Step 3: AmberTools parameterization
-echo "=== Step 3: AmberTools parameterization ==="
-
-echo "--- antechamber ---"
+# ── 2. Ligand parameterization ──────────────────────────────────────────────
+echo "=== 2. antechamber + parmchk2 ==="
 obabel ligand.sdf -O ligand_seed.mol2
+sed -i "s/UNL1/${LIG_RESNAME}/g" ligand_seed.mol2
 
 antechamber \
-    -i ligand_seed.mol2 \
-    -fi mol2 \
-    -o ligand_amber.mol2 \
-    -fo mol2 \
-    -c bcc \
-    -s 2 \
-    -at gaff2 \
-    -nc "$NET_CHARGE" \
-    -rn "$LIG_RESNAME" \
-    -an n \
-    -a ligand.pdb \
-    -fa pdb \
-    -ao name
+    -i ligand_seed.mol2 -fi mol2 \
+    -o ligand_amber.mol2 -fo mol2 \
+    -c bcc -s 2 -at gaff2 \
+    -nc "$NET_CHARGE" -rn "$LIG_RESNAME"
 
-echo "--- parmchk2 ---"
 parmchk2 -i ligand_amber.mol2 -f mol2 -o ligand.frcmod
 
-echo "--- tleap ---"
+# ── 3. tleap ────────────────────────────────────────────────────────────────
+echo "=== 3. tleap ==="
 cat >tleap.in <<EOF
 source $PROTEIN_FF
 source $LIGAND_FF
 
 $LIG_RESNAME = loadmol2 ligand_amber.mol2
 loadamberparams ligand.frcmod
+protein = loadpdb protein_amber.pdb
+complex = combine {protein $LIG_RESNAME}
 
-complex = loadpdb complex.pdb
-check complex
+set default PBRadii $PB_RADII
 saveamberparm complex complex.prmtop complex.rst7
-savepdb complex complex_from_tleap.pdb
 quit
 EOF
-
 tleap -f tleap.in
 
-# Step 4: ParmEd prmtop/rst7 -> PQR
-echo "=== Step 4: ParmEd -> PQR ==="
-
+# ── 4. ParmEd -> PQR ───────────────────────────────────────────────────────
+echo "=== 4. ParmEd -> PQR ==="
 python3 -c "
 import parmed as pmd
 parm = pmd.load_file('complex.prmtop', xyz='complex.rst7')
 parm.save('complex.pqr', overwrite=True)
 "
 
-# Step 5: APBS input generation via pdb2pqr inputgen
-echo "=== Step 5: APBS input generation ==="
+# ── 5. APBS input generation ───────────────────────────────────────────────
+echo "=== 5. inputgen ==="
+# inputgen CLI has a bug in pdb2pqr<=3.7.1: --istrng is parsed as str, not float.
+# Use the Python API directly.
+python3 -c "
+from pdb2pqr.inputgen import Input
+from pdb2pqr.psize import Psize
 
-inputgen "--istrng=${IONIC_STRENGTH}" --potdx complex.pqr
-echo "Generated APBS input from complex.pqr"
+size = Psize()
+size.run_psize('complex.pqr')
+inp = Input('complex.pqr', size, method='mg-auto', asyncflag=False,
+            istrng=${IONIC_STRENGTH}, potdx=True)
+inp.print_input_files('complex.in')
+"
+# Fix DX output stem: inputgen writes 'write pot dx complex.pqr' -> APBS would
+# produce complex.pqr.dx; change to 'complex' so output is complex-PE0.dx.
+sed -i 's|write pot dx complex\.pqr|write pot dx complex|' complex.in
 
-# inputgen writes <stem>.in next to the PQR
-APBS_IN="complex.in"
-if [[ ! -f "$APBS_IN" ]]; then
-    # Fall back to newest .in file in case of different naming
-    APBS_IN="$(ls -1t ./*.in 2>/dev/null | head -n 1 || true)"
-    if [[ -z "$APBS_IN" || ! -f "$APBS_IN" ]]; then
-        echo "ERROR: inputgen did not produce an APBS input file" >&2
-        exit 1
-    fi
-fi
-echo "Using APBS input: $APBS_IN"
-
-# Step 6: Run APBS
-echo "=== Step 6: Run APBS ==="
-
-apbs "$APBS_IN"
+# ── 6. APBS ────────────────────────────────────────────────────────────────
+echo "=== 6. APBS ==="
+apbs complex.in 2>&1 | tee apbs.log
+mv complex-PE0.dx complex.dx
 
 echo "=== Done ==="
-ls -lh complex.prmtop complex.rst7 complex.pqr "$APBS_IN" complex*.dx 2>/dev/null || true
+ls -lh complex.prmtop complex.rst7 complex.pqr complex.in complex.dx
