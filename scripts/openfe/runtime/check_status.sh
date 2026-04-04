@@ -204,9 +204,11 @@ process_one() {
                 "result JSON has null estimate/uncertainty"
             return
         fi
+        local est unc
+        read -r est unc < <(jq -r '[.estimate.magnitude, .uncertainty.magnitude] | @tsv' "$result_json")
         printf '%s\t%s\t%s\t%s\n' \
             "$replica_dir" "${c_green}completed${c_reset}" "replica_${replica_id}" \
-            "result JSON found"
+            "ddG = ${est:-?} +/- ${unc:-?} kcal/mol"
         return
     fi
 
