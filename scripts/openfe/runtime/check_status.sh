@@ -266,7 +266,7 @@ parallel -j "$JOBS" -k --colsep '\t' \
 
 # Restart failed replicas if -R was given.
 if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
     SBATCH_SCRIPT="${SCRIPT_DIR}/../quickrun.sbatch"
 
     if [[ ! -f "$SBATCH_SCRIPT" ]]; then
