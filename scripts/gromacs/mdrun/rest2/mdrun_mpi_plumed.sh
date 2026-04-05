@@ -78,7 +78,7 @@ for replica in "${REPLICA_DIRS[@]}"; do
         >"${TOPPAR_DIR}/topol${replica}.top"
 
     sed -e '11i\#include "../toppar/topol.top"' topol.top >"${replica}/topol${replica}.top"
-    sed -i "s/topol.top/topol${replica}.top/" "${replica}/topol${replica}.top"
+    sed -i "s/topol\.top/topol${replica}.top/" "${replica}/topol${replica}.top"
 done
 
 for replica in "${REPLICA_DIRS[@]}"; do
