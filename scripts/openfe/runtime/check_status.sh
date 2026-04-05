@@ -283,6 +283,6 @@ if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
         while IFS=$'\t' read -r tname replica_ids; do
             tf_json="${TRANSFORMS_DIR}/${tname}.json"
             echo "Resubmitting ${tname} replicas [${replica_ids}]"
-            sbatch --array="${replica_ids}" "$SBATCH_SCRIPT" "$tf_json" -o "$RESULTS_DIR"
+            sbatch --chdir "$ROOT_ABS" --array="${replica_ids}" "$SBATCH_SCRIPT" "$tf_json" -o "$RESULTS_DIR"
         done
 fi
