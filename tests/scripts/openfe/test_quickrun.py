@@ -6,7 +6,9 @@ import os
 import subprocess
 from pathlib import Path
 
-QUICKRUN_SH = Path(__file__).resolve().parents[3] / "scripts" / "openfe" / "quickrun.sh"
+QUICKRUN_SH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "openfe" / "quickrun" / "quickrun.sh"
+)
 
 
 # ---------------------------------------------------------------------------
