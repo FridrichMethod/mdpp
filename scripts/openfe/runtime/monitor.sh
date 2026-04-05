@@ -125,10 +125,10 @@ split_output() {
 }
 
 # Count statuses from TSV. Sets COMPLETED, ACTIVE, FAILED, ERROR, TOTAL,
-# and ERROR_LINES / FAILED_LINES in the caller's scope.
+# and ERROR_LINES in the caller's scope.
 count_statuses() {
     COMPLETED=0 ACTIVE=0 FAILED=0 ERROR=0 TOTAL=0
-    FAILED_LINES="" ERROR_LINES=""
+    ERROR_LINES=""
     local directory status replica info tname
     while IFS=$'\t' read -r directory status replica info; do
         [[ "$status" == "status" || -z "$status" ]] && continue
@@ -136,11 +136,7 @@ count_statuses() {
         case "$status" in
             completed) COMPLETED=$((COMPLETED + 1)) ;;
             active) ACTIVE=$((ACTIVE + 1)) ;;
-            failed)
-                FAILED=$((FAILED + 1))
-                tname="$(basename "$(dirname "$directory")")"
-                FAILED_LINES+="  ${tname}  ${replica}: ${info}"$'\n'
-                ;;
+            failed) FAILED=$((FAILED + 1)) ;;
             error)
                 ERROR=$((ERROR + 1))
                 tname="$(basename "$(dirname "$directory")")"
