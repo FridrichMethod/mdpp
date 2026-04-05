@@ -183,8 +183,8 @@ get_progress() {
     yaml_file="$(ls -t "$replica_dir"/shared_*/simulation_real_time_analysis.yaml 2>/dev/null | head -1)"
     if [[ -n "$yaml_file" && -f "$yaml_file" ]]; then
         local pct eta
-        pct="$(grep 'percent_complete:' "$yaml_file" | tail -1 | awk '{print $2}')"
-        eta="$(grep 'estimated_time_remaining:' "$yaml_file" | tail -1 | sed 's/.*estimated_time_remaining: *//')"
+        pct="$(grep -E '^[[:space:]]*percent_complete:' "$yaml_file" | tail -1 | awk '{print $2}')"
+        eta="$(grep -E '^[[:space:]]*estimated_time_remaining:' "$yaml_file" | tail -1 | sed 's/.*estimated_time_remaining: *//')"
         if [[ -n "$pct" ]]; then
             [[ -n "$eta" ]] && echo "${pct}% (ETA: ${eta})" || echo "${pct}%"
             return
@@ -212,7 +212,7 @@ match_active_jobs() {
     done <<<"$matches"
 }
 
-# Emit a status line. Args: replica_dir color status replica_id info
+# Emit a status line. Args: replica_dir color status reset replica_id info
 emit_status() {
     printf '%s\t%s\t%s\t%s\n' "$1" "$2$3$4" "replica_$5" "$6"
 }
