@@ -44,17 +44,47 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -d)
             shift
-            [[ $# -eq 0 || "$1" == -* ]] && { echo "Error: -d requires at least one directory" >&2; exit 2; }
+            [[ $# -eq 0 || "$1" == -* ]] && {
+                echo "Error: -d requires at least one directory" >&2
+                exit 2
+            }
             while [[ $# -gt 0 && "$1" != -* ]]; do
                 DIRS+=("$1")
                 shift
             done
             ;;
-        -e) [[ $# -lt 2 ]] && { echo "Error: -e requires an argument" >&2; exit 2; }; EMAIL="$2"; shift 2 ;;
-        -i) [[ $# -lt 2 ]] && { echo "Error: -i requires an argument" >&2; exit 2; }; INTERVAL="$2"; shift 2 ;;
-        -s) [[ $# -lt 2 ]] && { echo "Error: -s requires an argument" >&2; exit 2; }; STATE_FILE="$2"; shift 2 ;;
-        -n) DRY_RUN=true; shift ;;
-        -h) usage; exit 0 ;;
+        -e)
+            [[ $# -lt 2 ]] && {
+                echo "Error: -e requires an argument" >&2
+                exit 2
+            }
+            EMAIL="$2"
+            shift 2
+            ;;
+        -i)
+            [[ $# -lt 2 ]] && {
+                echo "Error: -i requires an argument" >&2
+                exit 2
+            }
+            INTERVAL="$2"
+            shift 2
+            ;;
+        -s)
+            [[ $# -lt 2 ]] && {
+                echo "Error: -s requires an argument" >&2
+                exit 2
+            }
+            STATE_FILE="$2"
+            shift 2
+            ;;
+        -n)
+            DRY_RUN=true
+            shift
+            ;;
+        -h)
+            usage
+            exit 0
+            ;;
         *)
             echo "Error: unknown option $1" >&2
             usage
