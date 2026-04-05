@@ -1,17 +1,19 @@
 #!/bin/bash
 
-cd toppar || exit
-rm processed_*
+set -euo pipefail
+
+cd toppar || exit 1
+rm -f processed_*.itp
 for d in *.itp; do
     cp "$d" processed_"$d"
 done
-rm processed_forcefield.itp
+rm -f processed_forcefield.itp
 cd ..
 touch cv.dat
-while read line; do
-    segid=$(echo "$line" | awk '{print $1}')
-    resid=$(echo "$line" | awk '{print $2}')
-    aname=$(echo "$line" | awk '{print $3}')
+while IFS= read -r line; do
+    segid=$(awk '{print $1}' <<<"$line")
+    resid=$(awk '{print $2}' <<<"$line")
+    aname=$(awk '{print $3}' <<<"$line")
 
     nl toppar/processed_"$segid".itp >toppar/temp.1
     begline=$(grep 'atoms' toppar/temp.1 | awk '{print $1}')
@@ -22,8 +24,8 @@ while read line; do
 
     awk -v var1="$resid" -v var2="$aname" '$4 == var1 && $6 == var2 {print $1}' toppar/temp.1 >>toppar/temp.list
 
-    while read line; do # variable `line` shadowing?
-        awk -v var1="$line" -v var2="$begline" -v var3="$endline" '$1 == var1 && $1 > var2 && $1 < var3 {$3=$3"_"}1' toppar/temp.1 >toppar/temp.2
+    while IFS= read -r atom_line; do
+        awk -v var1="$atom_line" -v var2="$begline" -v var3="$endline" '$1 == var1 && $1 > var2 && $1 < var3 {$3=$3"_"}1' toppar/temp.1 >toppar/temp.2
         mv toppar/temp.2 toppar/temp.1
     done <toppar/temp.list
     awk -F" " '{$1=""; print $0}' toppar/temp.1 >toppar/processed_"$segid".itp

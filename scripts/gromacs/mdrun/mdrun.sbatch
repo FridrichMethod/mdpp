@@ -36,10 +36,12 @@ max_restarts=3
 
 while true; do
     attempt=$((attempt + 1))
-    bash mdprep.sh && bash mdrun.sh
-    status=$?
+    status=0
+    bash mdprep.sh && bash mdrun.sh || status=$?
 
-    if [[ $status -eq 134 || $status -eq 139 ]]; then
+    if [[ $status -eq 0 ]]; then
+        exit 0
+    elif [[ $status -eq 134 || $status -eq 139 ]]; then
         echo "mdrun.sh failed with exit code ${status} on attempt ${attempt} at $(date). Restarting..." >&2
 
         if [[ $attempt -lt $max_restarts ]]; then

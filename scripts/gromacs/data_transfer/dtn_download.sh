@@ -36,11 +36,16 @@ shift $((OPTIND - 1))
 REMOTE_DIR="$1"
 LOCAL_DIR="$2"
 
+if [[ ! "$REMOTE_DIR" =~ ^/[a-zA-Z0-9_./-]+$ ]]; then
+    echo "Error: REMOTE_DIR contains unsafe characters: $REMOTE_DIR" >&2
+    exit 1
+fi
+
 mkdir -p "$LOCAL_DIR"
 
 echo "=== Discovering subdirectories in $REMOTE_DIR ==="
 mapfile -t SUBDIRS < <(
-    ssh -n "$LOGIN_HOST" "find \"$REMOTE_DIR\" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'" | sort
+    ssh -n "$LOGIN_HOST" "find $(printf '%q' "$REMOTE_DIR") -mindepth 1 -maxdepth 1 -type d -printf '%f\n'" | sort
 )
 [[ ${#SUBDIRS[@]} -gt 0 ]] || {
     echo "No subdirectories found in $REMOTE_DIR" >&2
@@ -52,8 +57,11 @@ echo "=== Found ${#SUBDIRS[@]} subdirectories, transferring with $JOBS parallel 
 LOGDIR="$LOCAL_DIR/.transfer_logs"
 mkdir -p "$LOGDIR"
 
+RSYNC_OPTS=(-ahP --append-verify)
+[[ -n "$DRY_RUN" ]] && RSYNC_OPTS+=("$DRY_RUN")
+
 parallel -j "$JOBS" --bar --joblog "$LOGDIR/joblog.tsv" \
-    rsync -ahP --append-verify $DRY_RUN \
+    rsync "${RSYNC_OPTS[@]}" \
     -e "'$SSH_OPTS'" \
     --log-file="'$LOGDIR/{}.log'" \
     "$DTN_HOST:$REMOTE_DIR/{}/" \

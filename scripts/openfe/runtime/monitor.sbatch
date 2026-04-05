@@ -18,12 +18,9 @@ set -euo pipefail
 # line recorded by SLURM.
 _submit_line="$(scontrol show job "$SLURM_JOB_ID" 2>/dev/null | sed -n 's/^[[:space:]]*SubmitLine=//p')"
 SCRIPTS_DIR=""
-for _word in $_submit_line; do
-    if [[ "$_word" == *monitor.sbatch ]]; then
-        SCRIPTS_DIR="$(cd "${SLURM_SUBMIT_DIR:-.}" && cd "$(dirname "$_word")" && pwd -P)"
-        break
-    fi
-done
+if [[ "$_submit_line" =~ ([^[:space:]]+monitor\.sbatch) ]]; then
+    SCRIPTS_DIR="$(cd "${SLURM_SUBMIT_DIR:-.}" && cd "$(dirname "${BASH_REMATCH[1]}")" && pwd -P)"
+fi
 
 if [[ -z "$SCRIPTS_DIR" || ! -f "${SCRIPTS_DIR}/monitor.sh" ]]; then
     echo "Error: could not resolve scripts directory from submit line: $_submit_line" >&2

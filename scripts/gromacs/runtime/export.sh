@@ -9,7 +9,6 @@ SKIP=${1:?Usage: export.sh <skip>}
 mkdir -p tmp
 
 cp index.ndx tmp/
-cp "./*.xvg" tmp/
 cp "${PRODUCTION}".gro "${PRODUCTION}".edr "${PRODUCTION}".tpr tmp/
 
 printf "0\n" | gmx trjconv \

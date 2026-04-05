@@ -120,12 +120,9 @@ build_active_jobs() {
             submit_line="$(scontrol show job "$sample_jobid" 2>/dev/null |
                 sed -n 's/^[[:space:]]*SubmitLine=//p' | head -1)"
             tname=""
-            for word in $submit_line; do
-                if [[ "$word" == *.json ]]; then
-                    tname="$(basename "$word" .json)"
-                    break
-                fi
-            done
+            if [[ "$submit_line" =~ ([^[:space:]]+\.json) ]]; then
+                tname="$(basename "${BASH_REMATCH[1]}" .json)"
+            fi
             printf '%s\t%s\n' "$ajid" "$tname"
         done >"$tmap"
 
