@@ -6,29 +6,27 @@ set -euo pipefail
 #
 # Monitor OpenFE quickrun jobs across project directories, restart failed jobs,
 # and send email reports. Designed to self-resubmit via SLURM for periodic
-# monitoring (default: hourly for 48 iterations / 2 days).
+# monitoring (default: hourly). Runs indefinitely until all jobs complete.
 #
 # Status handling:
 #   completed : no action
 #   active    : no action (job still running)
-#   failed    : restart via sbatch
+#   failed    : restart via check_status.sh -R
 #   error     : report only (multiple matching jobs, needs manual attention)
 #
 # Options:
 #   -d DIR         Project directory to monitor (repeatable, required)
 #   -e EMAIL       Notification email (default: zhaoyangli@stanford.edu)
-#   -m MAX_ITER    Maximum iterations before stopping (default: 48)
 #   -i HOURS       Hours between checks (default: 1)
 #   -s STATE_FILE  Iteration state file (default: ~/.openfe_monitor_state)
 #   -n             Dry run: parse and report but do not restart or resubmit
 #   -h             Show help
 
-SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
 CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
 
 DIRS=()
 EMAIL="zhaoyangli@stanford.edu"
-MAX_ITER=48
 INTERVAL=1
 STATE_FILE="${HOME}/.openfe_monitor_state"
 DRY_RUN=false
@@ -40,7 +38,6 @@ Usage: monitor.sh -d DIR [-d DIR ...] [OPTIONS]
 Options:
     -d DIR         Project directory to monitor (repeatable, required)
     -e EMAIL       Notification email (default: zhaoyangli@stanford.edu)
-    -m MAX_ITER    Maximum iterations (default: 48)
     -i HOURS       Interval between checks in hours (default: 1)
     -s STATE_FILE  Iteration state file (default: ~/.openfe_monitor_state)
     -n             Dry run: report only, no restarts or resubmissions
@@ -48,15 +45,17 @@ Options:
 EOF
 }
 
-while getopts ":d:e:m:i:s:nh" opt; do
+while getopts ":d:e:i:s:nh" opt; do
     case "$opt" in
         d) DIRS+=("$OPTARG") ;;
         e) EMAIL="$OPTARG" ;;
-        m) MAX_ITER="$OPTARG" ;;
         i) INTERVAL="$OPTARG" ;;
         s) STATE_FILE="$OPTARG" ;;
         n) DRY_RUN=true ;;
-        h) usage; exit 0 ;;
+        h)
+            usage
+            exit 0
+            ;;
         \?)
             echo "Error: invalid option -$OPTARG" >&2
             usage
@@ -108,20 +107,14 @@ send_email() {
 
 ITERATION=1
 if [[ -f "$STATE_FILE" ]]; then
-    ITERATION=$(( $(cat "$STATE_FILE") + 1 ))
+    ITERATION=$(($(cat "$STATE_FILE") + 1))
 fi
 
-if (( ITERATION > MAX_ITER )); then
-    echo "Maximum iterations ($MAX_ITER) reached. Exiting."
-    rm -f "$STATE_FILE"
-    exit 0
-fi
-
-echo "$ITERATION" > "$STATE_FILE"
+echo "$ITERATION" >"$STATE_FILE"
 
 NL=$'\n'
 
-echo "=== OpenFE Monitor: Iteration ${ITERATION}/${MAX_ITER} ==="
+echo "=== OpenFE Monitor: Iteration ${ITERATION} ==="
 echo "Timestamp: $(date)"
 echo ""
 
@@ -146,87 +139,92 @@ for DIR in "${DIRS[@]}"; do
 
     echo "--- Checking: ${DIR_NAME} ---"
 
-    # Run check_status.sh; stdout has TSV data, stderr goes to monitor log.
-    if ! STATUS_OUTPUT="$(bash "$CHECK_STATUS" -r "$DIR_ABS")"; then
+    # Build check_status.sh flags.
+    CS_FLAGS=(-r "$DIR_ABS")
+    if [[ "$DRY_RUN" == false ]]; then
+        CS_FLAGS+=(-R)
+    fi
+
+    # Run check_status.sh; capture full output (status TSV + restart messages).
+    if ! FULL_OUTPUT="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}" 2>&1)"; then
         echo "  Warning: check_status.sh returned non-zero for ${DIR_NAME}" >&2
         REPORT+="${NL}--- ${DIR_NAME} ---${NL}  check_status.sh failed${NL}"
         continue
     fi
 
     # Strip ANSI codes for parsing.
-    CLEAN_OUTPUT="$(echo "$STATUS_OUTPUT" | strip_ansi)"
+    CLEAN_OUTPUT="$(echo "$FULL_OUTPUT" | strip_ansi)"
 
-    # Count statuses (skip header line).
+    # Split into status TSV (before first blank line after header) and restart section.
+    STATUS_PART=""
+    RESTART_PART=""
+    past_status=false
+
+    while IFS= read -r line; do
+        if [[ "$past_status" == true ]]; then
+            RESTART_PART+="${line}${NL}"
+        elif [[ -z "$line" && -n "$STATUS_PART" ]]; then
+            past_status=true
+        else
+            STATUS_PART+="${line}${NL}"
+        fi
+    done <<<"$CLEAN_OUTPUT"
+
+    # Count statuses from TSV (skip header).
     COMPLETED=0
     ACTIVE=0
     FAILED=0
     ERROR=0
     TOTAL=0
-
-    FAILED_ENTRIES=()
-    ERROR_ENTRIES=()
+    ERROR_INFO=""
 
     while IFS=$'\t' read -r directory status replica info; do
-        # Skip header and blank lines.
         [[ "$status" == "status" ]] && continue
         [[ -z "$status" ]] && continue
 
         TOTAL=$((TOTAL + 1))
 
         case "$status" in
-            completed)
-                COMPLETED=$((COMPLETED + 1))
-                ;;
-            active)
-                ACTIVE=$((ACTIVE + 1))
-                ;;
-            failed)
-                FAILED=$((FAILED + 1))
-                # Extract tname from directory: .../results/<tname>/replica_<N>
-                tname="$(basename "$(dirname "$directory")")"
-                # Extract replica_id from replica column: replica_<N>
-                replica_id="${replica#replica_}"
-                FAILED_ENTRIES+=("${tname}|${replica_id}|${info}")
-                ;;
+            completed) COMPLETED=$((COMPLETED + 1)) ;;
+            active) ACTIVE=$((ACTIVE + 1)) ;;
+            failed) FAILED=$((FAILED + 1)) ;;
             error)
                 ERROR=$((ERROR + 1))
                 tname="$(basename "$(dirname "$directory")")"
-                replica_id="${replica#replica_}"
-                ERROR_ENTRIES+=("${tname}|${replica_id}|${info}")
+                ERROR_INFO+="    ${tname}  ${replica}: ${info}${NL}"
                 ;;
         esac
-    done <<< "$CLEAN_OUTPUT"
+    done <<<"$STATUS_PART"
 
     TOTAL_COMPLETED=$((TOTAL_COMPLETED + COMPLETED))
     TOTAL_ACTIVE=$((TOTAL_ACTIVE + ACTIVE))
     TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
     TOTAL_ERROR=$((TOTAL_ERROR + ERROR))
 
-    # Restart failed jobs.
-    DIR_RESTARTS=""
+    # Parse restart info from check_status.sh -R output.
     RESTART_COUNT=0
+    RESTART_INFO=""
 
-    if (( FAILED > 0 )); then
-        for entry in "${FAILED_ENTRIES[@]}"; do
-            IFS='|' read -r tname replica_id info <<< "$entry"
-
-            tfile="${DIR_ABS}/transformations/${tname}.json"
-            if [[ ! -f "$tfile" ]]; then
-                DIR_RESTARTS+="    ${tname}  replica_${replica_id}: transformation file not found${NL}"
-                continue
-            fi
-
-            if [[ "$DRY_RUN" == true ]]; then
-                DIR_RESTARTS+="    ${tname}  replica_${replica_id} -> [DRY RUN] would restart${NL}"
+    if [[ "$DRY_RUN" == true && FAILED -gt 0 ]]; then
+        # Dry run: show what would be restarted from the failed entries.
+        while IFS=$'\t' read -r directory status replica info; do
+            [[ "$status" == "failed" ]] || continue
+            tname="$(basename "$(dirname "$directory")")"
+            RESTART_INFO+="    ${tname}  ${replica} -> [DRY RUN] would restart${NL}"
+            RESTART_COUNT=$((RESTART_COUNT + 1))
+        done <<<"$STATUS_PART"
+    elif [[ -n "$RESTART_PART" ]]; then
+        # Parse actual restart output from check_status.sh -R.
+        local_restart=""
+        while IFS= read -r line; do
+            if [[ "$line" == Resubmitting* ]]; then
+                local_restart+="    ${line}${NL}"
+            elif [[ "$line" == "Submitted batch job"* ]]; then
                 RESTART_COUNT=$((RESTART_COUNT + 1))
-            else
-                # Submit restart from the project directory where quickrun.sbatch is symlinked.
-                RESTART_OUTPUT="$(cd "$DIR_ABS" && sbatch --array="$replica_id" quickrun.sbatch "transformations/${tname}.json" -o results/ 2>&1)" || true
-                JOB_ID="$(echo "$RESTART_OUTPUT" | grep -oP 'Submitted batch job \K[0-9]+' || echo "unknown")"
-                DIR_RESTARTS+="    ${tname}  replica_${replica_id} -> Job ${JOB_ID}${NL}"
-                RESTART_COUNT=$((RESTART_COUNT + 1))
+                local_restart+="    ${line}${NL}"
             fi
-        done
+        done <<<"$RESTART_PART"
+        RESTART_INFO="$local_restart"
     fi
 
     TOTAL_RESTARTS=$((TOTAL_RESTARTS + RESTART_COUNT))
@@ -234,21 +232,17 @@ for DIR in "${DIRS[@]}"; do
     # Build directory report section.
     DIR_REPORT="--- ${DIR_NAME} ---${NL}"
     DIR_REPORT+="  Completed: ${COMPLETED}/${TOTAL}  Active: ${ACTIVE}  Failed: ${FAILED}"
-    if (( RESTART_COUNT > 0 )); then
+    if ((RESTART_COUNT > 0)); then
         DIR_REPORT+=" (restarted)"
     fi
     DIR_REPORT+="  Error: ${ERROR}${NL}"
 
-    if [[ -n "$DIR_RESTARTS" ]]; then
-        DIR_REPORT+="${NL}  Restarts:${NL}${DIR_RESTARTS}"
+    if [[ -n "$RESTART_INFO" ]]; then
+        DIR_REPORT+="${NL}  Restarts:${NL}${RESTART_INFO}"
     fi
 
-    if (( ERROR > 0 )); then
-        DIR_REPORT+="${NL}  Errors (not restarted):${NL}"
-        for entry in "${ERROR_ENTRIES[@]}"; do
-            IFS='|' read -r tname replica_id info <<< "$entry"
-            DIR_REPORT+="    ${tname}  replica_${replica_id}: ${info}${NL}"
-        done
+    if ((ERROR > 0)); then
+        DIR_REPORT+="${NL}  Errors (not restarted):${NL}${ERROR_INFO}"
     fi
 
     REPORT+="${NL}${DIR_REPORT}"
@@ -258,7 +252,7 @@ done
 # ---- Check if all done ----
 
 ALL_DONE=false
-if (( TOTAL_ACTIVE == 0 && TOTAL_FAILED == 0 && TOTAL_ERROR == 0 && TOTAL_COMPLETED > 0 )); then
+if ((TOTAL_ACTIVE == 0 && TOTAL_FAILED == 0 && TOTAL_ERROR == 0 && TOTAL_COMPLETED > 0)); then
     ALL_DONE=true
 fi
 
@@ -267,14 +261,14 @@ fi
 if [[ "$ALL_DONE" == true ]]; then
     SUBJECT="[OpenFE Monitor] All jobs completed!"
     BODY="All jobs across ${#DIRS[@]} directories have completed.${NL}${NL}"
-    BODY+="Final status (iteration ${ITERATION}/${MAX_ITER}):${NL}"
+    BODY+="Final status (iteration ${ITERATION}):${NL}"
     BODY+="${REPORT}"
 else
-    SUBJECT="[OpenFE Monitor] Iteration ${ITERATION}/${MAX_ITER}"
-    if (( TOTAL_RESTARTS > 0 )); then
+    SUBJECT="[OpenFE Monitor] Iteration ${ITERATION}"
+    if ((TOTAL_RESTARTS > 0)); then
         SUBJECT+=" - ${TOTAL_RESTARTS} restart(s)"
     fi
-    BODY="Monitoring report for iteration ${ITERATION}/${MAX_ITER}${NL}"
+    BODY="Monitoring report for iteration ${ITERATION}${NL}"
     BODY+="Timestamp: $(date)${NL}"
     BODY+="${REPORT}"
 fi
@@ -297,19 +291,13 @@ if [[ "$ALL_DONE" == true ]]; then
     exit 0
 fi
 
-if (( ITERATION >= MAX_ITER )); then
-    echo "Maximum iterations (${MAX_ITER}) reached. No resubmission."
-    rm -f "$STATE_FILE"
-    exit 0
-fi
-
 # Reconstruct original arguments for resubmission.
 MONITOR_SBATCH="${SCRIPTS_DIR}/monitor.sbatch"
 ARGS=()
 for d in "${DIRS[@]}"; do
     ARGS+=(-d "$d")
 done
-ARGS+=(-e "$EMAIL" -m "$MAX_ITER" -i "$INTERVAL" -s "$STATE_FILE")
+ARGS+=(-e "$EMAIL" -i "$INTERVAL" -s "$STATE_FILE")
 if [[ "$DRY_RUN" == true ]]; then
     ARGS+=(-n)
 fi
