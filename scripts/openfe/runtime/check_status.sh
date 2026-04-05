@@ -78,6 +78,7 @@ fi
 
 # ---- Setup ----
 
+SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
 TMPDIR_MAIN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_MAIN"' EXIT
 
@@ -279,10 +280,7 @@ export -f get_progress match_active_jobs emit_status mark_restart process_one
 # Resubmit failed replicas grouped by transformation.
 restart_failed() {
     local restart_file="$1" transforms_dir="$2" root_abs="$3"
-    local script_dir sbatch_script
-
-    script_dir="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
-    sbatch_script="${script_dir}/../quickrun/quickrun.sbatch"
+    local sbatch_script="${SCRIPTS_DIR}/../quickrun/quickrun.sbatch"
 
     if [[ ! -f "$sbatch_script" ]]; then
         echo "Error: quickrun.sbatch not found at ${sbatch_script}" >&2
