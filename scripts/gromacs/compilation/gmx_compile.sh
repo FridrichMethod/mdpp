@@ -23,7 +23,7 @@ fi
 
 tar -xzvf "gromacs-${GMX_VERSION}.tar.gz"
 cd "gromacs-${GMX_VERSION}"
-mkdir build
+mkdir -p build
 cd build
 cmake .. \
     -DCMAKE_C_COMPILER=gcc \
