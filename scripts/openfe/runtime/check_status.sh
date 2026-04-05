@@ -228,7 +228,7 @@ process_one() {
     while IFS=$'\t' read -r jid jst ajid; do
         [[ -z "${jid:-}" ]] && continue
         count=$((count + 1))
-        local entry="${jid} (${ajid}_${replica_id}):${jst}"
+        local entry="${jid}(${ajid}_${replica_id}):${jst}"
         if [[ -z "$joblist" ]]; then
             joblist="$entry"
         else
@@ -244,9 +244,22 @@ process_one() {
     fi
 
     if ((count == 1)); then
+        # Extract progress from simulation_real_time_analysis.yaml.
+        local progress="0%"
+        local yaml_file
+        yaml_file="$(ls -t "$replica_dir"/shared_*/simulation_real_time_analysis.yaml 2>/dev/null | head -1)"
+        if [[ -n "$yaml_file" && -f "$yaml_file" ]]; then
+            local pct eta
+            pct="$(grep 'percent_complete:' "$yaml_file" | tail -1 | awk '{print $2}')"
+            eta="$(grep 'estimated_time_remaining:' "$yaml_file" | tail -1 | sed 's/.*estimated_time_remaining: *//')"
+            if [[ -n "$pct" ]]; then
+                progress="${pct}%"
+                [[ -n "$eta" ]] && progress="${progress} (ETA: ${eta})"
+            fi
+        fi
         printf '%s\t%s\t%s\t%s\n' \
             "$replica_dir" "${c_blue}active${c_reset}" "replica_${replica_id}" \
-            "job in squeue: ${joblist}"
+            "${progress} | ${joblist}"
         return
     fi
 

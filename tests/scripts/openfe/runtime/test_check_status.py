@@ -162,20 +162,22 @@ class TestNoResultNoJob:
 
 
 class TestActiveJob:
-    """Replica with an active Slurm job shows active with job info."""
+    """Replica with an active Slurm job shows active with job info and progress."""
 
-    def test_active_job_in_squeue(
-        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
-    ) -> None:
+    def _setup_active(self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]) -> Path:
         root_abs = openfe_workspace["root"].resolve()
-
         slurm_env["squeue"].write_text(f"100|0|100_0|RUNNING|{root_abs}\n")
         slurm_env["scontrol"].write_text(
             "   SubmitLine=sbatch --array=0 quickrun.sbatch "
             f"{root_abs}/transformations/rbfe_A_complex_B_complex.json "
             f"-o {root_abs}/results\n"
         )
+        return root_abs
 
+    def test_active_job_in_squeue(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        self._setup_active(slurm_env, openfe_workspace)
         result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
         assert result.returncode == 0
 
@@ -184,6 +186,47 @@ class TestActiveJob:
         assert rows[0]["status"] == "active"
         assert "100_0" in rows[0]["info"]
         assert "RUNNING" in rows[0]["info"]
+
+    def test_no_yaml_shows_zero_percent(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        self._setup_active(slurm_env, openfe_workspace)
+        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+
+        rows = _parse_rows(result.stdout)
+        assert "0%" in rows[0]["info"]
+
+    def test_yaml_progress(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        root_abs = self._setup_active(slurm_env, openfe_workspace)
+
+        # Create a simulation_real_time_analysis.yaml in the replica dir.
+        tname = "rbfe_A_complex_B_complex"
+        shared_dir = (
+            root_abs
+            / "results"
+            / tname
+            / "replica_0"
+            / "shared_HybridTopologyMultiStateSimulationUnit-abc_attempt_0"
+        )
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "simulation_real_time_analysis.yaml").write_text(
+            "- iteration: 100\n"
+            "  percent_complete: 12.5\n"
+            "  timing_data:\n"
+            "    estimated_time_remaining: 2 days, 3:00:00\n"
+            "- iteration: 200\n"
+            "  percent_complete: 25.0\n"
+            "  timing_data:\n"
+            "    estimated_time_remaining: 1 day, 12:00:00\n"
+        )
+
+        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        rows = _parse_rows(result.stdout)
+        assert "25.0%" in rows[0]["info"]
+        assert "ETA:" in rows[0]["info"]
+        assert "1 day" in rows[0]["info"]
 
 
 class TestMultipleJobs:
