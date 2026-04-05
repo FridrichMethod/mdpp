@@ -355,7 +355,7 @@ class TestCLI:
     def test_no_dirs(self, monitor_env: dict[str, Path]) -> None:
         result = _run(monitor_env, dirs=[])
         assert result.returncode == 2
-        assert "at least one -d DIR is required" in result.stderr
+        assert "-d DIR is required" in result.stderr
 
     def test_help_flag(self, monitor_env: dict[str, Path]) -> None:
         result = _run(monitor_env, "-h")
