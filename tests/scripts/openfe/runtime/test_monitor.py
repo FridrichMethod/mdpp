@@ -170,7 +170,6 @@ def monitor_env(tmp_path: Path) -> dict[str, Path]:
         "mail_log": mail_log,
         "_bin_dir": bin_dir,
         "project": project,
-        "state_file": tmp_path / "state.txt",
     }
 
 
@@ -183,7 +182,6 @@ def _run(
     cmd = ["bash", str(env["monitor_sh"])]
     for d in dirs if dirs is not None else [env["project"]]:
         cmd += ["-d", str(d)]
-    cmd += ["-s", str(env["state_file"])]
     if dry_run:
         cmd.append("-n")
     cmd += list(extra_args)
@@ -282,13 +280,7 @@ class TestDryRun:
 
 
 class TestAllDone:
-    """All completed: email, clean state, no resubmit."""
-
-    def test_clears_state_file(self, monitor_env: dict[str, Path]) -> None:
-        monitor_env["cs_response"].write_text(_STATUS_ALL_COMPLETED)
-        monitor_env["state_file"].write_text("5")
-        _run(monitor_env, dry_run=True)
-        assert not monitor_env["state_file"].exists()
+    """All completed: email, no resubmit."""
 
     def test_no_resubmit(self, monitor_env: dict[str, Path]) -> None:
         monitor_env["cs_response"].write_text(_STATUS_ALL_COMPLETED)
@@ -300,22 +292,6 @@ class TestAllDone:
         _run(monitor_env)
         assert "All" in monitor_env["mail_log"].read_text()
         assert "completed" in monitor_env["mail_log"].read_text()
-
-
-class TestIterationTracking:
-    """Iteration counter increments across runs."""
-
-    def test_first_iteration(self, monitor_env: dict[str, Path]) -> None:
-        monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED)
-        result = _run(monitor_env, dry_run=True)
-        assert "Iteration 1" in _strip_ansi(result.stdout)
-        assert monitor_env["state_file"].read_text().strip() == "1"
-
-    def test_increments(self, monitor_env: dict[str, Path]) -> None:
-        monitor_env["state_file"].write_text("3")
-        monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED)
-        result = _run(monitor_env, dry_run=True)
-        assert "Iteration 4" in _strip_ansi(result.stdout)
 
 
 class TestSelfResubmit:

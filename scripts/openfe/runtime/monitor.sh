@@ -11,7 +11,6 @@ set -euo pipefail
 #   -d DIR [DIR ...]  Project directories to monitor (required)
 #   -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
 #   -i HOURS          Hours between checks (default: 1)
-#   -s STATE_FILE     Iteration state file (default: ~/.openfe_monitor_state)
 #   -n                Dry run: report only, no restarts or resubmissions
 #   -h                Show help
 
@@ -23,7 +22,6 @@ CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
 DIRS=()
 EMAIL="zhaoyangli@stanford.edu"
 INTERVAL=1
-STATE_FILE="${HOME}/.openfe_monitor_state"
 DRY_RUN=false
 
 usage() {
@@ -34,7 +32,6 @@ Options:
     -d DIR [DIR ...]  Project directories to monitor (required)
     -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
     -i HOURS          Interval between checks in hours (default: 1)
-    -s STATE_FILE     Iteration state file (default: ~/.openfe_monitor_state)
     -n                Dry run: report only, no restarts or resubmissions
     -h                Show this help
 EOF
@@ -67,14 +64,6 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             }
             INTERVAL="$2"
-            shift 2
-            ;;
-        -s)
-            [[ $# -lt 2 ]] && {
-                echo "Error: -s requires an argument" >&2
-                exit 2
-            }
-            STATE_FILE="$2"
             shift 2
             ;;
         -n)
@@ -185,15 +174,7 @@ dry_run_restarts() {
     done <<<"$1"
 }
 
-# ---- Iteration tracking ----
-
-ITERATION=1
-if [[ -f "$STATE_FILE" ]]; then
-    ITERATION=$(($(cat "$STATE_FILE") + 1))
-fi
-echo "$ITERATION" >"$STATE_FILE"
-
-echo "=== OpenFE Monitor: Iteration ${ITERATION} ==="
+echo "=== OpenFE Monitor ==="
 echo "Timestamp: $(date)"
 echo ""
 
@@ -260,10 +241,10 @@ SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active, ${
 
 if [[ "$ALL_DONE" == true ]]; then
     SUBJECT="[OpenFE Monitor] All ${GRAND_TOTAL} jobs completed"
-    BODY="All jobs completed (iteration ${ITERATION})."$'\n\n'"${REPORT}"
+    BODY="All jobs completed."$'\n\n'"${REPORT}"
 else
-    SUBJECT="[OpenFE Monitor] #${ITERATION}: ${SUMMARY}"
-    BODY="Iteration ${ITERATION} -- $(date)"$'\n\n'"${REPORT}"
+    SUBJECT="[OpenFE Monitor] ${SUMMARY}"
+    BODY="$(date)"$'\n\n'"${REPORT}"
 fi
 
 echo "Sending email to ${EMAIL}..."
@@ -279,12 +260,11 @@ fi
 
 if [[ "$ALL_DONE" == true ]]; then
     echo "All jobs completed. No resubmission needed."
-    rm -f "$STATE_FILE"
     exit 0
 fi
 
 MONITOR_SBATCH="${SCRIPTS_DIR}/monitor.sbatch"
-ARGS=(-d "${DIRS[@]}" -e "$EMAIL" -i "$INTERVAL" -s "$STATE_FILE")
+ARGS=(-d "${DIRS[@]}" -e "$EMAIL" -i "$INTERVAL")
 [[ "$DRY_RUN" == true ]] && ARGS+=(-n)
 
 if [[ "$DRY_RUN" == true ]]; then
