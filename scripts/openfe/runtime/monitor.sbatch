@@ -19,6 +19,10 @@ set -euo pipefail
 # Self-resubmits via SLURM until all jobs complete.
 #
 # Can be run directly (bash monitor.sbatch ...) or submitted (sbatch monitor.sbatch ...).
+# When submitting via sbatch for the first time, run from this directory or use --chdir:
+#   cd scripts/openfe/runtime && sbatch monitor.sbatch -d /path/to/project
+#   sbatch --chdir scripts/openfe/runtime scripts/openfe/runtime/monitor.sbatch -d /path/to/project
+# Self-resubmission handles --chdir automatically.
 #
 # Options:
 #   -d DIR [DIR ...]  Project directories to monitor (required)
@@ -27,7 +31,14 @@ set -euo pipefail
 #   -n                Dry run: report only, no restarts or resubmissions
 #   -h                Show help
 
-SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
+# Under SLURM, BASH_SOURCE points to the spool copy — use the working
+# directory set by --chdir instead.  When run directly with bash,
+# BASH_SOURCE is reliable.
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    SCRIPTS_DIR="$(pwd -P)"
+else
+    SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
+fi
 CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
 
 # ---- Parse arguments ----

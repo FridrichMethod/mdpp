@@ -331,6 +331,58 @@ class TestMissingDirectory:
         assert "does not exist" in _strip_ansi(result.stdout + result.stderr)
 
 
+class TestSlurmSpoolResolution:
+    """SCRIPTS_DIR resolves correctly when SLURM copies the script to a spool dir."""
+
+    def test_slurm_spool_uses_cwd(self, monitor_env: dict[str, Path]) -> None:
+        """Under SLURM (SLURM_JOB_ID set), SCRIPTS_DIR comes from pwd, not BASH_SOURCE."""
+        monitor_env["cs_response"].write_text(_STATUS_ALL_COMPLETED)
+
+        # Copy monitor.sbatch to a fake spool directory (different from scripts_dir).
+        spool = monitor_env["monitor_sbatch"].parent.parent / "spool"
+        spool.mkdir()
+        spool_copy = spool / "slurm_script"
+        shutil.copy2(monitor_env["monitor_sbatch"], spool_copy)
+
+        scripts_dir = monitor_env["monitor_sbatch"].parent
+
+        # Run from spool path but with cwd=scripts_dir and SLURM_JOB_ID set.
+        cmd = ["bash", str(spool_copy), "-d", str(monitor_env["project"]), "-n"]
+        run_env = os.environ.copy()
+        run_env["PATH"] = f"{monitor_env['_bin_dir']}:{run_env['PATH']}"
+        run_env["SLURM_JOB_ID"] = "12345"
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=run_env, cwd=str(scripts_dir), check=False
+        )
+        assert result.returncode == 0
+        assert "2/2 completed" in _strip_ansi(result.stdout)
+
+    def test_spool_without_slurm_id_misresolves(self, monitor_env: dict[str, Path]) -> None:
+        """Without SLURM_JOB_ID, BASH_SOURCE resolves to spool — check_status.sh not found."""
+        monitor_env["cs_response"].write_text(_STATUS_ALL_COMPLETED)
+
+        spool = monitor_env["monitor_sbatch"].parent.parent / "spool"
+        spool.mkdir(exist_ok=True)
+        spool_copy = spool / "slurm_script"
+        shutil.copy2(monitor_env["monitor_sbatch"], spool_copy)
+
+        scripts_dir = monitor_env["monitor_sbatch"].parent
+
+        # Run from spool path with cwd=scripts_dir but NO SLURM_JOB_ID.
+        # BASH_SOURCE resolves to spool dir, so check_status.sh won't be found.
+        cmd = ["bash", str(spool_copy), "-d", str(monitor_env["project"]), "-n"]
+        run_env = os.environ.copy()
+        run_env["PATH"] = f"{monitor_env['_bin_dir']}:{run_env['PATH']}"
+        run_env.pop("SLURM_JOB_ID", None)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=run_env, cwd=str(scripts_dir), check=False
+        )
+        # SCRIPTS_DIR resolves to spool, check_status.sh is not there — warning emitted
+        assert "check_status.sh failed" in result.stdout + result.stderr
+        # Status counts should be empty (nothing processed)
+        assert "0/0 completed" in _strip_ansi(result.stdout)
+
+
 class TestCLI:
     """Argument parsing edge cases."""
 
