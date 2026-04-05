@@ -1,6 +1,9 @@
 #!/bin/bash
-
-set -euo pipefail
+# This script must be sourced, not executed.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "Error: source this script: . ${0}" >&2
+    exit 1
+fi
 
 ml gcc/12.4.0
 ml cmake/3.31.4
