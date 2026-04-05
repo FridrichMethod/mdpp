@@ -57,9 +57,10 @@ SLURM submission scripts for running OpenFE RBFE transformations on Sherlock.
 
 | Script | Purpose |
 |---|---|
-| `quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs (`-r N` for repeats) |
-| `quickrun.sbatch` | Batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
-| `runtime/check_status.sh` | Monitor transformation replicas and report completion status |
+| `quickrun/quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs (`-r N` for repeats) |
+| `quickrun/quickrun.sbatch` | Batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
+| `runtime/check_status.sh` | Check transformation replica status and optionally restart failed replicas |
+| `runtime/monitor.sbatch` | Periodic monitor: runs check_status, emails report, self-resubmits via SLURM |
 
 - CUDA MPS is required for Sherlock's `Exclusive_Process` GPU mode (openmmtools needs multiple CUDA contexts).
 - `--resume` enables checkpoint-based resumption after preemption on `owners` partition.

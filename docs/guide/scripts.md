@@ -83,23 +83,26 @@ SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in each 
 
 | Script | Description |
 |---|---|
-| `quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs |
-| `quickrun.sbatch` | SLURM batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
-| `runtime/check_status.sh` | Monitor transformation replicas and report completion status |
+| `quickrun/quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs |
+| `quickrun/quickrun.sbatch` | SLURM batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
+| `runtime/check_status.sh` | Check transformation replica status and optionally restart failed replicas |
+| `runtime/monitor.sbatch` | Periodic monitor: runs check_status, emails report, self-resubmits via SLURM |
 
 #### Quick start
 
 ```bash
 # Copy scripts to your working directory (alongside transformations/)
-cp scripts/openfe/{quickrun.sh,quickrun.sbatch} /path/to/workdir/
-cp -r scripts/openfe/runtime /path/to/workdir/
+cp -r scripts/openfe/{quickrun,runtime} /path/to/workdir/
 cd /path/to/workdir/
 
 # Submit with 3 independent repeats per transformation
-./quickrun.sh -r 3
+./quickrun/quickrun.sh -r 3
 
 # Check status of all transformations
 ./runtime/check_status.sh
+
+# Start periodic monitoring (emails reports, restarts failures, self-resubmits)
+sbatch runtime/monitor.sbatch -d /path/to/workdir -e $USER@stanford.edu
 ```
 
 #### Output structure

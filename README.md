@@ -146,7 +146,8 @@ Shell scripts live in `scripts/` and are not installed as part of the Python pac
 | `gromacs/data_transfer` | DTN download scripts (Sherlock) |
 | `gromacs/postprocessing` | Trajectory postprocessing |
 | `gromacs/visualization` | PyMOL movie generation |
-| `openfe/` | RBFE SLURM submission (`quickrun.sh`, `quickrun.sbatch`) and runtime monitoring |
+| `openfe/quickrun` | RBFE SLURM submission (`quickrun.sh`, `quickrun.sbatch`) |
+| `openfe/runtime` | Status checking (`check_status.sh`) and periodic monitoring (`monitor.sbatch`) |
 
 ## Design Philosophy
 

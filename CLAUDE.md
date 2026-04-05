@@ -55,7 +55,9 @@ scripts/             # shell scripts (NOT packaged, copy to MD working directori
 │   ├── postprocessing/  # gmx_postprocessing.sh
 │   ├── runtime/         # check_status.sh, restart.sh, extend.sh, export.sh
 │   └── visualization/   # pymol_movie.pml
-├── openfe/              # quickrun.sh, quickrun.sbatch, runtime/check_status.sh
+├── openfe/
+│   ├── quickrun/        # quickrun.sh, quickrun.sbatch
+│   └── runtime/         # check_status.sh, monitor.sbatch
 examples/            # worked examples and notebooks
 ├── gromacs/             # GROMACS analysis notebooks (RMSD, RMSF, DCCM, FES, I/O)
 ├── openfe/              # OpenFE RBFE workflow notebook + input PDBs
