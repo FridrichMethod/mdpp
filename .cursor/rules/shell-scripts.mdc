@@ -14,6 +14,6 @@ alwaysApply: false
   - `scripts/gromacs/analysis/` — gmx analysis commands
   - `scripts/amber/` — AMBER/AmberTools workflows
   - `scripts/openfe/` — OpenFE RBFE workflows (quickrun.sh, quickrun.sbatch, runtime/check_status.sh)
-- Sherlock (SLURM) variants go in a `sherlock/` subdirectory with `.sbatch` extension.
+- SLURM batch scripts (`.sbatch`) live alongside `.sh` scripts in the same category directory.
 - OpenFE scripts require >= 1.10.0 for `--resume` checkpoint support.
 - `quickrun.sbatch` starts CUDA MPS for Sherlock's `Exclusive_Process` GPU mode — do not remove the MPS setup block.

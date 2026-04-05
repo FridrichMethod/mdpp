@@ -87,7 +87,7 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 - Helper utilities within a subpackage: `utils.py`
 - MDP config templates: `scripts/gromacs/mdps/<ff>/<step>.mdp`
 - Shell scripts (not packaged): `scripts/<engine>/<category>/<script>.sh`
-- SLURM scripts: `scripts/<engine>/<category>/sherlock/<script>.sbatch`
+- SLURM scripts: `scripts/<engine>/<category>/<script>.sbatch`
 
 ## Adding a New Analysis
 

@@ -47,11 +47,11 @@ src/mdpp/
 scripts/             # shell scripts (NOT packaged, copy to MD working directories)
 ├── gromacs/
 │   ├── analysis/        # gmx_rmsd.sh, gmx_rmsf.sh, etc.
-│   ├── compilation/     # gmx_compile.sh, sherlock/ variants
-│   ├── data_transfer/   # sherlock/ DTN download scripts
+│   ├── compilation/     # gmx_compile.sh, gmx_mpi_compile.sh, plumed_compile.sh
+│   ├── data_transfer/   # dtn_download.sh (DTN rsync from Sherlock)
 │   ├── mdps/            # force-field-specific GROMACS MDP templates
-│   ├── mdenv/           # environment setup (sherlock/)
-│   ├── mdrun/           # mdprep.sh, mdrun.sh, rest2/, sherlock/ sbatch files
+│   ├── mdenv/           # environment setup (source_gmx.sh, source_plumed.sh)
+│   ├── mdrun/           # mdprep.sh, mdrun.sh, mdrun.sbatch, rest2/
 │   ├── postprocessing/  # gmx_postprocessing.sh
 │   ├── runtime/         # check_status.sh, restart.sh, extend.sh, export.sh
 │   └── visualization/   # pymol_movie.pml
@@ -155,7 +155,7 @@ The `three_d.py` module provides interactive 3D visualization via py3Dmol and ng
 
 - `set -euo pipefail`, 4-space indent, pass shellcheck.
 - All shell scripts live in top-level `scripts/<engine>/<category>/` — not packaged, copy to MD working directories.
-- SLURM variants in `sherlock/` subdirectories.
+- SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in the same directory.
 
 ## Dependencies
 

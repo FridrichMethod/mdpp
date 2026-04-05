@@ -75,12 +75,7 @@ needed.
 
 #### SLURM (Sherlock HPC)
 
-SLURM batch scripts are in `sherlock/` subdirectories within each category:
-
-- `scripts/gromacs/analysis/sherlock/`
-- `scripts/gromacs/compilation/sherlock/`
-- `scripts/gromacs/mdenv/sherlock/`
-- `scripts/gromacs/mdrun/sherlock/`
+SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in each category directory.
 
 ### OpenFE
 
