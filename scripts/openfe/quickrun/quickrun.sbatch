@@ -3,7 +3,7 @@
 #SBATCH --output=logs/openfe_%A_%a.out
 #SBATCH --error=logs/openfe_%A_%a.err
 #SBATCH --mail-type=FAIL
-#SBATCH --mail-user=zhaoyangli@stanford.edu
+#SBATCH --mail-user=${USER}@stanford.edu
 #SBATCH --partition=gpu,owners
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

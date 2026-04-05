@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Options:
 #   -d DIR [DIR ...]  Project directories to monitor (required)
-#   -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
+#   -e EMAIL          Notification email (default: ${USER}@stanford.edu)
 #   -i HOURS          Hours between checks (default: 1)
 #   -n                Dry run: report only, no restarts or resubmissions
 #   -h                Show help
@@ -20,7 +20,7 @@ CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
 # ---- Parse arguments ----
 
 DIRS=()
-EMAIL="zhaoyangli@stanford.edu"
+EMAIL="${USER}@stanford.edu"
 INTERVAL=1
 DRY_RUN=false
 
@@ -30,7 +30,7 @@ Usage: monitor.sh -d DIR [DIR ...] [OPTIONS]
 
 Options:
     -d DIR [DIR ...]  Project directories to monitor (required)
-    -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
+    -e EMAIL          Notification email (default: ${USER}@stanford.edu)
     -i HOURS          Interval between checks in hours (default: 1)
     -n                Dry run: report only, no restarts or resubmissions
     -h                Show this help

@@ -7,7 +7,7 @@
 #SBATCH --mem=4G
 #SBATCH --time=00:30:00
 #SBATCH --mail-type=FAIL
-#SBATCH --mail-user=zhaoyangli@stanford.edu
+#SBATCH --mail-user=${USER}@stanford.edu
 #SBATCH --output=logs/monitor_%j.out
 #SBATCH --error=logs/monitor_%j.err
 

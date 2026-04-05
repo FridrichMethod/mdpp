@@ -3,7 +3,7 @@
 #SBATCH --output=mdrun_%j.out
 #SBATCH --error=mdrun_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=zhaoyangli@stanford.edu
+#SBATCH --mail-user=${USER}@stanford.edu
 #SBATCH --partition=gpu,owners
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=2
