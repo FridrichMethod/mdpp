@@ -104,7 +104,7 @@ build_active_jobs() {
 
     # Collect running jobs whose WorkDir matches our root.
     # %F=ArrayJobId, %K=ArrayTaskId, %A=JobId, %T=State, %Z=WorkDir
-    squeue -h -u "${USER:-$(id -un)}" -o "%F|%K|%A|%T|%Z" |
+    squeue -r -h -u "${USER:-$(id -un)}" -o "%F|%K|%A|%T|%Z" |
         while IFS='|' read -r ajid taskid jobid state workdir; do
             [[ -z "$jobid" || -z "$state" ]] && continue
             workdir="$(realpath -m -- "$workdir" 2>/dev/null || true)"
