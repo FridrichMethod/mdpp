@@ -92,7 +92,6 @@ fi
 
 ACTIVE_FILE="${TMPDIR_MAIN}/active_jobs.tsv"
 RESTART_FILE="${TMPDIR_MAIN}/restart.tsv"
-export RESTART_FILE
 
 # Build one cache of all active jobs for this user at this working directory.
 # Uses scontrol SubmitLine to map each ArrayJobId to its transformation name.
@@ -208,7 +207,7 @@ process_one() {
             printf '%s\t%s\t%s\t%s\n' \
                 "$replica_dir" "${c_red}failed${c_reset}" "replica_${replica_id}" \
                 "result JSON has null estimate/uncertainty"
-            printf '%s\t%s\n' "$tname" "$replica_id" >>"$RESTART_FILE"
+            printf '__RESTART__\t%s\t%s\n' "$tname" "$replica_id"
             return
         fi
         local est unc
@@ -247,11 +246,12 @@ process_one() {
         # Extract progress from simulation_real_time_analysis.yaml.
         local progress="0%"
         local yaml_file
-        yaml_file="$(ls -t "$replica_dir"/shared_*/simulation_real_time_analysis.yaml 2>/dev/null | head -1)"
+        yaml_file="$(find "$replica_dir" -maxdepth 2 -path '*/shared_*/simulation_real_time_analysis.yaml' \
+            -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
         if [[ -n "$yaml_file" && -f "$yaml_file" ]]; then
             local pct eta
-            pct="$(grep 'percent_complete:' "$yaml_file" | tail -1 | awk '{print $2}')"
-            eta="$(grep 'estimated_time_remaining:' "$yaml_file" | tail -1 | sed 's/.*estimated_time_remaining: *//')"
+            pct="$(grep -E '^[[:space:]]*percent_complete:' "$yaml_file" | tail -1 | awk '{print $2}')"
+            eta="$(grep -E '^[[:space:]]*estimated_time_remaining:' "$yaml_file" | tail -1 | sed 's/.*estimated_time_remaining: *//')"
             if [[ -n "$pct" ]]; then
                 progress="${pct}%"
                 [[ -n "$eta" ]] && progress="${progress} (ETA: ${eta})"
@@ -266,7 +266,7 @@ process_one() {
     printf '%s\t%s\t%s\t%s\n' \
         "$replica_dir" "${c_red}failed${c_reset}" "replica_${replica_id}" \
         "incomplete and no matching active job"
-    printf '%s\t%s\n' "$tname" "$replica_id" >>"$RESTART_FILE"
+    printf '__RESTART__\t%s\t%s\n' "$tname" "$replica_id"
 }
 
 export -f process_one
@@ -274,8 +274,14 @@ export -f process_one
 printf 'directory\tstatus\treplica\tinfo\n'
 
 # shellcheck disable=SC1083  # {1} {2} are GNU parallel placeholders
-parallel -j "$JOBS" -k --colsep '\t' \
-    process_one {1} {2} "$RESULTS_DIR" "$ACTIVE_FILE" <"$WORK_FILE"
+_raw="$(parallel -j "$JOBS" -k --colsep '\t' \
+    process_one {1} {2} "$RESULTS_DIR" "$ACTIVE_FILE" <"$WORK_FILE")" || true
+
+# Separate status lines from restart markers emitted by process_one.
+if [[ -n "$_raw" ]]; then
+    printf '%s\n' "$_raw" | { grep -v '^__RESTART__' || true; }
+    printf '%s\n' "$_raw" | { grep '^__RESTART__' || true; } | cut -f2- >"$RESTART_FILE"
+fi
 
 # Restart failed replicas if -R was given.
 if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then

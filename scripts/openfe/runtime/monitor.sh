@@ -187,7 +187,7 @@ for DIR in "${DIRS[@]}"; do
     CS_FLAGS=(-r "$DIR_ABS")
     [[ "$DRY_RUN" == false ]] && CS_FLAGS+=(-R)
 
-    if ! RAW="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}" 2>&1)"; then
+    if ! RAW="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}")"; then
         echo "  Warning: check_status.sh failed for ${DIR_NAME}" >&2
         continue
     fi
