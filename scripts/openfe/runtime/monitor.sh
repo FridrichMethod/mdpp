@@ -4,26 +4,21 @@ set -euo pipefail
 
 # monitor.sh
 #
-# Monitor OpenFE quickrun jobs across project directories, restart failed jobs,
-# and send email reports. Designed to self-resubmit via SLURM for periodic
-# monitoring (default: hourly). Runs indefinitely until all jobs complete.
-#
-# Status handling:
-#   completed : no action
-#   active    : no action (job still running)
-#   failed    : restart via check_status.sh -R
-#   error     : report only (multiple matching jobs, needs manual attention)
+# Monitor OpenFE quickrun jobs, restart failures, send email reports.
+# Self-resubmits via SLURM until all jobs complete.
 #
 # Options:
 #   -d DIR         Project directory to monitor (repeatable, required)
 #   -e EMAIL       Notification email (default: zhaoyangli@stanford.edu)
 #   -i HOURS       Hours between checks (default: 1)
 #   -s STATE_FILE  Iteration state file (default: ~/.openfe_monitor_state)
-#   -n             Dry run: parse and report but do not restart or resubmit
+#   -n             Dry run: report only, no restarts or resubmissions
 #   -h             Show help
 
 SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
 CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
+
+# ---- Parse arguments ----
 
 DIRS=()
 EMAIL="zhaoyangli@stanford.edu"
@@ -75,32 +70,90 @@ if [[ ${#DIRS[@]} -eq 0 ]]; then
     exit 2
 fi
 
-# ---- Helper functions ----
+# ---- Helpers ----
 
-strip_ansi() {
-    sed 's/\x1b\[[0-9;]*m//g'
-}
+strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
 
 send_email() {
-    local subject="$1"
-    local body="$2"
-    local recipient="$3"
-
+    local subject="$1" body="$2" recipient="$3"
     if command -v mail >/dev/null 2>&1; then
         echo "$body" | mail -s "$subject" "$recipient"
     elif command -v sendmail >/dev/null 2>&1; then
-        {
-            printf 'To: %s\n' "$recipient"
-            printf 'Subject: %s\n' "$subject"
-            printf 'Content-Type: text/plain; charset=UTF-8\n'
-            printf '\n'
-            printf '%s\n' "$body"
-        } | sendmail "$recipient"
+        printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s\n' \
+            "$recipient" "$subject" "$body" | sendmail "$recipient"
     else
         echo "WARNING: No mail command available. Email report:" >&2
         echo "Subject: $subject" >&2
         echo "$body" >&2
     fi
+}
+
+# Split check_status.sh output into status TSV and restart section.
+# Sets STATUS_PART and RESTART_PART in the caller's scope.
+split_output() {
+    local clean="$1"
+    STATUS_PART=""
+    RESTART_PART=""
+    local past_status=false
+    while IFS= read -r line; do
+        if [[ "$past_status" == true ]]; then
+            RESTART_PART+="${line}"$'\n'
+        elif [[ -z "$line" && -n "$STATUS_PART" ]]; then
+            past_status=true
+        else
+            STATUS_PART+="${line}"$'\n'
+        fi
+    done <<<"$clean"
+}
+
+# Count statuses from TSV. Sets COMPLETED, ACTIVE, FAILED, ERROR, TOTAL,
+# and ERROR_LINES / FAILED_LINES in the caller's scope.
+count_statuses() {
+    COMPLETED=0 ACTIVE=0 FAILED=0 ERROR=0 TOTAL=0
+    FAILED_LINES="" ERROR_LINES=""
+    local directory status replica info tname
+    while IFS=$'\t' read -r directory status replica info; do
+        [[ "$status" == "status" || -z "$status" ]] && continue
+        TOTAL=$((TOTAL + 1))
+        case "$status" in
+            completed) COMPLETED=$((COMPLETED + 1)) ;;
+            active) ACTIVE=$((ACTIVE + 1)) ;;
+            failed)
+                FAILED=$((FAILED + 1))
+                tname="$(basename "$(dirname "$directory")")"
+                FAILED_LINES+="  ${tname}  ${replica}: ${info}"$'\n'
+                ;;
+            error)
+                ERROR=$((ERROR + 1))
+                tname="$(basename "$(dirname "$directory")")"
+                ERROR_LINES+="  ${tname}  ${replica}: ${info}"$'\n'
+                ;;
+        esac
+    done <<<"$1"
+}
+
+# Parse restart output from check_status.sh -R. Sets RESTART_COUNT and
+# RESTART_LINES in the caller's scope.
+parse_restarts() {
+    RESTART_COUNT=0 RESTART_LINES=""
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        RESTART_LINES+="  ${line}"$'\n'
+        [[ "$line" == "Submitted batch job"* ]] && RESTART_COUNT=$((RESTART_COUNT + 1))
+    done <<<"$1"
+}
+
+# Build dry-run restart lines from failed entries.
+dry_run_restarts() {
+    RESTART_COUNT=0 RESTART_LINES=""
+    local directory status replica info tname
+    while IFS=$'\t' read -r directory status replica info; do
+        [[ "$status" == "failed" ]] || continue
+        tname="$(basename "$(dirname "$directory")")"
+        RESTART_LINES+="  ${tname}  ${replica} -> [DRY RUN] would restart"$'\n'
+        RESTART_COUNT=$((RESTART_COUNT + 1))
+    done <<<"$1"
 }
 
 # ---- Iteration tracking ----
@@ -109,171 +162,81 @@ ITERATION=1
 if [[ -f "$STATE_FILE" ]]; then
     ITERATION=$(($(cat "$STATE_FILE") + 1))
 fi
-
 echo "$ITERATION" >"$STATE_FILE"
-
-NL=$'\n'
 
 echo "=== OpenFE Monitor: Iteration ${ITERATION} ==="
 echo "Timestamp: $(date)"
 echo ""
 
-# ---- Main loop over directories ----
+# ---- Process each directory ----
 
-TOTAL_RESTARTS=0
-TOTAL_COMPLETED=0
-TOTAL_ACTIVE=0
-TOTAL_FAILED=0
-TOTAL_ERROR=0
+GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_FAILED=0 GRAND_ERROR=0
+GRAND_TOTAL=0 GRAND_RESTARTS=0
 REPORT=""
 
 for DIR in "${DIRS[@]}"; do
     if [[ ! -d "$DIR" ]]; then
         echo "  Warning: directory does not exist: $DIR" >&2
-        REPORT+="${NL}--- $(basename "$DIR") ---${NL}  Directory not found: ${DIR}${NL}"
         continue
     fi
 
     DIR_ABS="$(cd "$DIR" && pwd -P)"
     DIR_NAME="$(basename "$DIR_ABS")"
 
-    echo "--- Checking: ${DIR_NAME} ---"
-
-    # Build check_status.sh flags.
+    # Run check_status.sh (with -R unless dry run).
     CS_FLAGS=(-r "$DIR_ABS")
-    if [[ "$DRY_RUN" == false ]]; then
-        CS_FLAGS+=(-R)
-    fi
+    [[ "$DRY_RUN" == false ]] && CS_FLAGS+=(-R)
 
-    # Run check_status.sh; capture full output (status TSV + restart messages).
-    if ! FULL_OUTPUT="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}" 2>&1)"; then
-        echo "  Warning: check_status.sh returned non-zero for ${DIR_NAME}" >&2
-        REPORT+="${NL}--- ${DIR_NAME} ---${NL}  check_status.sh failed${NL}"
+    if ! RAW="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}" 2>&1)"; then
+        echo "  Warning: check_status.sh failed for ${DIR_NAME}" >&2
         continue
     fi
 
-    # Strip ANSI codes for parsing.
-    CLEAN_OUTPUT="$(echo "$FULL_OUTPUT" | strip_ansi)"
-
-    # Split into status TSV (before first blank line after header) and restart section.
-    STATUS_PART=""
-    RESTART_PART=""
-    past_status=false
-
-    while IFS= read -r line; do
-        if [[ "$past_status" == true ]]; then
-            RESTART_PART+="${line}${NL}"
-        elif [[ -z "$line" && -n "$STATUS_PART" ]]; then
-            past_status=true
-        else
-            STATUS_PART+="${line}${NL}"
-        fi
-    done <<<"$CLEAN_OUTPUT"
-
-    # Count statuses from TSV (skip header).
-    COMPLETED=0
-    ACTIVE=0
-    FAILED=0
-    ERROR=0
-    TOTAL=0
-    ERROR_INFO=""
-
-    while IFS=$'\t' read -r directory status replica info; do
-        [[ "$status" == "status" ]] && continue
-        [[ -z "$status" ]] && continue
-
-        TOTAL=$((TOTAL + 1))
-
-        case "$status" in
-            completed) COMPLETED=$((COMPLETED + 1)) ;;
-            active) ACTIVE=$((ACTIVE + 1)) ;;
-            failed) FAILED=$((FAILED + 1)) ;;
-            error)
-                ERROR=$((ERROR + 1))
-                tname="$(basename "$(dirname "$directory")")"
-                ERROR_INFO+="    ${tname}  ${replica}: ${info}${NL}"
-                ;;
-        esac
-    done <<<"$STATUS_PART"
-
-    TOTAL_COMPLETED=$((TOTAL_COMPLETED + COMPLETED))
-    TOTAL_ACTIVE=$((TOTAL_ACTIVE + ACTIVE))
-    TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
-    TOTAL_ERROR=$((TOTAL_ERROR + ERROR))
-
-    # Parse restart info from check_status.sh -R output.
-    RESTART_COUNT=0
-    RESTART_INFO=""
+    CLEAN="$(echo "$RAW" | strip_ansi)"
+    split_output "$CLEAN"
+    count_statuses "$STATUS_PART"
 
     if [[ "$DRY_RUN" == true && FAILED -gt 0 ]]; then
-        # Dry run: show what would be restarted from the failed entries.
-        while IFS=$'\t' read -r directory status replica info; do
-            [[ "$status" == "failed" ]] || continue
-            tname="$(basename "$(dirname "$directory")")"
-            RESTART_INFO+="    ${tname}  ${replica} -> [DRY RUN] would restart${NL}"
-            RESTART_COUNT=$((RESTART_COUNT + 1))
-        done <<<"$STATUS_PART"
-    elif [[ -n "$RESTART_PART" ]]; then
-        # Parse actual restart output from check_status.sh -R.
-        local_restart=""
-        while IFS= read -r line; do
-            if [[ "$line" == Resubmitting* ]]; then
-                local_restart+="    ${line}${NL}"
-            elif [[ "$line" == "Submitted batch job"* ]]; then
-                RESTART_COUNT=$((RESTART_COUNT + 1))
-                local_restart+="    ${line}${NL}"
-            fi
-        done <<<"$RESTART_PART"
-        RESTART_INFO="$local_restart"
+        dry_run_restarts "$STATUS_PART"
+    else
+        parse_restarts "$RESTART_PART"
     fi
 
-    TOTAL_RESTARTS=$((TOTAL_RESTARTS + RESTART_COUNT))
+    # Accumulate totals.
+    GRAND_COMPLETED=$((GRAND_COMPLETED + COMPLETED))
+    GRAND_ACTIVE=$((GRAND_ACTIVE + ACTIVE))
+    GRAND_FAILED=$((GRAND_FAILED + FAILED))
+    GRAND_ERROR=$((GRAND_ERROR + ERROR))
+    GRAND_TOTAL=$((GRAND_TOTAL + TOTAL))
+    GRAND_RESTARTS=$((GRAND_RESTARTS + RESTART_COUNT))
 
-    # Build directory report section.
-    DIR_REPORT="--- ${DIR_NAME} ---${NL}"
-    DIR_REPORT+="  Completed: ${COMPLETED}/${TOTAL}  Active: ${ACTIVE}  Failed: ${FAILED}"
-    if ((RESTART_COUNT > 0)); then
-        DIR_REPORT+=" (restarted)"
-    fi
-    DIR_REPORT+="  Error: ${ERROR}${NL}"
-
-    if [[ -n "$RESTART_INFO" ]]; then
-        DIR_REPORT+="${NL}  Restarts:${NL}${RESTART_INFO}"
-    fi
-
-    if ((ERROR > 0)); then
-        DIR_REPORT+="${NL}  Errors (not restarted):${NL}${ERROR_INFO}"
-    fi
-
-    REPORT+="${NL}${DIR_REPORT}"
-    echo "$DIR_REPORT"
+    # Build per-directory report.
+    R="[${DIR_NAME}] ${COMPLETED}/${TOTAL} completed, ${ACTIVE} active, ${FAILED} failed, ${ERROR} error"$'\n'
+    [[ -n "$RESTART_LINES" ]] && R+="${RESTART_LINES}"
+    [[ -n "$ERROR_LINES" ]] && R+="${ERROR_LINES}"
+    REPORT+="${R}"$'\n'
+    echo "$R"
 done
 
-# ---- Check if all done ----
+# ---- All done? ----
 
 ALL_DONE=false
-if ((TOTAL_ACTIVE == 0 && TOTAL_FAILED == 0 && TOTAL_ERROR == 0 && TOTAL_COMPLETED > 0)); then
+if ((GRAND_ACTIVE == 0 && GRAND_FAILED == 0 && GRAND_ERROR == 0 && GRAND_COMPLETED > 0)); then
     ALL_DONE=true
 fi
 
-# ---- Build and send email ----
+# ---- Email ----
+
+SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active, ${GRAND_FAILED} failed, ${GRAND_ERROR} error"
 
 if [[ "$ALL_DONE" == true ]]; then
-    SUBJECT="[OpenFE Monitor] All jobs completed!"
-    BODY="All jobs across ${#DIRS[@]} directories have completed.${NL}${NL}"
-    BODY+="Final status (iteration ${ITERATION}):${NL}"
-    BODY+="${REPORT}"
+    SUBJECT="[OpenFE Monitor] All ${GRAND_TOTAL} jobs completed"
+    BODY="All jobs completed (iteration ${ITERATION})."$'\n\n'"${REPORT}"
 else
-    SUBJECT="[OpenFE Monitor] Iteration ${ITERATION}"
-    if ((TOTAL_RESTARTS > 0)); then
-        SUBJECT+=" - ${TOTAL_RESTARTS} restart(s)"
-    fi
-    BODY="Monitoring report for iteration ${ITERATION}${NL}"
-    BODY+="Timestamp: $(date)${NL}"
-    BODY+="${REPORT}"
+    SUBJECT="[OpenFE Monitor] #${ITERATION}: ${SUMMARY}"
+    BODY="Iteration ${ITERATION} -- $(date)"$'\n\n'"${REPORT}"
 fi
 
-echo ""
 echo "Sending email to ${EMAIL}..."
 if [[ "$DRY_RUN" == true ]]; then
     echo "[DRY RUN] Would send email:"
@@ -291,16 +254,11 @@ if [[ "$ALL_DONE" == true ]]; then
     exit 0
 fi
 
-# Reconstruct original arguments for resubmission.
 MONITOR_SBATCH="${SCRIPTS_DIR}/monitor.sbatch"
 ARGS=()
-for d in "${DIRS[@]}"; do
-    ARGS+=(-d "$d")
-done
+for d in "${DIRS[@]}"; do ARGS+=(-d "$d"); done
 ARGS+=(-e "$EMAIL" -i "$INTERVAL" -s "$STATE_FILE")
-if [[ "$DRY_RUN" == true ]]; then
-    ARGS+=(-n)
-fi
+[[ "$DRY_RUN" == true ]] && ARGS+=(-n)
 
 if [[ "$DRY_RUN" == true ]]; then
     echo "[DRY RUN] Would resubmit: sbatch --begin=now+${INTERVAL}hour --dependency=singleton ${MONITOR_SBATCH} ${ARGS[*]}"
