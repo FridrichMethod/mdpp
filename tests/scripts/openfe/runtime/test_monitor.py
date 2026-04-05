@@ -1,4 +1,4 @@
-"""Tests for scripts/openfe/runtime/monitor.sh.
+"""Tests for scripts/openfe/runtime/monitor.sbatch.
 
 Uses a mock check_status.sh that returns canned TSV output, so no
 Slurm/parallel/jq dependencies are needed.
@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 
-MONITOR_SH = Path(__file__).resolve().parents[4] / "scripts" / "openfe" / "runtime" / "monitor.sh"
+MONITOR_SBATCH = (
+    Path(__file__).resolve().parents[4] / "scripts" / "openfe" / "runtime" / "monitor.sbatch"
+)
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -100,7 +102,7 @@ _STATUS_MIXED_WITH_RESTART = (
 
 @pytest.fixture()
 def monitor_env(tmp_path: Path) -> dict[str, Path]:
-    """Set up a mock environment for monitor.sh."""
+    """Set up a mock environment for monitor.sbatch."""
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
 
@@ -120,13 +122,9 @@ def monitor_env(tmp_path: Path) -> dict[str, Path]:
     )
     _make_executable(mock_cs)
 
-    # Copy real monitor.sh so SCRIPTS_DIR resolves to our mock dir.
-    monitor_copy = scripts_dir / "monitor.sh"
-    shutil.copy2(MONITOR_SH, monitor_copy)
-
-    # Mock monitor.sbatch for self-resubmit.
-    (scripts_dir / "monitor.sbatch").write_text("#!/bin/bash\nexit 0\n")
-    _make_executable(scripts_dir / "monitor.sbatch")
+    # Copy real monitor.sbatch so SCRIPTS_DIR resolves to our mock dir.
+    monitor_copy = scripts_dir / "monitor.sbatch"
+    shutil.copy2(MONITOR_SBATCH, monitor_copy)
 
     # Shim bin dir: sbatch and mail.
     bin_dir = tmp_path / "bin"
@@ -164,7 +162,7 @@ def monitor_env(tmp_path: Path) -> dict[str, Path]:
     (project / "results").mkdir(parents=True)
 
     return {
-        "monitor_sh": monitor_copy,
+        "monitor_sbatch": monitor_copy,
         "cs_response": cs_response,
         "sbatch_log": sbatch_log,
         "mail_log": mail_log,
@@ -179,7 +177,7 @@ def _run(
     dirs: list[Path] | None = None,
     dry_run: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    cmd = ["bash", str(env["monitor_sh"])]
+    cmd = ["bash", str(env["monitor_sbatch"])]
     for d in dirs if dirs is not None else [env["project"]]:
         cmd += ["-d", str(d)]
     if dry_run:
@@ -295,7 +293,7 @@ class TestAllDone:
 
 
 class TestSelfResubmit:
-    """Self-resubmission with correct interval."""
+    """Self-resubmission with correct interval and --chdir."""
 
     def test_interval_flag(self, monitor_env: dict[str, Path]) -> None:
         monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED_AND_RESTART)
@@ -303,6 +301,14 @@ class TestSelfResubmit:
         sbatch_log = monitor_env["sbatch_log"].read_text()
         assert "now+2hour" in sbatch_log
         assert "--dependency=singleton" in sbatch_log
+
+    def test_chdir_to_scripts_dir(self, monitor_env: dict[str, Path]) -> None:
+        """Self-resubmit must pass --chdir so the resubmitted job runs in the scripts dir."""
+        monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED_AND_RESTART)
+        _run(monitor_env)
+        sbatch_log = monitor_env["sbatch_log"].read_text()
+        scripts_dir = str(monitor_env["monitor_sbatch"].parent)
+        assert f"--chdir {scripts_dir}" in sbatch_log
 
 
 class TestEmailContent:
