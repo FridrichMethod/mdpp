@@ -73,15 +73,19 @@ def _place_result(
     return result_json
 
 
+def _ensure_replica_dir(results_dir: Path, tname: str, replica_id: int) -> Path:
+    """Create an empty replica directory (no result JSON) for auto-detect."""
+    replica_dir = results_dir / tname / f"replica_{replica_id}"
+    replica_dir.mkdir(parents=True, exist_ok=True)
+    return replica_dir
+
+
 def _run(
     slurm_env: dict[str, Path],
     *extra_args: str,
     root: Path,
-    replicas: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cmd = ["bash", str(CHECK_STATUS), "-r", str(root)]
-    if replicas is not None:
-        cmd += ["-n", str(replicas)]
     cmd += list(extra_args)
     return subprocess.run(
         cmd,
@@ -118,7 +122,7 @@ class TestCompletedReplica:
     ) -> None:
         _place_result(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0, valid=True)
 
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -137,7 +141,7 @@ class TestNullEstimate:
     ) -> None:
         _place_result(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0, valid=False)
 
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -152,7 +156,8 @@ class TestNoResultNoJob:
     def test_missing_result_is_failed(
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        _ensure_replica_dir(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -178,7 +183,8 @@ class TestActiveJob:
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
         self._setup_active(slurm_env, openfe_workspace)
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        _ensure_replica_dir(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -191,7 +197,8 @@ class TestActiveJob:
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
         self._setup_active(slurm_env, openfe_workspace)
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        _ensure_replica_dir(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0)
+        result = _run(slurm_env, root=openfe_workspace["root"])
 
         rows = _parse_rows(result.stdout)
         assert "0%" in rows[0]["info"]
@@ -222,7 +229,7 @@ class TestActiveJob:
             "    estimated_time_remaining: 1 day, 12:00:00\n"
         )
 
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         rows = _parse_rows(result.stdout)
         assert "25.0%" in rows[0]["info"]
         assert "ETA:" in rows[0]["info"]
@@ -246,7 +253,8 @@ class TestMultipleJobs:
             f"-o {root_abs}/results\n"
         )
 
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        _ensure_replica_dir(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -264,9 +272,9 @@ class TestMixedReplicas:
         tname = "rbfe_A_complex_B_complex"
         _place_result(openfe_workspace["results_dir"], tname, 0, valid=True)
         _place_result(openfe_workspace["results_dir"], tname, 1, valid=False)
-        # replica 2: no result, no job
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 2)
 
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=3)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         rows = _parse_rows(result.stdout)
@@ -304,9 +312,9 @@ class TestRestartFlag:
         tname = "rbfe_A_complex_B_complex"
         _place_result(openfe_workspace["results_dir"], tname, 0, valid=True)
         _place_result(openfe_workspace["results_dir"], tname, 1, valid=False)
-        # replica 2: missing
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 2)
 
-        result = _run(slurm_env, "-R", root=openfe_workspace["root"], replicas=3)
+        result = _run(slurm_env, "-R", root=openfe_workspace["root"])
         assert result.returncode == 0
 
         sbatch_log = slurm_env["sbatch"].read_text().strip()
@@ -322,7 +330,8 @@ class TestRestartFlag:
     def test_no_restart_without_flag(
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
-        result = _run(slurm_env, root=openfe_workspace["root"], replicas=1)
+        _ensure_replica_dir(openfe_workspace["results_dir"], "rbfe_A_complex_B_complex", 0)
+        result = _run(slurm_env, root=openfe_workspace["root"])
         assert result.returncode == 0
 
         sbatch_log = slurm_env["sbatch"].read_text().strip()
@@ -336,7 +345,7 @@ class TestNoTransformationsDir:
         empty = tmp_path / "empty"
         empty.mkdir()
 
-        result = _run(slurm_env, root=empty, replicas=1)
+        result = _run(slurm_env, root=empty)
         assert result.returncode != 0
         assert "transformations directory not found" in result.stderr
 

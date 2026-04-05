@@ -14,7 +14,6 @@ set -euo pipefail
 #
 # Options:
 #   -j N    number of parallel workers (default: 8)
-#   -n N    number of replicas per transformation (default: auto-detect)
 #   -r DIR  root directory to search (default: .)
 #   -R      restart failed replicas via sbatch
 #   -h      show help
@@ -23,26 +22,23 @@ set -euo pipefail
 
 JOBS=8
 ROOT="."
-REPLICAS=""
 RESTART=false
 
 usage() {
     cat <<'EOF'
-Usage: check_status.sh [-j N] [-n REPLICAS] [-r ROOT] [-R]
+Usage: check_status.sh [-j N] [-r ROOT] [-R]
 
 Options:
     -j N        Number of parallel workers (default: 8)
-    -n REPLICAS Number of replicas per transformation (default: auto-detect)
     -r ROOT     Root directory (default: .)
     -R          Restart failed replicas via sbatch
     -h          Show this help
 EOF
 }
 
-while getopts ":j:n:r:Rh" opt; do
+while getopts ":j:r:Rh" opt; do
     case "$opt" in
         j) JOBS="$OPTARG" ;;
-        n) REPLICAS="$OPTARG" ;;
         r) ROOT="$OPTARG" ;;
         R) RESTART=true ;;
         h)
@@ -70,11 +66,6 @@ for cmd in parallel squeue scontrol; do
         exit 1
     }
 done
-
-if [[ -n "$REPLICAS" ]] && ! [[ "$REPLICAS" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: -n REPLICAS must be a positive integer" >&2
-    exit 2
-fi
 
 # ---- Setup ----
 
@@ -137,33 +128,35 @@ build_active_jobs() {
 # ---- Functions: work enumeration ----
 
 # List all (transform_name, replica_id) pairs that need checking.
+# Replica count is auto-detected per transformation by taking the maximum
+# replica ID from two sources:
+#   1. Existing replica_* directories under results/<tname>/
+#   2. Active SLURM array task IDs for that transformation in squeue
+# The final count is max_id + 1, checking replica_0 through replica_{max_id}.
 enumerate_work() {
-    local transforms_dir="$1" results_dir="$2" active_tsv="$3" num_replicas="$4"
+    local transforms_dir="$1" results_dir="$2" active_tsv="$3"
 
     find "$transforms_dir" -maxdepth 1 -name '*.json' -type f | sort |
         while IFS= read -r tfile; do
             tname="$(basename "$tfile" .json)"
 
-            if [[ -n "$num_replicas" ]]; then
-                count="$num_replicas"
-            else
-                # Auto-detect replica count from results dir + active jobs.
-                max_id=-1
+            max_id=-1
 
-                if [[ -d "${results_dir}/${tname}" ]]; then
-                    for rdir in "${results_dir}/${tname}"/replica_*; do
-                        [[ -d "$rdir" ]] || continue
-                        rid="${rdir##*replica_}"
-                        [[ "$rid" =~ ^[0-9]+$ ]] && ((rid > max_id)) && max_id=$rid
-                    done
-                fi
-
-                while IFS=$'\t' read -r tn tid _ _; do
-                    [[ "$tn" == "$tname" && "$tid" =~ ^[0-9]+$ ]] && ((tid > max_id)) && max_id=$tid
-                done <"$active_tsv"
-
-                count=$((max_id + 1))
+            # Source 1: replica directories on disk.
+            if [[ -d "${results_dir}/${tname}" ]]; then
+                for rdir in "${results_dir}/${tname}"/replica_*; do
+                    [[ -d "$rdir" ]] || continue
+                    rid="${rdir##*replica_}"
+                    [[ "$rid" =~ ^[0-9]+$ ]] && ((rid > max_id)) && max_id=$rid
+                done
             fi
+
+            # Source 2: active SLURM array task IDs.
+            while IFS=$'\t' read -r tn tid _ _; do
+                [[ "$tn" == "$tname" && "$tid" =~ ^[0-9]+$ ]] && ((tid > max_id)) && max_id=$tid
+            done <"$active_tsv"
+
+            count=$((max_id + 1))
 
             for ((i = 0; i < count; i++)); do
                 printf '%s\t%s\n' "$tname" "$i"
@@ -304,11 +297,11 @@ restart_failed() {
 build_active_jobs "$ROOT_ABS" >"$ACTIVE_FILE"
 
 shopt -s nullglob
-enumerate_work "$TRANSFORMS_DIR" "$RESULTS_DIR" "$ACTIVE_FILE" "$REPLICAS" \
+enumerate_work "$TRANSFORMS_DIR" "$RESULTS_DIR" "$ACTIVE_FILE" \
     >"${TMPDIR_MAIN}/work.tsv"
 
 if [[ ! -s "${TMPDIR_MAIN}/work.tsv" ]]; then
-    echo "No replicas found. Use -n to specify replica count." >&2
+    echo "No replicas found." >&2
     exit 0
 fi
 
