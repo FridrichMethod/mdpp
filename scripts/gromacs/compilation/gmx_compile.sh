@@ -2,15 +2,17 @@
 
 set -euo pipefail
 
-for compiler in cmake make gcc g++ nvcc; do
-    if ! command -v $compiler >/dev/null 2>&1; then
-        echo "$compiler could not be found"
-        exit 1
-    fi
-done
+ml gcc/12.4.0
+ml cmake/3.31.4
+ml make/4.4
+ml cuda/12.6.1
+ml fftw/3.3.9
+ml gsl/2.7
+ml openblas/0.3.28
+ml python/3.12.1
 
 GMX_VERSION="2026.0"
-GMX_PREFIX="/usr/local/gromacs-${GMX_VERSION}"
+GMX_PREFIX="${GROUP_HOME}/gromacs-${GMX_VERSION}"
 GMX_TGZ_URL="https://ftp.gromacs.org/gromacs/gromacs-${GMX_VERSION}.tar.gz"
 NPROC="${1:-$(nproc)}"
 

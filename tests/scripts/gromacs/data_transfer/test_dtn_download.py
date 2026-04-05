@@ -1,4 +1,4 @@
-"""Tests for scripts/gromacs/data_transfer/sherlock/dtn_download.sh.
+"""Tests for scripts/gromacs/data_transfer/dtn_download.sh.
 
 Only argument parsing and validation are tested; actual SSH/rsync
 calls are not executed (the script would fail without a real host).
@@ -20,7 +20,6 @@ DTN_SH = (
     / "scripts"
     / "gromacs"
     / "data_transfer"
-    / "sherlock"
     / "dtn_download.sh"
 )
 
