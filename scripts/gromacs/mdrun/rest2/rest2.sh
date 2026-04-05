@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+[[ -d toppar ]] || {
+    echo "Error: toppar/ not found" >&2
+    exit 1
+}
 cd toppar || exit 1
 rm -f processed_*.itp
 for d in *.itp; do

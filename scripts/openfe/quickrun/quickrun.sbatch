@@ -66,7 +66,7 @@ if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
 fi
 
 filename=$(basename "${FILE}" .json)
-run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID}"
+run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID:-0}"
 mkdir -p "${run_dir}"
 
 # Remove stale result JSON so openfe can write to -o.

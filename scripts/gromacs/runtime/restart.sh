@@ -9,11 +9,11 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 err() {
-    echo -e "${RED}Error:${NC} $*" >&2
+    printf '%bError:%b %s\n' "${RED}" "${NC}" "$*" >&2
     exit 1
 }
-info() { echo -e "${GREEN}[$1]${NC} $2"; }
-warn() { echo -e "${YELLOW}Warning:${NC} $*" >&2; }
+info() { printf '%b[%s]%b %s\n' "${GREEN}" "$1" "${NC}" "$2"; }
+warn() { printf '%bWarning:%b %s\n' "${YELLOW}" "${NC}" "$*" >&2; }
 
 usage() {
     echo "Usage: $0 <slurm_job_id> [slurm_job_id ...]" >&2
@@ -44,7 +44,7 @@ for JOBID in "$@"; do
     done
 
     if [[ ${#DIRS[@]} -ne 1 ]]; then
-        echo -e "${RED}Error:${NC} found ${BOLD}mdrun_${JOBID}.*${NC} in multiple directories:" >&2
+        printf '%bError:%b found %bmdrun_%s.*%b in multiple directories:\n' "${RED}" "${NC}" "${BOLD}" "${JOBID}" "${NC}" >&2
         for d in "${!DIRS[@]}"; do
             echo "  $d" >&2
         done

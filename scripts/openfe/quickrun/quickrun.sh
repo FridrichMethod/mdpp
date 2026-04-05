@@ -10,6 +10,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -r | --repeats)
             REPEATS=$2
+            if ! [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Error: --repeats must be a positive integer, got: ${REPEATS}" >&2
+                exit 1
+            fi
             shift 2
             ;;
         *)

@@ -25,7 +25,13 @@ SSH_OPTS="ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInter
 
 while getopts "j:n" opt; do
     case $opt in
-        j) JOBS="$OPTARG" ;;
+        j)
+            [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
+                echo "Error: -j requires a positive integer" >&2
+                usage
+            }
+            JOBS="$OPTARG"
+            ;;
         n) DRY_RUN="--dry-run" ;;
         *) usage ;;
     esac

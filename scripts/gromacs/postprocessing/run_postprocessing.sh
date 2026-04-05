@@ -13,9 +13,15 @@ MAX_JOBS=0
 
 while getopts "j:" opt; do
     case "${opt}" in
-        j) MAX_JOBS="${OPTARG}" ;;
+        j)
+            [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
+                printf '%bError: -j requires a positive integer%b\n' "${RED}" "${RESET}" >&2
+                exit 1
+            }
+            MAX_JOBS="${OPTARG}"
+            ;;
         *)
-            echo -e "${RED}Usage: $0 [-j max_parallel] <directory>${RESET}"
+            printf '%bUsage: %s [-j max_parallel] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
             exit 1
             ;;
     esac
@@ -23,8 +29,8 @@ done
 shift $((OPTIND - 1))
 
 if [[ $# -ne 1 ]]; then
-    echo -e "${RED}Usage: $0 [-j max_parallel] <directory>${RESET}"
-    echo -e "${RED}Example: $0 -j 4 results/md/replica2${RESET}"
+    printf '%bUsage: %s [-j max_parallel] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
+    printf '%bExample: %s -j 4 results/md/replica2%b\n' "${RED}" "$0" "${RESET}" >&2
     exit 1
 fi
 
@@ -32,7 +38,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="$(realpath "$1")"
 
 if [[ ! -d "${TARGET_DIR}" ]]; then
-    echo -e "${RED}Error: ${TARGET_DIR} is not a directory${RESET}"
+    printf '%bError: %s is not a directory%b\n' "${RED}" "${TARGET_DIR}" "${RESET}" >&2
     exit 1
 fi
 
@@ -59,10 +65,9 @@ for subdir in "${TARGET_DIR}"/*/; do
 
     (
         cd "${subdir}"
-        cp "${SCRIPT_DIR}/gmx_postprocessing_fast.sh" .
-        echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${BLUE}Starting:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
-        bash gmx_postprocessing_fast.sh
-        echo -e "${GRAY}[$(date '+%H:%M:%S')]${RESET} ${GREEN}Finished:${RESET} ${BOLD}$(basename "${subdir}")${RESET}"
+        printf '%b[%s]%b %bStarting:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${BLUE}" "${RESET}" "${BOLD}" "$(basename "${subdir}")" "${RESET}"
+        bash "${SCRIPT_DIR}/gmx_postprocessing_fast.sh"
+        printf '%b[%s]%b %bFinished:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${GREEN}" "${RESET}" "${BOLD}" "$(basename "${subdir}")" "${RESET}"
     ) &
 
     PIDS+=($!)
@@ -80,11 +85,11 @@ for i in "${!PIDS[@]}"; do
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
-    echo -e "${RED}Failed jobs:${RESET}"
+    printf '%bFailed jobs:%b\n' "${RED}" "${RESET}"
     for name in "${FAILED[@]}"; do
-        echo -e "  ${RED}- ${name}${RESET}"
+        printf '  %b- %s%b\n' "${RED}" "${name}" "${RESET}"
     done
     exit 1
 fi
 
-echo -e "${GREEN}All ${#PIDS[@]} jobs completed successfully${RESET}"
+printf '%bAll %d jobs completed successfully%b\n' "${GREEN}" "${#PIDS[@]}" "${RESET}"

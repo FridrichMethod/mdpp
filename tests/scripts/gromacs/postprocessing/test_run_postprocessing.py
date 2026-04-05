@@ -140,8 +140,7 @@ class TestNotADirectory:
         _, script = _setup_workspace(tmp_path, [])
         result = _run(script, str(tmp_path / "nonexistent"), cwd=tmp_path)
         assert result.returncode != 0
-        # Script prints errors to stdout via echo -e.
-        assert "is not a directory" in _strip_ansi(result.stdout)
+        assert "is not a directory" in _strip_ansi(result.stderr)
 
 
 class TestNoArgument:
@@ -151,8 +150,7 @@ class TestNoArgument:
         _, script = _setup_workspace(tmp_path, [])
         result = _run(script, cwd=tmp_path)
         assert result.returncode == 1
-        # Script prints usage to stdout via echo -e.
-        assert "Usage:" in _strip_ansi(result.stdout)
+        assert "Usage:" in _strip_ansi(result.stderr)
 
 
 class TestMaxJobsFlag:

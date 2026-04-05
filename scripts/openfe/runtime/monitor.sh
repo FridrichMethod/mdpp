@@ -64,6 +64,10 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             }
             INTERVAL="$2"
+            if ! [[ "$INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Error: -i INTERVAL must be a positive integer, got: ${INTERVAL}" >&2
+                exit 2
+            fi
             shift 2
             ;;
         -n)
@@ -95,14 +99,14 @@ strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
 send_email() {
     local subject="$1" body="$2" recipient="$3"
     if command -v mail >/dev/null 2>&1; then
-        echo "$body" | mail -s "$subject" "$recipient"
+        printf '%s\n' "$body" | mail -s "$subject" "$recipient"
     elif command -v sendmail >/dev/null 2>&1; then
         printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s\n' \
             "$recipient" "$subject" "$body" | sendmail "$recipient"
     else
         echo "WARNING: No mail command available. Email report:" >&2
         echo "Subject: $subject" >&2
-        echo "$body" >&2
+        printf '%s\n' "$body" >&2
     fi
 }
 
@@ -142,6 +146,7 @@ count_statuses() {
                 tname="$(basename "$(dirname "$directory")")"
                 ERROR_LINES+="  ${tname}  ${replica}: ${info}"$'\n'
                 ;;
+            *) echo "Warning: unexpected status '${status}' for ${directory}" >&2 ;;
         esac
     done <<<"$1"
 }
