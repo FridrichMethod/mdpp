@@ -8,12 +8,12 @@ set -euo pipefail
 # Self-resubmits via SLURM until all jobs complete.
 #
 # Options:
-#   -d DIR         Project directory to monitor (repeatable, required)
-#   -e EMAIL       Notification email (default: zhaoyangli@stanford.edu)
-#   -i HOURS       Hours between checks (default: 1)
-#   -s STATE_FILE  Iteration state file (default: ~/.openfe_monitor_state)
-#   -n             Dry run: report only, no restarts or resubmissions
-#   -h             Show help
+#   -d DIR [DIR ...]  Project directories to monitor (required)
+#   -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
+#   -i HOURS          Hours between checks (default: 1)
+#   -s STATE_FILE     Iteration state file (default: ~/.openfe_monitor_state)
+#   -n                Dry run: report only, no restarts or resubmissions
+#   -h                Show help
 
 SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
 CHECK_STATUS="${SCRIPTS_DIR}/check_status.sh"
@@ -28,36 +28,35 @@ DRY_RUN=false
 
 usage() {
     cat <<'EOF'
-Usage: monitor.sh -d DIR [-d DIR ...] [OPTIONS]
+Usage: monitor.sh -d DIR [DIR ...] [OPTIONS]
 
 Options:
-    -d DIR         Project directory to monitor (repeatable, required)
-    -e EMAIL       Notification email (default: zhaoyangli@stanford.edu)
-    -i HOURS       Interval between checks in hours (default: 1)
-    -s STATE_FILE  Iteration state file (default: ~/.openfe_monitor_state)
-    -n             Dry run: report only, no restarts or resubmissions
-    -h             Show this help
+    -d DIR [DIR ...]  Project directories to monitor (required)
+    -e EMAIL          Notification email (default: zhaoyangli@stanford.edu)
+    -i HOURS          Interval between checks in hours (default: 1)
+    -s STATE_FILE     Iteration state file (default: ~/.openfe_monitor_state)
+    -n                Dry run: report only, no restarts or resubmissions
+    -h                Show this help
 EOF
 }
 
-while getopts ":d:e:i:s:nh" opt; do
-    case "$opt" in
-        d) DIRS+=("$OPTARG") ;;
-        e) EMAIL="$OPTARG" ;;
-        i) INTERVAL="$OPTARG" ;;
-        s) STATE_FILE="$OPTARG" ;;
-        n) DRY_RUN=true ;;
-        h)
-            usage
-            exit 0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -d)
+            shift
+            [[ $# -eq 0 || "$1" == -* ]] && { echo "Error: -d requires at least one directory" >&2; exit 2; }
+            while [[ $# -gt 0 && "$1" != -* ]]; do
+                DIRS+=("$1")
+                shift
+            done
             ;;
-        \?)
-            echo "Error: invalid option -$OPTARG" >&2
-            usage
-            exit 2
-            ;;
-        :)
-            echo "Error: option -$OPTARG requires an argument" >&2
+        -e) [[ $# -lt 2 ]] && { echo "Error: -e requires an argument" >&2; exit 2; }; EMAIL="$2"; shift 2 ;;
+        -i) [[ $# -lt 2 ]] && { echo "Error: -i requires an argument" >&2; exit 2; }; INTERVAL="$2"; shift 2 ;;
+        -s) [[ $# -lt 2 ]] && { echo "Error: -s requires an argument" >&2; exit 2; }; STATE_FILE="$2"; shift 2 ;;
+        -n) DRY_RUN=true; shift ;;
+        -h) usage; exit 0 ;;
+        *)
+            echo "Error: unknown option $1" >&2
             usage
             exit 2
             ;;
@@ -65,7 +64,7 @@ while getopts ":d:e:i:s:nh" opt; do
 done
 
 if [[ ${#DIRS[@]} -eq 0 ]]; then
-    echo "Error: at least one -d DIR is required" >&2
+    echo "Error: -d DIR is required" >&2
     usage
     exit 2
 fi
@@ -255,9 +254,7 @@ if [[ "$ALL_DONE" == true ]]; then
 fi
 
 MONITOR_SBATCH="${SCRIPTS_DIR}/monitor.sbatch"
-ARGS=()
-for d in "${DIRS[@]}"; do ARGS+=(-d "$d"); done
-ARGS+=(-e "$EMAIL" -i "$INTERVAL" -s "$STATE_FILE")
+ARGS=(-d "${DIRS[@]}" -e "$EMAIL" -i "$INTERVAL" -s "$STATE_FILE")
 [[ "$DRY_RUN" == true ]] && ARGS+=(-n)
 
 if [[ "$DRY_RUN" == true ]]; then
