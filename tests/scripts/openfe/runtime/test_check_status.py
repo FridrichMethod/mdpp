@@ -448,7 +448,7 @@ class TestPreemptionDetection:
     def test_sacct_step_records_are_skipped(
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
-        """sacct step records (*.batch, *.extern) are filtered out."""
+        """Sacct step records (*.batch, *.extern) are filtered out."""
         root_abs = openfe_workspace["root"].resolve()
         tname = "rbfe_A_complex_B_complex"
         _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
@@ -456,8 +456,7 @@ class TestPreemptionDetection:
         slurm_env["squeue"].write_text("")
         # Only sub-step records -- should all be filtered.
         slurm_env["sacct"].write_text(
-            f"100_0.batch|PREEMPTED|{root_abs}\n"
-            f"100_0.extern|PREEMPTED|{root_abs}\n"
+            f"100_0.batch|PREEMPTED|{root_abs}\n100_0.extern|PREEMPTED|{root_abs}\n"
         )
 
         result = _run(slurm_env, root=openfe_workspace["root"])
@@ -471,7 +470,6 @@ class TestPreemptionDetection:
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
     ) -> None:
         """Preempted jobs from a different project workdir are ignored."""
-        root_abs = openfe_workspace["root"].resolve()
         tname = "rbfe_A_complex_B_complex"
         _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
 
@@ -515,9 +513,7 @@ class TestPreemptionDetection:
         slurm_env["squeue"].write_text("")
         # Same task preempted three times -- should be deduplicated by sort -u.
         slurm_env["sacct"].write_text(
-            f"100_0|PREEMPTED|{root_abs}\n"
-            f"100_0|PREEMPTED|{root_abs}\n"
-            f"100_0|PREEMPTED|{root_abs}\n"
+            f"100_0|PREEMPTED|{root_abs}\n100_0|PREEMPTED|{root_abs}\n100_0|PREEMPTED|{root_abs}\n"
         )
         self._setup_scontrol(slurm_env, root_abs)
 
