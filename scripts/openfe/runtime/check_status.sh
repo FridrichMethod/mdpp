@@ -8,8 +8,9 @@ set -euo pipefail
 #
 # Status definitions:
 #   completed : result JSON with valid estimate/uncertainty
-#   active    : not complete, matching Slurm job in squeue
-#   failed    : not complete, no matching Slurm job (or null estimates)
+#   active    : not complete, matching Slurm job in squeue (or recently
+#                preempted and likely requeuing)
+#   failed    : not complete, no matching Slurm job, no recent preemption
 #   error     : multiple matching Slurm jobs for one replica
 #
 # Options:
@@ -23,6 +24,16 @@ set -euo pipefail
 JOBS=8
 ROOT="."
 RESTART=false
+
+# Grace period (minutes) for preemption detection.  On shared partitions like
+# "owners", SLURM preempts and requeues jobs automatically.  During the requeue
+# transition there is a brief window where the job is invisible to squeue.  If
+# check_status runs during that window it would misclassify the replica as
+# "failed" and (with -R) resubmit a duplicate.  To avoid this, we query sacct
+# for jobs preempted within this grace period and treat them as still active.
+# Set to roughly half the monitor check interval; 10 min is generous since the
+# actual SLURM requeue transition typically completes in seconds.
+PREEMPT_GRACE_MINUTES=10
 
 usage() {
     cat <<'EOF'
@@ -103,6 +114,59 @@ build_active_jobs() {
             [[ "$workdir" == "$root_abs" ]] || continue
             printf '%s\t%s\t%s\t%s\n' "$ajid" "$taskid" "$jobid" "$state"
         done >"$raw"
+
+    # Phase 2 -- preemption detection via sacct.
+    #
+    # Problem: when SLURM preempts and requeues an array task, there is a
+    # transient window (typically seconds, but could be longer under
+    # scheduler load) during which the task vanishes from squeue.  If we
+    # check during that window, job_count == 0 and the replica looks
+    # "failed", triggering a duplicate submission with -R.
+    #
+    # Solution: query sacct for PREEMPTED events within the grace period.
+    # For each (ArrayJobId, ArrayTaskId) that sacct reports as preempted
+    # but that does NOT already appear in squeue (i.e. the requeue hasn't
+    # surfaced yet), inject a synthetic entry with state "REQUEUING".
+    # Downstream, process_one sees job_count == 1 and classifies the
+    # replica as "active" -- no restart marker is emitted.
+    #
+    # Flags:
+    #   --duplicates   show all records, not just the latest per job
+    #   --state=PREEMPTED  only preemption events
+    #   -S "now-Nminutes"  limit to the grace window
+    #   -n -P              no header, pipe-delimited
+    #
+    # Graceful degradation: if sacct is not on PATH or the grace period
+    # is 0, this block is silently skipped and the script behaves as
+    # before (squeue-only detection).
+    if ((PREEMPT_GRACE_MINUTES > 0)) && command -v sacct >/dev/null 2>&1; then
+        local sacct_raw="${TMPDIR_MAIN}/sacct_preempted.tsv"
+        sacct -u "${USER:-$(id -un)}" --duplicates \
+            -S "now-${PREEMPT_GRACE_MINUTES}minutes" --state=PREEMPTED \
+            -n -P --format="JobID%30,State%15,WorkDir%300" |
+            while IFS='|' read -r jid_raw state workdir; do
+                # Skip sub-step records (e.g. "12345_0.batch") and
+                # non-array jobs (no underscore in the JobID).
+                [[ "$jid_raw" == *.* || "$jid_raw" != *_* ]] && continue
+                workdir="$(realpath -m -- "$workdir" 2>/dev/null || true)"
+                [[ "$workdir" == "$root_abs" ]] || continue
+                local ajid="${jid_raw%%_*}"
+                local taskid="${jid_raw#*_}"
+                printf '%s\t%s\n' "$ajid" "$taskid"
+            done | sort -u >"$sacct_raw"
+
+        # For each preempted task not already in the squeue snapshot,
+        # append a synthetic REQUEUING entry so it counts as active.
+        # shellcheck disable=SC2094  # awk reads $raw; loop appends new entries
+        while IFS=$'\t' read -r ajid taskid; do
+            if ! awk -F'\t' -v a="$ajid" -v t="$taskid" \
+                '$1==a && $2==t { found=1; exit } END { exit !found }' \
+                "$raw" 2>/dev/null; then
+                printf '%s\t%s\t%s\t%s\n' \
+                    "$ajid" "$taskid" "${ajid}_${taskid}" "REQUEUING"
+            fi
+        done <"$sacct_raw" >>"$raw"
+    fi
 
     # Map each ArrayJobId -> transformation name via SubmitLine.
     : >"$tmap"

@@ -1,7 +1,7 @@
 """Shared fixtures for shell script tests.
 
 Creates a fake Slurm environment by placing shim executables for squeue,
-scontrol, and sbatch on PATH ahead of any real installations.
+scontrol, sacct, and sbatch on PATH ahead of any real installations.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def slurm_env(tmp_path: Path) -> dict[str, Path]:
     """Fake Slurm environment with shim executables.
 
     Returns a dict with paths keyed by command name:
-    - ``squeue``, ``scontrol``: write canned responses to these files.
+    - ``squeue``, ``scontrol``, ``sacct``: write canned responses to these files.
     - ``sbatch``: read this file to see logged invocations.
     - ``_bin_dir``: path to prepend to PATH.
     """
@@ -50,7 +50,7 @@ def slurm_env(tmp_path: Path) -> dict[str, Path]:
 
     files: dict[str, Path] = {}
 
-    for cmd in ("squeue", "scontrol"):
+    for cmd in ("squeue", "scontrol", "sacct"):
         resp = tmp_path / f"{cmd}_response.txt"
         resp.write_text("")
         shim = bin_dir / cmd

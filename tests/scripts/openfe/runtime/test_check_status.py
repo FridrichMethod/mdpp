@@ -379,3 +379,152 @@ class TestInvalidOption:
         result = _run(slurm_env, "-Z", root=openfe_workspace["root"])
         assert result.returncode == 2
         assert "invalid option" in result.stderr
+
+
+class TestPreemptionDetection:
+    """Preempted jobs detected via sacct are treated as active (REQUEUING).
+
+    When SLURM preempts and requeues an array task, the task temporarily
+    vanishes from squeue.  The sacct-based Phase 2 in build_active_jobs
+    detects this and injects a synthetic REQUEUING entry so the replica
+    is classified as "active" instead of "failed".
+    """
+
+    @staticmethod
+    def _setup_scontrol(
+        slurm_env: dict[str, Path], root_abs: Path, tname: str = "rbfe_A_complex_B_complex"
+    ) -> None:
+        slurm_env["scontrol"].write_text(
+            "   SubmitLine=sbatch --array=0 quickrun.sbatch "
+            f"{root_abs}/transformations/{tname}.json "
+            f"-o {root_abs}/results\n"
+        )
+
+    def test_preempted_not_in_squeue_shows_active(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """A preempted job absent from squeue is classified as active/REQUEUING."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        # squeue is empty -- the job vanished during requeue transition.
+        slurm_env["squeue"].write_text("")
+        # sacct reports the job was recently preempted.
+        slurm_env["sacct"].write_text(f"100_0|PREEMPTED|{root_abs}\n")
+        self._setup_scontrol(slurm_env, root_abs)
+
+        result = _run(slurm_env, root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        rows = _parse_rows(result.stdout)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "active"
+        assert "REQUEUING" in rows[0]["info"]
+
+    def test_preempted_already_in_squeue_no_duplicate(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """A preempted job that reappeared in squeue is not double-counted."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        # Job is back in squeue after requeue.
+        slurm_env["squeue"].write_text(f"100|0|100_0|RUNNING|{root_abs}\n")
+        # sacct still reports the earlier preemption event.
+        slurm_env["sacct"].write_text(f"100_0|PREEMPTED|{root_abs}\n")
+        self._setup_scontrol(slurm_env, root_abs)
+
+        result = _run(slurm_env, root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        rows = _parse_rows(result.stdout)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "active"
+        # Should show RUNNING from squeue, not REQUEUING.
+        assert "RUNNING" in rows[0]["info"]
+
+    def test_sacct_step_records_are_skipped(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """sacct step records (*.batch, *.extern) are filtered out."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        slurm_env["squeue"].write_text("")
+        # Only sub-step records -- should all be filtered.
+        slurm_env["sacct"].write_text(
+            f"100_0.batch|PREEMPTED|{root_abs}\n"
+            f"100_0.extern|PREEMPTED|{root_abs}\n"
+        )
+
+        result = _run(slurm_env, root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        rows = _parse_rows(result.stdout)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "failed"
+
+    def test_sacct_filters_other_workdir(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """Preempted jobs from a different project workdir are ignored."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        slurm_env["squeue"].write_text("")
+        # sacct reports a preemption from a different workdir.
+        slurm_env["sacct"].write_text("100_0|PREEMPTED|/some/other/project\n")
+
+        result = _run(slurm_env, root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        rows = _parse_rows(result.stdout)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "failed"
+
+    def test_preempted_does_not_trigger_restart(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """A preempted-but-requeuing replica is NOT resubmitted with -R."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        slurm_env["squeue"].write_text("")
+        slurm_env["sacct"].write_text(f"100_0|PREEMPTED|{root_abs}\n")
+        self._setup_scontrol(slurm_env, root_abs)
+
+        result = _run(slurm_env, "-R", root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        sbatch_log = slurm_env["sbatch"].read_text().strip()
+        assert sbatch_log == "", "sbatch must not be called for requeuing replicas"
+
+    def test_multiple_preemptions_deduplicated(
+        self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
+    ) -> None:
+        """Multiple sacct PREEMPTED records for the same task are deduplicated."""
+        root_abs = openfe_workspace["root"].resolve()
+        tname = "rbfe_A_complex_B_complex"
+        _ensure_replica_dir(openfe_workspace["results_dir"], tname, 0)
+
+        slurm_env["squeue"].write_text("")
+        # Same task preempted three times -- should be deduplicated by sort -u.
+        slurm_env["sacct"].write_text(
+            f"100_0|PREEMPTED|{root_abs}\n"
+            f"100_0|PREEMPTED|{root_abs}\n"
+            f"100_0|PREEMPTED|{root_abs}\n"
+        )
+        self._setup_scontrol(slurm_env, root_abs)
+
+        result = _run(slurm_env, root=openfe_workspace["root"])
+        assert result.returncode == 0
+
+        rows = _parse_rows(result.stdout)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "active"
+        assert "REQUEUING" in rows[0]["info"]
