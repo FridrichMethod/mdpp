@@ -59,6 +59,19 @@ printf "Chain_A\nSOLU\n" | gmx trjconv \
     -pbc mol \
     -ur compact
 
+# Extract the first frame
+# We have to extract the first frame at this stage to preserve proper chain topology and visual integrity in PyMOL.
+# Performing this step after complex extraction would result in broken chains and misrepresentation of the structure.
+printf "Chain_A\nSOLU\n" | gmx trjconv \
+    -s "${PRODUCTION}.tpr" \
+    -f "${PRODUCTION}.xtc" \
+    -o "${PRODUCTION}_complex_fit.pdb" \
+    -n index_protein_chain_A.ndx \
+    -center \
+    -pbc mol \
+    -ur compact \
+    -dump 0
+
 rm "${PRODUCTION}.xtc"
 
 # Fit the trajectory
@@ -70,14 +83,6 @@ printf "Chain_A_BB\nSystem\n" | gmx trjconv \
     -fit rot+trans
 
 rm "${PRODUCTION}_complex_center.xtc"
-
-# Extract the first frame
-printf "System\n" | gmx trjconv \
-    -s "${PRODUCTION}_complex_fit.tpr" \
-    -f "${PRODUCTION}_complex_fit.xtc" \
-    -o "${PRODUCTION}_complex_fit.pdb" \
-    -n index_complex.ndx \
-    -dump 0
 
 # Smooth the trajectory
 gmx filter \
