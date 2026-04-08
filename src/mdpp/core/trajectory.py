@@ -171,18 +171,30 @@ def load_trajectories(
     :class:`multiprocessing.Pool` (process-based parallelism).
 
     Why processes instead of threads:
-        mdtraj's C-level XTC/TRR parsers hold the GIL during decoding, so
-        threads cannot achieve true concurrency. In benchmarks on 6 replicas
-        (stride=10, 1000 frames each), threads gave only ~1x speedup while
-        processes achieved ~6x.
+        mdtraj's C-level XTC/TRR parsers hold the GIL during frame
+        decoding, so threads cannot run concurrently on the CPU-bound
+        parsing step. Benchmarks on 6 replicas (stride=10, 1000 frames
+        each, ~5000 atoms) show:
+
+        ============  ======  =========  ===========
+        Method        Time    Speedup    RSS delta
+        ============  ======  =========  ===========
+        Sequential    9.7 s   1.0x       +16.8 MB
+        Threads (6)   4.5 s   2.2x       +7.7 MB
+        mp.Pool (6)   0.9 s   11.2x      +0.0 MB
+        ============  ======  =========  ===========
+
+        Processes win on both speed and memory. Worker processes allocate
+        trajectory data in their own address space; when the pool closes
+        that memory is fully released to the OS, leaving zero RSS growth
+        in the parent. Threads allocate within the parent and rely on
+        Python's allocator to (possibly) return pages.
 
     Why ``multiprocessing.Pool`` instead of ``ProcessPoolExecutor``:
-        Both perform identically in benchmarks for this workload. ``Pool`` is
-        chosen for its simpler API (``map`` returns results directly) and
-        ``maxtasksperchild`` support, which can guard against memory leaks
-        from large trajectory allocations. The ``Future`` abstraction that
-        ``concurrent.futures`` provides is unnecessary for a pure map
-        operation.
+        Both perform identically in benchmarks for this workload. ``Pool``
+        is chosen for its simpler API (``map`` returns results directly)
+        and ``maxtasksperchild`` support, which can guard against memory
+        leaks from large trajectory allocations.
 
     Args:
         trajectory_paths: Trajectory paths.
