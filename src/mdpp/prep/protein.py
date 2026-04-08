@@ -7,10 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import mdtraj as md
-import propka.run
 from Bio.PDB import Select
-from openmm.app import PDBFile
-from pdbfixer import PDBFixer
 
 from mdpp._types import StrPath
 
@@ -86,6 +83,8 @@ def run_propka(pdb_path: StrPath) -> PropkaResult:
     Returns:
         pKa predictions for all titratable residues found.
     """
+    import propka.run
+
     mol = propka.run.single(str(pdb_path), write_pka=False)
     conf = next(iter(mol.conformations.values()))
 
@@ -169,6 +168,9 @@ def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None
             pH,
             lines,
         )
+
+    from openmm.app import PDBFile
+    from pdbfixer import PDBFixer
 
     fixer = PDBFixer(filename=str(pdb_path))
     fixer.removeHeterogens(keepWater=False)

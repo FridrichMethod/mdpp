@@ -1,13 +1,21 @@
-"""Interactive 3D visualization helpers for molecules and trajectories."""
+"""Interactive 3D visualization helpers for molecules and trajectories.
+
+Heavy dependencies (``rdkit``, ``py3Dmol``, ``nglview``) are imported
+lazily inside the functions that need them so that importing this module
+does not require all three packages to be installed.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import mdtraj as md
-import nglview
-import py3Dmol
-from rdkit import Chem
+
+if TYPE_CHECKING:
+    import nglview
+    import py3Dmol
+    from rdkit import Chem
 
 _PY3DMOL_POSITION_KEYS = ("x", "y", "z")
 
@@ -147,12 +155,15 @@ def view_mol_3d(
     Raises:
         ValueError: If the molecule has no conformer or any label spec is invalid.
     """
+    import py3Dmol as _py3Dmol
+    from rdkit import Chem as _Chem
+
     conformer, selected_conformer_id = _get_selected_conformer(mol, conformer_id)
     del conformer  # Only needed for label coordinate lookup below.
 
-    viewer = py3Dmol.view(width=width, height=height)
+    viewer = _py3Dmol.view(width=width, height=height)
     viewer.setBackgroundColor(background_color)
-    viewer.addModel(Chem.MolToMolBlock(mol, confId=selected_conformer_id), "sdf")
+    viewer.addModel(_Chem.MolToMolBlock(mol, confId=selected_conformer_id), "sdf")
     viewer.setStyle(dict(style) if style is not None else {"stick": {}})
 
     if labels:
@@ -187,7 +198,9 @@ def view_traj_3d(
     Raises:
         ValueError: If any representation dictionary is missing ``type``.
     """
-    widget = nglview.show_mdtraj(traj)
+    import nglview as _nglview
+
+    widget = _nglview.show_mdtraj(traj)
     if representations is None:
         return widget
 
