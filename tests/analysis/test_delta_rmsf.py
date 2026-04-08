@@ -24,7 +24,7 @@ def _make_rmsf(
     return RMSFResult(
         rmsf_nm=arr,
         atom_indices=np.arange(arr.size, dtype=np.int_),
-        residue_ids=np.array(residue_ids, dtype=np.int_) if residue_ids else None,
+        residue_ids=np.array(residue_ids, dtype=np.int_) if residue_ids is not None else None,
     )
 
 

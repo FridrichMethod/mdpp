@@ -340,8 +340,8 @@ def _average_rmsf_with_sem(
     if len(results) < 2:
         return avg_rmsf, None
 
-    n = len(results)
-    sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n)
+    n_replicas = len(results)
+    sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
     sem_rmsf = np.where(avg_rmsf > 0, sem_msf / (2.0 * avg_rmsf), 0.0).astype(np.float64)
     return avg_rmsf, sem_rmsf
 

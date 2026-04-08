@@ -27,8 +27,8 @@ def _make_result(
 ) -> DeltaRMSFResult:
     return DeltaRMSFResult(
         delta_rmsf_nm=np.array(delta, dtype=np.float64),
-        residue_ids=np.array(residue_ids, dtype=np.int_) if residue_ids else None,
-        sem_nm=np.array(sem, dtype=np.float64) if sem else None,
+        residue_ids=np.array(residue_ids, dtype=np.int_) if residue_ids is not None else None,
+        sem_nm=np.array(sem, dtype=np.float64) if sem is not None else None,
     )
 
 

@@ -16,6 +16,7 @@ from mdpp.analysis.metrics import (
     RMSDResult,
     RMSFResult,
     SASAResult,
+    _average_rmsf_with_sem,
 )
 from mdpp.plots.utils import get_axis
 
@@ -160,9 +161,8 @@ def plot_rmsf_average(
     if len(sizes) > 1:
         raise ValueError(f"All RMSFResult arrays must have the same length, got sizes {sizes}.")
 
-    msf_stack = np.stack([r.rmsf_nm**2 for r in results])
-    avg_msf = np.mean(msf_stack, axis=0)
-    avg_rmsf_angstrom = np.sqrt(avg_msf) * 10.0
+    avg_rmsf_nm, sem_rmsf_nm = _average_rmsf_with_sem(results)
+    avg_rmsf_angstrom = avg_rmsf_nm * 10.0
 
     axis = get_axis(ax)
     ref = results[0]
@@ -172,22 +172,19 @@ def plot_rmsf_average(
         else np.arange(ref.rmsf_nm.size, dtype=np.float64) + 1.0
     )
     (line,) = axis.plot(x_values, avg_rmsf_angstrom, label=label, linewidth=linewidth, color=color)
-    if show_sem and len(results) >= 2:
-        n_replicas = len(results)
-        sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
-        # Propagate SEM through sqrt: d/d(MSF) sqrt(MSF) = 1 / (2 * sqrt(MSF))
-        avg_rmsf_nm = np.sqrt(avg_msf)
-        sem = np.where(avg_rmsf_nm > 0, sem_msf / (2.0 * avg_rmsf_nm), 0.0) * 10.0
+    if show_sem and sem_rmsf_nm is not None:
+        sem_angstrom = sem_rmsf_nm * 10.0
         axis.fill_between(
             x_values,
-            avg_rmsf_angstrom - sem,
-            avg_rmsf_angstrom + sem,
+            avg_rmsf_angstrom - sem_angstrom,
+            avg_rmsf_angstrom + sem_angstrom,
             alpha=sem_alpha,
             color=line.get_color(),
         )
     axis.set_xlabel("Residue ID")
     axis.set_ylabel("RMSF (Å)")
-    axis.legend()
+    if label is not None:
+        axis.legend()
     return axis
 
 
@@ -495,6 +492,8 @@ def plot_delta_rmsf(
     """
     axis = get_axis(ax)
     drmsf = result.delta_rmsf_angstrom
+    if drmsf.size < 2:
+        raise ValueError("plot_delta_rmsf requires at least 2 residues.")
     x_values = (
         np.asarray(result.residue_ids, dtype=np.float64)
         if result.residue_ids is not None
