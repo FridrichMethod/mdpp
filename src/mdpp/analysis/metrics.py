@@ -56,15 +56,27 @@ class DeltaRMSFResult:
     Averaging is done in MSF (mean-square fluctuation) space: per-residue
     RMSF^2 values are averaged across replicas, then the square root is
     taken.  The delta is computed on the resulting average RMSF values.
+
+    The SEM on each system's average RMSF is propagated through the sqrt
+    transform, then the two independent SEMs are combined in quadrature
+    to give the SEM on the delta.
     """
 
     delta_rmsf_nm: NDArray[np.float64]
     residue_ids: NDArray[np.int_] | None
+    sem_nm: NDArray[np.float64] | None
 
     @property
     def delta_rmsf_angstrom(self) -> NDArray[np.float64]:
         """Return delta-RMSF values in Angstrom."""
         return self.delta_rmsf_nm * 10.0
+
+    @property
+    def sem_angstrom(self) -> NDArray[np.float64] | None:
+        """Return SEM on the delta-RMSF in Angstrom."""
+        if self.sem_nm is None:
+            return None
+        return self.sem_nm * 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,14 +359,38 @@ def compute_radius_of_gyration(
     )
 
 
-def _average_rmsf_nm(results: list[RMSFResult]) -> NDArray[np.float64]:
-    """Average RMSF values across replicas in MSF space.
+def _average_rmsf_with_sem(
+    results: list[RMSFResult],
+) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
+    """Average RMSF across replicas in MSF space and propagate SEM.
 
-    Returns the per-residue average RMSF in nm, computed as
-    ``sqrt(mean(RMSF^2))``.
+    Returns:
+        (avg_rmsf_nm, sem_rmsf_nm).  SEM is ``None`` when fewer than 2
+        replicas are provided.
+
+    The SEM on MSF is propagated through the sqrt transform:
+    ``sem_rmsf = sem_msf / (2 * avg_rmsf)``.
     """
     msf_stack = np.stack([r.rmsf_nm**2 for r in results])
-    return np.sqrt(np.mean(msf_stack, axis=0)).astype(np.float64)
+    avg_msf = np.mean(msf_stack, axis=0)
+    avg_rmsf = np.sqrt(avg_msf).astype(np.float64)
+
+    if len(results) < 2:
+        return avg_rmsf, None
+
+    n = len(results)
+    sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n)
+    sem_rmsf = np.where(avg_rmsf > 0, sem_msf / (2.0 * avg_rmsf), 0.0).astype(np.float64)
+    return avg_rmsf, sem_rmsf
+
+
+def _validate_rmsf_replicas(results: list[RMSFResult], name: str) -> None:
+    """Validate that a list of RMSF results is non-empty and consistent."""
+    if not results:
+        raise ValueError(f"{name} must not be empty.")
+    sizes = {r.rmsf_nm.size for r in results}
+    if len(sizes) > 1:
+        raise ValueError(f"{name} replicas have inconsistent sizes: {sizes}.")
 
 
 def compute_delta_rmsf(
@@ -370,6 +406,12 @@ def compute_delta_rmsf(
     The RMSF for each system is first averaged across replicas in MSF space
     (``sqrt(mean(RMSF^2))``), then the delta is taken as B minus A.
     Positive values indicate that system B is more flexible.
+
+    The SEM on each system's average RMSF is propagated through the sqrt
+    transform (``sem_rmsf = sem_msf / (2 * avg_rmsf)``), then the two
+    independent SEMs are combined in quadrature to give the SEM on the
+    delta.  At least 2 replicas per system are required for SEM; otherwise
+    ``DeltaRMSFResult.sem_nm`` is ``None``.
 
     For systems with **identical residue counts**, ``indices_a`` and
     ``indices_b`` may be omitted and the comparison is element-wise.
@@ -395,27 +437,18 @@ def compute_delta_rmsf(
             positions given by ``indices_a``.
 
     Returns:
-        DeltaRMSFResult with the per-residue difference.
+        DeltaRMSFResult with the per-residue difference and SEM.
 
     Raises:
         ValueError: If input lists are empty, replicas within a system
             have inconsistent lengths, index arrays differ in length, or
             unindexed systems have different residue counts.
     """
-    if not results_a:
-        raise ValueError("results_a must not be empty.")
-    if not results_b:
-        raise ValueError("results_b must not be empty.")
+    _validate_rmsf_replicas(results_a, "results_a")
+    _validate_rmsf_replicas(results_b, "results_b")
 
-    sizes_a = {r.rmsf_nm.size for r in results_a}
-    if len(sizes_a) > 1:
-        raise ValueError(f"results_a replicas have inconsistent sizes: {sizes_a}.")
-    sizes_b = {r.rmsf_nm.size for r in results_b}
-    if len(sizes_b) > 1:
-        raise ValueError(f"results_b replicas have inconsistent sizes: {sizes_b}.")
-
-    avg_a = _average_rmsf_nm(results_a)
-    avg_b = _average_rmsf_nm(results_b)
+    avg_a, sem_a = _average_rmsf_with_sem(results_a)
+    avg_b, sem_b = _average_rmsf_with_sem(results_b)
 
     if indices_a is not None and indices_b is not None:
         if indices_a.shape[0] != indices_b.shape[0]:
@@ -425,6 +458,10 @@ def compute_delta_rmsf(
             )
         avg_a = avg_a[indices_a]
         avg_b = avg_b[indices_b]
+        if sem_a is not None:
+            sem_a = sem_a[indices_a]
+        if sem_b is not None:
+            sem_b = sem_b[indices_b]
 
         if residue_ids is None:
             ref = results_a[0]
@@ -443,7 +480,14 @@ def compute_delta_rmsf(
             residue_ids = results_a[0].residue_ids
 
     delta = avg_b - avg_a
+
+    # Combine SEMs in quadrature (independent systems)
+    sem: NDArray[np.float64] | None = None
+    if sem_a is not None and sem_b is not None:
+        sem = np.sqrt(sem_a**2 + sem_b**2).astype(np.float64)
+
     return DeltaRMSFResult(
         delta_rmsf_nm=delta,
         residue_ids=residue_ids,
+        sem_nm=sem,
     )

@@ -38,13 +38,25 @@ class TestDeltaRMSFResult:
         result = DeltaRMSFResult(
             delta_rmsf_nm=np.array([0.1, -0.2], dtype=np.float64),
             residue_ids=np.array([1, 2], dtype=np.int_),
+            sem_nm=np.array([0.01, 0.02], dtype=np.float64),
         )
         np.testing.assert_allclose(result.delta_rmsf_angstrom, [1.0, -2.0])
+        assert result.sem_angstrom is not None
+        np.testing.assert_allclose(result.sem_angstrom, [0.1, 0.2])
+
+    def test_sem_none(self) -> None:
+        result = DeltaRMSFResult(
+            delta_rmsf_nm=np.array([0.1], dtype=np.float64),
+            residue_ids=None,
+            sem_nm=None,
+        )
+        assert result.sem_angstrom is None
 
     def test_frozen(self) -> None:
         result = DeltaRMSFResult(
             delta_rmsf_nm=np.array([0.1], dtype=np.float64),
             residue_ids=None,
+            sem_nm=None,
         )
         with pytest.raises(AttributeError):
             result.delta_rmsf_nm = np.array([0.5])  # type: ignore[misc]
@@ -100,6 +112,41 @@ class TestComputeDeltaRMSFIdentical:
         a = _make_rmsf([0.1, 0.2, 0.3])
         result = compute_delta_rmsf([a], [a])
         np.testing.assert_allclose(result.delta_rmsf_nm, 0.0, atol=1e-15)
+
+    def test_sem_none_with_single_replica(self) -> None:
+        a = _make_rmsf([0.1, 0.2])
+        b = _make_rmsf([0.3, 0.4])
+        result = compute_delta_rmsf([a], [b])
+        assert result.sem_nm is None
+
+    def test_sem_none_when_only_one_system_has_replicas(self) -> None:
+        a1 = _make_rmsf([0.1, 0.2])
+        a2 = _make_rmsf([0.3, 0.2])
+        b = _make_rmsf([0.3, 0.4])
+        result = compute_delta_rmsf([a1, a2], [b])
+        assert result.sem_nm is None
+
+    def test_sem_computed_with_multi_replicas(self) -> None:
+        a1 = _make_rmsf([0.1, 0.3])
+        a2 = _make_rmsf([0.3, 0.1])
+        b1 = _make_rmsf([0.2, 0.4])
+        b2 = _make_rmsf([0.4, 0.2])
+        result = compute_delta_rmsf([a1, a2], [b1, b2])
+        assert result.sem_nm is not None
+        assert result.sem_nm.shape == result.delta_rmsf_nm.shape
+        # SEM should be positive everywhere
+        assert np.all(result.sem_nm >= 0)
+
+    def test_sem_with_indices(self) -> None:
+        a1 = _make_rmsf([0.1, 0.2, 0.3])
+        a2 = _make_rmsf([0.15, 0.25, 0.35])
+        b1 = _make_rmsf([0.4, 0.5])
+        b2 = _make_rmsf([0.45, 0.55])
+        idx_a = np.array([0, 2], dtype=np.int_)
+        idx_b = np.array([0, 1], dtype=np.int_)
+        result = compute_delta_rmsf([a1, a2], [b1, b2], indices_a=idx_a, indices_b=idx_b)
+        assert result.sem_nm is not None
+        assert result.sem_nm.shape == (2,)
 
 
 # ---------------------------------------------------------------------------

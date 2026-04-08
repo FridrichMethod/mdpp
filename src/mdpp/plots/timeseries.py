@@ -468,24 +468,27 @@ def plot_delta_rmsf(
     labels: tuple[str, str] = ("system A", "system B"),
     positive_color: str = "crimson",
     negative_color: str = "steelblue",
-    alpha: float = 0.5,
+    linewidth: float = 1.5,
+    sem_alpha: float = 0.3,
 ) -> Axes:
-    """Plot per-residue RMSF difference as a filled area chart.
+    """Plot per-residue RMSF difference as a line with SEM error band.
 
-    Positive regions (system B more flexible) are filled with
-    ``positive_color``; negative regions (system A more flexible) are
-    filled with ``negative_color``.
+    The delta-RMSF line is drawn in black. When SEM data is available
+    (requires >= 2 replicas per system), the +/- 1 SEM band is drawn
+    with ``positive_color`` where delta > 0 (system B more flexible)
+    and ``negative_color`` where delta < 0 (system A more flexible).
 
     Args:
         result: DeltaRMSFResult from ``compute_delta_rmsf``.
         ax: Optional matplotlib axis.
         labels: Tuple of ``(system_a_name, system_b_name)`` used in the
             legend (e.g. ``("BirA", "TurboID")``).
-        positive_color: Fill color for residues where system B is more
-            flexible (delta > 0).
-        negative_color: Fill color for residues where system A is more
-            flexible (delta < 0).
-        alpha: Opacity of the filled regions (0.0 -- 1.0).
+        positive_color: SEM band color for residues where system B is
+            more flexible (delta > 0).
+        negative_color: SEM band color for residues where system A is
+            more flexible (delta < 0).
+        linewidth: Line width for the delta-RMSF trace.
+        sem_alpha: Opacity of the SEM band (0.0 -- 1.0).
 
     Returns:
         The matplotlib axis.
@@ -497,28 +500,37 @@ def plot_delta_rmsf(
         if result.residue_ids is not None
         else np.arange(drmsf.size, dtype=np.float64) + 1.0
     )
-    positive = (drmsf > 0).tolist()
-    negative = (drmsf < 0).tolist()
-    axis.fill_between(
-        x_values,
-        0,
-        drmsf,
-        where=positive,
-        alpha=alpha,
-        color=positive_color,
-        label=f"{labels[1]} more flexible",
-    )
-    axis.fill_between(
-        x_values,
-        0,
-        drmsf,
-        where=negative,
-        alpha=alpha,
-        color=negative_color,
-        label=f"{labels[0]} more flexible",
-    )
+
+    axis.plot(x_values, drmsf, color="black", linewidth=linewidth)
+
+    sem = result.sem_angstrom
+    if sem is not None:
+        upper = drmsf + sem
+        lower = drmsf - sem
+        positive = (drmsf > 0).tolist()
+        negative = (drmsf < 0).tolist()
+        axis.fill_between(
+            x_values,
+            lower,
+            upper,
+            where=positive,
+            alpha=sem_alpha,
+            color=positive_color,
+            label=f"{labels[1]} more flexible",
+        )
+        axis.fill_between(
+            x_values,
+            lower,
+            upper,
+            where=negative,
+            alpha=sem_alpha,
+            color=negative_color,
+            label=f"{labels[0]} more flexible",
+        )
+
     axis.axhline(0, color="black", linewidth=0.8, linestyle="--")
     axis.set_xlabel("Residue ID")
     axis.set_ylabel(r"$\Delta$RMSF (Å)")
-    axis.legend()
+    if sem is not None:
+        axis.legend()
     return axis
