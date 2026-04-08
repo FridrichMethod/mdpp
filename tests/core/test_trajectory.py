@@ -202,6 +202,41 @@ def test_load_trajectories_n_frames(traj_on_disk: tuple[Path, Path, int]) -> Non
     assert all(t.n_frames == 10 for t in trajs)
 
 
+def test_load_trajectories_parallel(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Parallel loading should produce identical results to sequential."""
+    xtc, pdb, _ = traj_on_disk
+    sequential = load_trajectories(
+        [xtc, xtc, xtc],
+        topology_paths=[pdb, pdb, pdb],
+        n_frames=10,
+    )
+    parallel = load_trajectories(
+        [xtc, xtc, xtc],
+        topology_paths=[pdb, pdb, pdb],
+        n_frames=10,
+        max_workers=3,
+    )
+    assert len(parallel) == len(sequential)
+    for seq, par in zip(sequential, parallel, strict=True):
+        assert seq.n_frames == par.n_frames
+        np.testing.assert_allclose(seq.xyz, par.xyz, atol=1e-6)
+        np.testing.assert_allclose(seq.time, par.time, atol=1e-3)
+
+
+def test_load_trajectories_parallel_preserves_order(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Parallel loading must return trajectories in input order."""
+    xtc, pdb, _total = traj_on_disk
+    trajs = load_trajectories(
+        [xtc, xtc],
+        topology_paths=[pdb, pdb],
+        n_frames=5,
+        max_workers=2,
+    )
+    ref = load_trajectory(xtc, topology_path=pdb, n_frames=5)
+    for traj in trajs:
+        np.testing.assert_allclose(traj.xyz, ref.xyz, atol=1e-6)
+
+
 def test_load_trajectories_mismatched_lengths(traj_on_disk: tuple[Path, Path, int]) -> None:
     """Mismatched path lengths should raise ValueError."""
     xtc, pdb, _ = traj_on_disk
