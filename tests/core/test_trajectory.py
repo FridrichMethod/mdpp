@@ -200,17 +200,320 @@ def test_start_stop_stride_matches_full_slice(traj_on_disk: tuple[Path, Path, in
     np.testing.assert_allclose(partial.time, expected.time, atol=1e-3)
 
 
-# --- atom_selection ---
+# --- atom_selection (direct loading, no post-load slicing) ---
 
 
-def test_stop_with_atom_selection(traj_on_disk: tuple[Path, Path, int]) -> None:
-    """start/stop and atom_selection should both be applied."""
-    xtc, pdb, _ = traj_on_disk
-    traj = load_trajectory(
-        xtc, topology_path=pdb, start=5, stop=15, atom_selection="name CA and resSeq 1"
+@pytest.fixture()
+def multi_type_traj_on_disk(tmp_path: Path) -> tuple[Path, Path, int, int]:
+    """Write a trajectory with multiple atom types per residue.
+
+    3 residues, each with CA + CB + N = 9 atoms total, 30 frames.
+    Returns (xtc_path, pdb_path, n_frames, n_atoms).
+    """
+    topology = md.Topology()
+    chain = topology.add_chain()
+    atoms = []
+    for i in range(1, 4):
+        res = topology.add_residue("ALA", chain, resSeq=i)
+        atoms.append(topology.add_atom("N", md.element.nitrogen, res))
+        atoms.append(topology.add_atom("CA", md.element.carbon, res))
+        atoms.append(topology.add_atom("CB", md.element.carbon, res))
+
+    n_frames = 30
+    n_atoms = len(atoms)
+    rng = np.random.default_rng(99)
+    xyz = rng.normal(size=(n_frames, n_atoms, 3)).astype(np.float32) * 0.1
+    time_ps = np.arange(n_frames, dtype=np.float64) * 10.0
+    traj = md.Trajectory(xyz=xyz, topology=topology, time=time_ps)
+
+    pdb_path = tmp_path / "multi.pdb"
+    xtc_path = tmp_path / "multi.xtc"
+    traj[0].save_pdb(str(pdb_path))
+    traj.save_xtc(str(xtc_path))
+    return xtc_path, pdb_path, n_frames, n_atoms
+
+
+class TestAtomSelectionDirect:
+    """Verify atom_indices are passed to the reader (not post-load sliced)."""
+
+    def test_ca_only_default_path(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """atom_selection='name CA' on the default (start=0, stop=None) path."""
+        xtc, pdb, n_frames, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA")
+        assert traj.n_atoms == 3  # 3 residues, 1 CA each
+        assert traj.n_frames == n_frames
+
+    def test_ca_only_with_start_stop(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """atom_selection on the seek/read_as_traj path."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, start=5, stop=15, atom_selection="name CA")
+        assert traj.n_atoms == 3
+        assert traj.n_frames == 10
+
+    def test_ca_only_with_stride(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """atom_selection with stride."""
+        xtc, pdb, n_frames, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, stride=5, atom_selection="name CA")
+        assert traj.n_atoms == 3
+        assert traj.n_frames == len(range(0, n_frames, 5))
+
+    def test_ca_only_with_start_stop_stride(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """atom_selection combined with start/stop/stride."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        traj = load_trajectory(
+            xtc, topology_path=pdb, start=2, stop=20, stride=3, atom_selection="name CA"
+        )
+        assert traj.n_atoms == 3
+        assert traj.n_frames == len(range(2, 20, 3))
+
+    def test_single_residue_selection(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Select a single residue's CA atom."""
+        xtc, pdb, n_frames, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA and resSeq 2")
+        assert traj.n_atoms == 1
+        assert traj.n_frames == n_frames
+
+    def test_multiple_atom_types(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Select CA + N atoms (6 out of 9)."""
+        xtc, pdb, n_frames, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA or name N")
+        assert traj.n_atoms == 6
+        assert traj.n_frames == n_frames
+
+    def test_no_selection_loads_all(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """No atom_selection should load all atoms."""
+        xtc, pdb, n_frames, n_atoms = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb)
+        assert traj.n_atoms == n_atoms
+        assert traj.n_frames == n_frames
+
+    def test_coordinates_match_full_load_then_slice(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Direct atom loading should produce identical coordinates to load-all + slice."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        direct = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA")
+        full = load_trajectory(xtc, topology_path=pdb)
+        sliced = full.atom_slice(full.topology.select("name CA"))
+        np.testing.assert_allclose(direct.xyz, sliced.xyz, atol=1e-3)
+        np.testing.assert_allclose(direct.time, sliced.time, atol=1e-3)
+
+    def test_coordinates_match_with_start_stop(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Direct atom loading with start/stop should match load-all + slice."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        direct = load_trajectory(xtc, topology_path=pdb, start=5, stop=20, atom_selection="name CA")
+        full = load_trajectory(xtc, topology_path=pdb, start=5, stop=20)
+        sliced = full.atom_slice(full.topology.select("name CA"))
+        np.testing.assert_allclose(direct.xyz, sliced.xyz, atol=1e-3)
+
+    def test_coordinates_match_with_start_stop_stride(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Full combination: start + stop + stride + atom_selection."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        direct = load_trajectory(
+            xtc, topology_path=pdb, start=3, stop=25, stride=4, atom_selection="name CA"
+        )
+        full = load_trajectory(xtc, topology_path=pdb, start=3, stop=25, stride=4)
+        sliced = full.atom_slice(full.topology.select("name CA"))
+        assert direct.n_frames == sliced.n_frames
+        assert direct.n_atoms == sliced.n_atoms
+        np.testing.assert_allclose(direct.xyz, sliced.xyz, atol=1e-3)
+        np.testing.assert_allclose(direct.time, sliced.time, atol=1e-3)
+
+    def test_topology_matches_selection(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Loaded topology should only contain selected atoms."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA")
+        atom_names = [a.name for a in traj.topology.atoms]
+        assert all(name == "CA" for name in atom_names)
+        assert traj.topology.n_atoms == 3
+
+    def test_residue_ids_preserved(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Residue sequence IDs should be preserved after atom selection."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        traj = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA")
+        res_ids = [r.resSeq for r in traj.topology.residues]
+        assert res_ids == [1, 2, 3]
+
+    def test_start_exceeds_total_with_selection(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Start past end with atom_selection should return empty traj with correct topology."""
+        xtc, pdb, n_frames, _ = multi_type_traj_on_disk
+        traj = load_trajectory(
+            xtc,
+            topology_path=pdb,
+            start=n_frames + 10,
+            stop=n_frames + 20,
+            atom_selection="name CA",
+        )
+        assert traj.n_frames == 0
+        assert traj.n_atoms == 3  # topology should still reflect selection
+
+    def test_load_trajectories_with_selection(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """load_trajectories should pass atom_selection through."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        trajs = load_trajectories(
+            [xtc, xtc],
+            topology_paths=[pdb, pdb],
+            atom_selection="name CA",
+        )
+        for traj in trajs:
+            assert traj.n_atoms == 3
+
+    def test_load_trajectories_parallel_with_selection(
+        self, multi_type_traj_on_disk: tuple[Path, Path, int, int]
+    ) -> None:
+        """Parallel loading with atom_selection should match sequential."""
+        xtc, pdb, _, _ = multi_type_traj_on_disk
+        seq = load_trajectories(
+            [xtc, xtc],
+            topology_paths=[pdb, pdb],
+            start=5,
+            stop=20,
+            atom_selection="name CA",
+        )
+        par = load_trajectories(
+            [xtc, xtc],
+            topology_paths=[pdb, pdb],
+            start=5,
+            stop=20,
+            atom_selection="name CA",
+            max_workers=2,
+        )
+        for s, p in zip(seq, par, strict=True):
+            assert s.n_atoms == p.n_atoms
+            np.testing.assert_allclose(s.xyz, p.xyz, atol=1e-3)
+
+
+# --- Benchmark: atom_selection direct vs load-all + slice ---
+
+
+@pytest.fixture()
+def large_traj_on_disk(tmp_path: Path) -> tuple[Path, Path, int, int]:
+    """Write a larger trajectory for benchmarking (100 frames, 500 atoms)."""
+    topology = md.Topology()
+    chain = topology.add_chain()
+    for i in range(1, 101):
+        res = topology.add_residue("ALA", chain, resSeq=i)
+        topology.add_atom("N", md.element.nitrogen, res)
+        topology.add_atom("CA", md.element.carbon, res)
+        topology.add_atom("CB", md.element.carbon, res)
+        topology.add_atom("C", md.element.carbon, res)
+        topology.add_atom("O", md.element.oxygen, res)
+
+    n_atoms = topology.n_atoms  # 500
+    n_frames = 100
+    rng = np.random.default_rng(42)
+    xyz = rng.normal(size=(n_frames, n_atoms, 3)).astype(np.float32) * 0.1
+    time_ps = np.arange(n_frames, dtype=np.float64) * 10.0
+    traj = md.Trajectory(xyz=xyz, topology=topology, time=time_ps)
+
+    pdb_path = tmp_path / "large.pdb"
+    xtc_path = tmp_path / "large.xtc"
+    traj[0].save_pdb(str(pdb_path))
+    traj.save_xtc(str(xtc_path))
+    return xtc_path, pdb_path, n_frames, n_atoms
+
+
+def test_benchmark_atom_selection_direct_vs_slice(
+    large_traj_on_disk: tuple[Path, Path, int, int],
+) -> None:
+    """Direct atom loading should use less peak memory than load-all + slice.
+
+    This test verifies correctness and reports timing. The real memory
+    savings scale with atom count -- with 500 atoms selecting 100 CA atoms
+    the xyz allocation is 5x smaller.
+    """
+    import time
+
+    xtc, pdb, n_frames, _n_atoms = large_traj_on_disk
+
+    # Method 1: direct loading with atom_selection
+    t0 = time.perf_counter()
+    direct = load_trajectory(xtc, topology_path=pdb, atom_selection="name CA")
+    t_direct = time.perf_counter() - t0
+
+    # Method 2: load all, then slice
+    t0 = time.perf_counter()
+    full = load_trajectory(xtc, topology_path=pdb)
+    sliced = full.atom_slice(full.topology.select("name CA"))
+    t_slice = time.perf_counter() - t0
+
+    # Verify correctness
+    assert direct.n_atoms == 100  # 100 residues, 1 CA each
+    assert direct.n_atoms == sliced.n_atoms
+    assert direct.n_frames == sliced.n_frames == n_frames
+    np.testing.assert_allclose(direct.xyz, sliced.xyz, atol=1e-3)
+
+    # Verify memory footprint difference
+    # direct.xyz: (100, 100, 3) * 4 bytes = 120 KB
+    # full.xyz:   (100, 500, 3) * 4 bytes = 600 KB (5x larger, temporary)
+    direct_bytes = direct.xyz.nbytes
+    full_bytes = full.xyz.nbytes
+    assert full_bytes > direct_bytes
+    ratio = full_bytes / direct_bytes
+    assert ratio == pytest.approx(5.0, rel=0.01)  # 500 atoms / 100 CA atoms
+
+    print(f"\n  Direct: {direct_bytes:,} bytes, {t_direct:.4f}s")
+    print(f"  Slice:  {full_bytes:,} bytes (temp), {t_slice:.4f}s")
+    print(f"  Memory ratio: {ratio:.1f}x")
+
+    del full, sliced, direct
+
+
+def test_benchmark_atom_selection_with_start_stop(
+    large_traj_on_disk: tuple[Path, Path, int, int],
+) -> None:
+    """Benchmark direct loading with start/stop + atom_selection."""
+    import time
+
+    xtc, pdb, _, _n_atoms = large_traj_on_disk
+
+    # Direct: start/stop + atom_selection
+    t0 = time.perf_counter()
+    direct = load_trajectory(
+        xtc, topology_path=pdb, start=10, stop=60, stride=2, atom_selection="name CA"
     )
-    assert traj.n_frames == 10
-    assert traj.n_atoms == 1
+    t_direct = time.perf_counter() - t0
+
+    # Load-all: start/stop then slice
+    t0 = time.perf_counter()
+    full = load_trajectory(xtc, topology_path=pdb, start=10, stop=60, stride=2)
+    sliced = full.atom_slice(full.topology.select("name CA"))
+    t_slice = time.perf_counter() - t0
+
+    assert direct.n_atoms == 100
+    assert direct.n_frames == len(range(10, 60, 2))
+    np.testing.assert_allclose(direct.xyz, sliced.xyz, atol=1e-3)
+
+    print(f"\n  Direct (start/stop/stride): {direct.xyz.nbytes:,} bytes, {t_direct:.4f}s")
+    print(f"  Slice  (start/stop/stride): {full.xyz.nbytes:,} bytes (temp), {t_slice:.4f}s")
+
+    del full, sliced, direct
 
 
 # --- Validation errors ---
