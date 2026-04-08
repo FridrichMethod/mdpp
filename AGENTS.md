@@ -28,11 +28,16 @@ ruff format src/ tests/            # format
 pre-commit run --all-files         # full check suite
 ```
 
-After modifying code, always run validation before considering the task complete:
+After modifying any production code under `src/mdpp/`, you MUST complete the following loop before considering the task done. Repeat until no CRITICAL issues remain:
 
-- Use the `mdpp` conda environment for checks, preferably with `conda run -n mdpp ...`.
-- Run `conda run -n mdpp pre-commit run --all-files` as the standard post-edit gate. Treat this as the required lint/type-check check instead of running only standalone `ruff` or `mypy`.
-- Also run the most relevant `pytest` scope for the files you changed. Run full `pytest` when the change is broad or cross-cutting.
+1. **Write tests** -- add or update tests for every changed function. Tests live under `tests/` mirroring the `src/mdpp/` layout.
+1. **Run tests** -- `conda run -n mdpp pytest <relevant scope>` (use full `pytest` when multiple areas are affected).
+1. **Run pre-commit** -- `conda run -n mdpp pre-commit run --all-files` (covers ruff lint, ruff format, mypy type checking, shellcheck).
+1. **Run AI review** -- request an independent AI code review of the changes (e.g. Codex review, Claude code-reviewer, or equivalent).
+1. **Fix issues** -- address any CRITICAL or HIGH issues from tests, pre-commit, or review.
+1. **Repeat from step 2** until all checks pass and no CRITICAL issues are found.
+
+Prefer `conda run -n mdpp ...` for all non-interactive checks.
 
 ## Package Layout
 

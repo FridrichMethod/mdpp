@@ -97,11 +97,16 @@ mkdocs serve
 
 ## Post-Edit Validation
 
-After modifying code, always validate in the `mdpp` conda environment before considering the task complete.
+After modifying any production code under `src/mdpp/`, you MUST complete the following loop before considering the task done. Repeat until no CRITICAL issues remain:
 
-- Prefer `conda run -n mdpp ...` for non-interactive checks.
-- Run `conda run -n mdpp pre-commit run --all-files` as the standard post-edit gate. This is the default way to cover linting and type checking, rather than relying only on standalone `ruff` or `mypy`.
-- Also run the most relevant `pytest` scope for the files you changed. Use full `pytest` when the change affects multiple areas.
+1. **Write tests** -- add or update tests for every changed function. Tests live under `tests/` mirroring the `src/mdpp/` layout.
+1. **Run tests** -- `conda run -n mdpp pytest <relevant scope>` (use full `pytest` when multiple areas are affected).
+1. **Run pre-commit** -- `conda run -n mdpp pre-commit run --all-files` (covers ruff lint, ruff format, mypy type checking, shellcheck).
+1. **Run Codex review** -- invoke `/codex:review` to get an independent review of the changes.
+1. **Fix issues** -- address any CRITICAL or HIGH issues from tests, pre-commit, or Codex review.
+1. **Repeat from step 2** until all checks pass and no CRITICAL issues are found.
+
+Prefer `conda run -n mdpp ...` for all non-interactive checks.
 
 ## Coding Conventions
 
