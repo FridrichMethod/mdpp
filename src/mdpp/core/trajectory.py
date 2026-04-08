@@ -82,17 +82,17 @@ def load_trajectory(
     stride: int = 1,
     atom_selection: str | None = None,
 ) -> md.Trajectory:
-    """Load a single trajectory and optionally atom-slice it.
+    """Load a single trajectory with optional frame and atom selection.
 
     Frame selection follows Python's ``range(start, stop, stride)``
     convention: *start* is included, *stop* is excluded, and *stride*
     controls the step size.  All three refer to **raw frame indices** in
     the trajectory file.
 
-    When *start* or *stop* is provided, the file is opened directly via
-    mdtraj's format-specific reader (e.g. ``XTCTrajectoryFile``) and
-    ``seek``/``read_as_traj`` are used to read exactly the requested
-    window.  Only the selected frames are read into memory.
+    When *atom_selection* is provided, the selected atom indices are
+    passed directly to the underlying mdtraj reader so that only those
+    atoms are read from disk.  This avoids loading the full-atom
+    trajectory into memory.
 
     Args:
         trajectory_path: Path to trajectory file (for example, ``.xtc``).
@@ -101,10 +101,11 @@ def load_trajectory(
         stop: Raw frame index at which to stop loading (exclusive). If
             ``None``, read to the end of the file.
         stride: Frame stride (step size). Default is 1.
-        atom_selection: Optional MDTraj selection for atom slicing after load.
+        atom_selection: Optional MDTraj atom selection string. Matching
+            atoms are loaded directly from disk (no post-load slicing).
 
     Returns:
-        Loaded (and optionally sliced) trajectory.
+        Loaded trajectory containing only the selected frames and atoms.
 
     Raises:
         ValueError: If ``stride`` is less than 1, ``start`` is negative,
@@ -118,30 +119,29 @@ def load_trajectory(
         raise ValueError("stop must be greater than start.")
 
     top = None if topology_path is None else str(topology_path)
+    topology = md.load_topology(top) if top is not None else md.load_topology(str(trajectory_path))
+    atom_indices = (
+        select_atom_indices(topology, atom_selection) if atom_selection is not None else None
+    )
 
     if start == 0 and stop is None:
-        trajectory = md.load(str(trajectory_path), top=top, stride=stride)
-    else:
-        topology = (
-            md.load_topology(top) if top is not None else md.load_topology(str(trajectory_path))
+        return md.load(str(trajectory_path), top=top, stride=stride, atom_indices=atom_indices)
+
+    n_frames = len(range(start, stop, stride)) if stop is not None else None
+    with md.open(str(trajectory_path)) as fh:
+        if start > 0:
+            try:
+                fh.seek(start)
+            except OSError:
+                n_atoms = len(atom_indices) if atom_indices is not None else topology.n_atoms
+                sliced_top = topology.subset(atom_indices) if atom_indices is not None else topology
+                return md.Trajectory(
+                    xyz=np.empty((0, n_atoms, 3), dtype=np.float32),
+                    topology=sliced_top,
+                )
+        return fh.read_as_traj(
+            topology, n_frames=n_frames, stride=stride, atom_indices=atom_indices
         )
-        n_frames = len(range(start, stop, stride)) if stop is not None else None
-        with md.open(str(trajectory_path)) as fh:
-            if start > 0:
-                try:
-                    fh.seek(start)
-                except OSError:
-                    return md.Trajectory(
-                        xyz=np.empty((0, topology.n_atoms, 3), dtype=np.float32),
-                        topology=topology,
-                    )
-            trajectory = fh.read_as_traj(topology, n_frames=n_frames, stride=stride)
-
-    if atom_selection is None:
-        return trajectory
-
-    atom_indices = select_atom_indices(trajectory.topology, atom_selection)
-    return trajectory.atom_slice(atom_indices)
 
 
 def _load_trajectory_worker(
