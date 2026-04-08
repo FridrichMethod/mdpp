@@ -316,7 +316,7 @@ def test_load_trajectories_mismatched_lengths(traj_on_disk: tuple[Path, Path, in
 
 @pytest.fixture()
 def multi_atom_traj() -> md.Trajectory:
-    """3-atom, 5-frame trajectory with known displacements for alignment tests."""
+    """3-CA-atom, 5-frame trajectory with per-frame translations for alignment tests."""
     topology = md.Topology()
     chain = topology.add_chain()
     for i in range(1, 4):
@@ -325,57 +325,229 @@ def multi_atom_traj() -> md.Trajectory:
 
     rng = np.random.default_rng(42)
     xyz = rng.normal(size=(5, 3, 3)).astype(np.float32)
-    # Add a translation per frame to make alignment non-trivial
     for i in range(5):
         xyz[i] += i * 0.1
     time_ps = np.arange(5, dtype=np.float64) * 10.0
     return md.Trajectory(xyz=xyz, topology=topology, time=time_ps)
 
 
-def test_align_default_returns_new_trajectory(multi_atom_traj: md.Trajectory) -> None:
-    """Default (inplace=False) should return a new object."""
-    original_xyz = multi_atom_traj.xyz.copy()
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
-    assert aligned is not multi_atom_traj
-    # Original should be untouched
-    np.testing.assert_allclose(multi_atom_traj.xyz, original_xyz)
+# -- Object identity and isolation (inplace=False) --
 
 
-def test_align_inplace_returns_same_object(multi_atom_traj: md.Trajectory) -> None:
-    """inplace=True should return the same trajectory object."""
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=True)
-    assert aligned is multi_atom_traj
+class TestAlignCopy:
+    """Tests for the default non-inplace path."""
+
+    def test_returns_new_object(self, multi_atom_traj: md.Trajectory) -> None:
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert aligned is not multi_atom_traj
+
+    def test_original_xyz_untouched(self, multi_atom_traj: md.Trajectory) -> None:
+        original_xyz = multi_atom_traj.xyz.copy()
+        align_trajectory(multi_atom_traj, atom_selection="name CA")
+        np.testing.assert_allclose(multi_atom_traj.xyz, original_xyz)
+
+    def test_original_time_untouched(self, multi_atom_traj: md.Trajectory) -> None:
+        original_time = multi_atom_traj.time.copy()
+        align_trajectory(multi_atom_traj, atom_selection="name CA")
+        np.testing.assert_allclose(multi_atom_traj.time, original_time)
+
+    def test_shares_topology(self, multi_atom_traj: md.Trajectory) -> None:
+        """Topology is shared (no deepcopy) for memory efficiency."""
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert aligned.topology is multi_atom_traj.topology
+
+    def test_shares_time(self, multi_atom_traj: md.Trajectory) -> None:
+        """Time array is shared (not copied)."""
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert np.shares_memory(aligned.time, multi_atom_traj.time)
+
+    def test_xyz_not_shared(self, multi_atom_traj: md.Trajectory) -> None:
+        """Xyz must be a separate copy so alignment doesn't corrupt the original."""
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert not np.shares_memory(aligned.xyz, multi_atom_traj.xyz)
+
+    def test_n_frames_preserved(self, multi_atom_traj: md.Trajectory) -> None:
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert aligned.n_frames == multi_atom_traj.n_frames
+
+    def test_n_atoms_preserved(self, multi_atom_traj: md.Trajectory) -> None:
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        assert aligned.n_atoms == multi_atom_traj.n_atoms
+
+    def test_mutating_aligned_does_not_affect_original(
+        self, multi_atom_traj: md.Trajectory
+    ) -> None:
+        """Writing to aligned.xyz must not change the original."""
+        original_xyz = multi_atom_traj.xyz.copy()
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        aligned.xyz[:] = 999.0
+        np.testing.assert_allclose(multi_atom_traj.xyz, original_xyz)
+
+    def test_mutating_original_does_not_affect_aligned(
+        self, multi_atom_traj: md.Trajectory
+    ) -> None:
+        """Writing to original.xyz must not change the aligned copy."""
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
+        aligned_xyz = aligned.xyz.copy()
+        multi_atom_traj.xyz[:] = 999.0
+        np.testing.assert_allclose(aligned.xyz, aligned_xyz)
 
 
-def test_align_copy_shares_topology(multi_atom_traj: md.Trajectory) -> None:
-    """Non-inplace alignment should share topology (no deepcopy)."""
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
-    assert aligned.topology is multi_atom_traj.topology
+# -- In-place path --
 
 
-def test_align_copy_does_not_share_xyz(multi_atom_traj: md.Trajectory) -> None:
-    """Non-inplace alignment should have its own xyz array."""
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA")
-    assert not np.shares_memory(aligned.xyz, multi_atom_traj.xyz)
+class TestAlignInplace:
+    """Tests for inplace=True."""
+
+    def test_returns_same_object(self, multi_atom_traj: md.Trajectory) -> None:
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=True)
+        assert aligned is multi_atom_traj
+
+    def test_xyz_is_same_buffer(self, multi_atom_traj: md.Trajectory) -> None:
+        """In-place alignment should modify the original xyz buffer, not create a new one."""
+        xyz_id = id(multi_atom_traj.xyz)
+        align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=True)
+        assert id(multi_atom_traj.xyz) == xyz_id
+
+    def test_modifies_original_xyz(self, multi_atom_traj: md.Trajectory) -> None:
+        original_xyz = multi_atom_traj.xyz.copy()
+        align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=True)
+        assert not np.allclose(multi_atom_traj.xyz, original_xyz)
+
+    def test_inplace_and_copy_produce_same_coordinates(
+        self, multi_atom_traj: md.Trajectory
+    ) -> None:
+        """Both paths should produce identical aligned coordinates."""
+        copy_aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=False)
+        inplace_aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", inplace=True)
+        np.testing.assert_allclose(inplace_aligned.xyz, copy_aligned.xyz, atol=1e-6)
 
 
-def test_align_reference_frame_is_unchanged(multi_atom_traj: md.Trajectory) -> None:
-    """The reference frame should be identical before and after alignment."""
-    ref_xyz = multi_atom_traj.xyz[0].copy()
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=0)
-    np.testing.assert_allclose(aligned.xyz[0], ref_xyz, atol=1e-6)
+# -- Alignment correctness --
 
 
-def test_align_reduces_rmsd(multi_atom_traj: md.Trajectory) -> None:
-    """Aligned trajectory should have lower RMSD to reference than the original."""
-    ref_frame = 0
-    aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=ref_frame)
-    original_rmsd = np.sqrt(np.mean((multi_atom_traj.xyz[1] - multi_atom_traj.xyz[ref_frame]) ** 2))
-    aligned_rmsd = np.sqrt(np.mean((aligned.xyz[1] - aligned.xyz[ref_frame]) ** 2))
-    assert aligned_rmsd <= original_rmsd
+class TestAlignCorrectness:
+    """Tests that alignment actually does the right thing."""
+
+    def test_reference_frame_unchanged(self, multi_atom_traj: md.Trajectory) -> None:
+        ref_xyz = multi_atom_traj.xyz[0].copy()
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=0)
+        np.testing.assert_allclose(aligned.xyz[0], ref_xyz, atol=1e-6)
+
+    def test_reference_frame_last(self, multi_atom_traj: md.Trajectory) -> None:
+        """Aligning to the last frame should work and leave that frame unchanged."""
+        last = multi_atom_traj.n_frames - 1
+        ref_xyz = multi_atom_traj.xyz[last].copy()
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=last)
+        np.testing.assert_allclose(aligned.xyz[last], ref_xyz, atol=1e-6)
+
+    def test_reduces_rmsd_to_reference(self, multi_atom_traj: md.Trajectory) -> None:
+        """Alignment should reduce RMSD between each frame and the reference."""
+        ref = 0
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=ref)
+        for i in range(1, multi_atom_traj.n_frames):
+            orig_rmsd = float(
+                np.sqrt(np.mean((multi_atom_traj.xyz[i] - multi_atom_traj.xyz[ref]) ** 2))
+            )
+            new_rmsd = float(np.sqrt(np.mean((aligned.xyz[i] - aligned.xyz[ref]) ** 2)))
+            assert new_rmsd <= orig_rmsd + 1e-6
+
+    def test_pure_translation_removed(self) -> None:
+        """A trajectory differing only by translation should have zero RMSD after alignment."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        for i in range(1, 4):
+            res = topology.add_residue("ALA", chain, resSeq=i)
+            topology.add_atom("CA", md.element.carbon, res)
+
+        base = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
+        xyz = np.stack([base, base + 5.0, base - 3.0])
+        traj = md.Trajectory(xyz=xyz, topology=topology)
+
+        aligned = align_trajectory(traj, atom_selection="name CA", reference_frame=0)
+        for i in range(1, 3):
+            rmsd = float(np.sqrt(np.mean((aligned.xyz[i] - aligned.xyz[0]) ** 2)))
+            assert rmsd == pytest.approx(0.0, abs=1e-5)
+
+    def test_all_frames_identical_is_noop(self) -> None:
+        """If all frames are identical, alignment should not change coordinates."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        res = topology.add_residue("ALA", chain, resSeq=1)
+        topology.add_atom("CA", md.element.carbon, res)
+
+        xyz = np.tile([[1.0, 2.0, 3.0]], (5, 1, 1)).astype(np.float32)
+        traj = md.Trajectory(xyz=xyz.copy(), topology=topology)
+
+        aligned = align_trajectory(traj, atom_selection="name CA")
+        np.testing.assert_allclose(aligned.xyz, xyz, atol=1e-6)
 
 
-def test_align_invalid_reference_frame(multi_atom_traj: md.Trajectory) -> None:
-    """Out-of-range reference_frame should raise ValueError."""
-    with pytest.raises(ValueError, match="reference_frame must be in"):
-        align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=100)
+# -- Corner cases --
+
+
+class TestAlignCornerCases:
+    """Edge cases and error handling."""
+
+    def test_single_frame(self) -> None:
+        """A single-frame trajectory should align without error (trivial case)."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        res = topology.add_residue("ALA", chain, resSeq=1)
+        topology.add_atom("CA", md.element.carbon, res)
+
+        xyz = np.array([[[1.0, 2.0, 3.0]]], dtype=np.float32)
+        traj = md.Trajectory(xyz=xyz.copy(), topology=topology)
+
+        aligned = align_trajectory(traj, atom_selection="name CA", reference_frame=0)
+        np.testing.assert_allclose(aligned.xyz, xyz, atol=1e-6)
+
+    def test_two_frames(self) -> None:
+        """Two-frame trajectory should align successfully."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        for i in range(1, 3):
+            res = topology.add_residue("ALA", chain, resSeq=i)
+            topology.add_atom("CA", md.element.carbon, res)
+
+        xyz = np.array(
+            [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [[5.0, 0.0, 0.0], [6.0, 0.0, 0.0]]],
+            dtype=np.float32,
+        )
+        traj = md.Trajectory(xyz=xyz, topology=topology)
+        aligned = align_trajectory(traj, atom_selection="name CA")
+        rmsd = float(np.sqrt(np.mean((aligned.xyz[1] - aligned.xyz[0]) ** 2)))
+        assert rmsd == pytest.approx(0.0, abs=1e-5)
+
+    def test_reference_frame_zero(self, multi_atom_traj: md.Trajectory) -> None:
+        """reference_frame=0 (default) should not raise."""
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=0)
+        assert aligned.n_frames == multi_atom_traj.n_frames
+
+    def test_reference_frame_last_valid(self, multi_atom_traj: md.Trajectory) -> None:
+        """reference_frame = n_frames - 1 (last valid) should not raise."""
+        last = multi_atom_traj.n_frames - 1
+        aligned = align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=last)
+        assert aligned.n_frames == multi_atom_traj.n_frames
+
+    def test_reference_frame_negative_raises(self, multi_atom_traj: md.Trajectory) -> None:
+        with pytest.raises(ValueError, match="reference_frame must be in"):
+            align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=-1)
+
+    def test_reference_frame_equals_n_frames_raises(self, multi_atom_traj: md.Trajectory) -> None:
+        """reference_frame = n_frames is out of bounds."""
+        with pytest.raises(ValueError, match="reference_frame must be in"):
+            align_trajectory(
+                multi_atom_traj,
+                atom_selection="name CA",
+                reference_frame=multi_atom_traj.n_frames,
+            )
+
+    def test_reference_frame_far_out_of_range_raises(self, multi_atom_traj: md.Trajectory) -> None:
+        with pytest.raises(ValueError, match="reference_frame must be in"):
+            align_trajectory(multi_atom_traj, atom_selection="name CA", reference_frame=9999)
+
+    def test_invalid_atom_selection_raises(self, multi_atom_traj: md.Trajectory) -> None:
+        """An atom selection matching no atoms should raise ValueError."""
+        with pytest.raises(ValueError, match="matched no atoms"):
+            align_trajectory(multi_atom_traj, atom_selection="name ZZ")
