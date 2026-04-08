@@ -44,23 +44,23 @@ def plot_rmsd(
         The matplotlib axis.
     """
     axis = get_axis(ax)
+    use_ma = moving_average is not None and moving_average > 1
     (line,) = axis.plot(
         result.time_ns,
         result.rmsd_angstrom,
-        label=label,
+        label=None if use_ma else label,
         linewidth=linewidth,
         alpha=alpha,
     )
-    if moving_average is not None and moving_average > 1:
+    if use_ma and moving_average is not None:
         kernel = np.ones(moving_average) / moving_average
         smoothed = np.convolve(result.rmsd_angstrom, kernel, mode="same")
-        ma_label = f"{label} (MA={moving_average})" if label is not None else None
         axis.plot(
             result.time_ns,
             smoothed,
             color=line.get_color(),
             linewidth=ma_linewidth,
-            label=ma_label,
+            label=label,
         )
     axis.set_xlabel("Time (ns)")
     axis.set_ylabel("RMSD (Å)")
@@ -110,13 +110,19 @@ def plot_rmsf_average(
     label: str = "average",
     linewidth: float = 2.0,
     color: str | None = None,
+    show_sem: bool = True,
+    sem_alpha: float = 0.2,
 ) -> Axes:
-    """Plot the average RMSF from multiple replicas.
+    """Plot the average RMSF from multiple replicas with optional SEM band.
 
     Averaging is done in MSF (mean-square fluctuation) space: the per-residue
     RMSF^2 values are averaged across replicas, then the square root is taken.
     This is the physically correct way to combine RMSF values because RMSF is
     the square root of a variance-like quantity.
+
+    The error band shows the standard error of the mean (SEM) of the
+    per-residue RMSF values across replicas, which is the standard metric
+    for quantifying uncertainty in averaged MD observables.
 
     Args:
         results: List of RMSFResult objects (one per replica). All must have
@@ -125,6 +131,9 @@ def plot_rmsf_average(
         label: Legend label for the average line.
         linewidth: Line width.
         color: Optional line color. Defaults to matplotlib's next color.
+        show_sem: If ``True``, draw a transparent band showing +/- 1 SEM
+            around the average. Requires at least 2 replicas.
+        sem_alpha: Opacity of the SEM band (0.0 -- 1.0).
 
     Returns:
         The matplotlib axis.
@@ -139,9 +148,9 @@ def plot_rmsf_average(
     if len(sizes) > 1:
         raise ValueError(f"All RMSFResult arrays must have the same length, got sizes {sizes}.")
 
+    rmsf_stack = np.stack([r.rmsf_angstrom for r in results])
     msf_stack = np.stack([r.rmsf_nm**2 for r in results])
-    avg_rmsf_nm = np.sqrt(np.mean(msf_stack, axis=0))
-    avg_rmsf_angstrom = avg_rmsf_nm * 10.0
+    avg_rmsf_angstrom = np.sqrt(np.mean(msf_stack, axis=0)) * 10.0
 
     axis = get_axis(ax)
     ref = results[0]
@@ -150,7 +159,17 @@ def plot_rmsf_average(
         if ref.residue_ids is not None
         else np.arange(ref.rmsf_nm.size, dtype=np.float64) + 1.0
     )
-    axis.plot(x_values, avg_rmsf_angstrom, label=label, linewidth=linewidth, color=color)
+    (line,) = axis.plot(x_values, avg_rmsf_angstrom, label=label, linewidth=linewidth, color=color)
+    if show_sem and len(results) >= 2:
+        n_replicas = len(results)
+        sem = np.std(rmsf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
+        axis.fill_between(
+            x_values,
+            avg_rmsf_angstrom - sem,
+            avg_rmsf_angstrom + sem,
+            alpha=sem_alpha,
+            color=line.get_color(),
+        )
     axis.set_xlabel("Residue ID")
     axis.set_ylabel("RMSF (Å)")
     axis.legend()
