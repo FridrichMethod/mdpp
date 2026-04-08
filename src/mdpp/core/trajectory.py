@@ -257,11 +257,18 @@ def align_trajectory(
 ) -> md.Trajectory:
     """Align a trajectory to a reference frame.
 
+    ``md.Trajectory.superpose`` modifies coordinates in place.  When
+    ``inplace=False`` (the default), only the ``xyz`` array is copied;
+    topology and time are shared with the original trajectory.  This
+    avoids the expensive ``deepcopy(topology)`` that ``traj[:]`` performs.
+
     Args:
         traj: Input trajectory.
         atom_selection: Atoms used for alignment.
         reference_frame: Reference frame index.
-        inplace: Whether to align ``traj`` in place.
+        inplace: If ``True``, align ``traj`` in place and return it.
+            If ``False`` (default), return a new trajectory that shares
+            topology and time but has its own aligned coordinates.
 
     Returns:
         The aligned trajectory.
@@ -274,7 +281,12 @@ def align_trajectory(
             f"reference_frame must be in [0, {traj.n_frames - 1}], got {reference_frame}."
         )
 
-    aligned = traj if inplace else traj[:]
+    if inplace:
+        aligned = traj
+    else:
+        aligned = traj.slice(slice(None), copy=False)
+        aligned.xyz = traj.xyz.copy()
+
     atom_indices = select_atom_indices(aligned.topology, atom_selection)
     aligned.superpose(aligned, frame=reference_frame, atom_indices=atom_indices)
     return aligned
