@@ -78,30 +78,52 @@ def load_trajectory(
     *,
     topology_path: PathLike | None = None,
     stride: int = 1,
+    n_frames: int | None = None,
     atom_selection: str | None = None,
 ) -> md.Trajectory:
     """Load a single trajectory and optionally atom-slice it.
+
+    When *n_frames* is provided, uses :func:`mdtraj.iterload` to stream
+    chunks from disk and stops as soon as *n_frames* frames (after stride)
+    have been collected, avoiding reading the full file into memory.
 
     Args:
         trajectory_path: Path to trajectory file (for example, ``.xtc``).
         topology_path: Optional topology path (for example, ``.pdb``).
         stride: Frame stride.
+        n_frames: Optional maximum number of frames to load (after stride).
+            If ``None``, the entire trajectory is loaded.
         atom_selection: Optional MDTraj selection for atom slicing after load.
 
     Returns:
         Loaded (and optionally sliced) trajectory.
 
     Raises:
-        ValueError: If ``stride`` is less than 1.
+        ValueError: If ``stride`` is less than 1 or ``n_frames`` is less than 1.
     """
     if stride < 1:
         raise ValueError("stride must be >= 1.")
+    if n_frames is not None and n_frames < 1:
+        raise ValueError("n_frames must be >= 1.")
 
-    trajectory = md.load(
-        str(trajectory_path),
-        top=None if topology_path is None else str(topology_path),
-        stride=stride,
-    )
+    top = None if topology_path is None else str(topology_path)
+
+    if n_frames is None:
+        trajectory = md.load(str(trajectory_path), top=top, stride=stride)
+    else:
+        chunks: list[md.Trajectory] = []
+        loaded = 0
+        chunk_size = min(n_frames, 1000)
+        for chunk in md.iterload(str(trajectory_path), top=top, stride=stride, chunk=chunk_size):
+            need = n_frames - loaded
+            if chunk.n_frames >= need:
+                chunks.append(chunk[:need])
+                loaded += need
+                break
+            chunks.append(chunk)
+            loaded += chunk.n_frames
+        trajectory = md.join(chunks)
+
     if atom_selection is None:
         return trajectory
 
@@ -114,6 +136,7 @@ def load_trajectories(
     *,
     topology_paths: Sequence[PathLike | None] | None = None,
     stride: int = 1,
+    n_frames: int | None = None,
     atom_selection: str | None = None,
 ) -> list[md.Trajectory]:
     """Load a list of trajectories with a shared interface.
@@ -123,6 +146,7 @@ def load_trajectories(
         topology_paths: Optional topology paths. If provided, must match
             ``trajectory_paths`` length.
         stride: Frame stride.
+        n_frames: Optional maximum number of frames per trajectory (after stride).
         atom_selection: Optional atom selection for slicing.
 
     Returns:
@@ -141,6 +165,7 @@ def load_trajectories(
             trajectory_path=trajectory_path,
             topology_path=topology_path,
             stride=stride,
+            n_frames=n_frames,
             atom_selection=atom_selection,
         )
         for trajectory_path, topology_path in zip(trajectory_paths, topology_paths, strict=True)

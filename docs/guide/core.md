@@ -23,6 +23,18 @@ traj = load_trajectory(
 )
 ```
 
+For very large trajectories, use `n_frames` to load only the first N frames
+(after stride) without reading the full file into memory:
+
+```python
+traj = load_trajectory(
+    "md.xtc",
+    topology_path="topol.gro",
+    stride=10,
+    n_frames=1000,
+)
+```
+
 ### Multiple trajectories
 
 ```python
