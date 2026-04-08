@@ -92,7 +92,7 @@ def test_n_frames_not_multiple_of_chunk(traj_on_disk: tuple[Path, Path, int]) ->
 
 def test_n_frames_with_stride(traj_on_disk: tuple[Path, Path, int]) -> None:
     """n_frames counts post-stride frames, not raw frames."""
-    xtc, pdb, total = traj_on_disk
+    xtc, pdb, _total = traj_on_disk
     stride = 5
     traj = load_trajectory(xtc, topology_path=pdb, stride=stride, n_frames=3)
     assert traj.n_frames == 3
