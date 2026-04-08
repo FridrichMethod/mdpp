@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp.core.trajectory import (
-    align_trajectory,
     residue_ids_from_indices,
     select_atom_indices,
     trajectory_time_ps,
@@ -133,38 +132,27 @@ def compute_rmsd(
     *,
     atom_selection: str = "backbone",
     reference_frame: int = 0,
-    align: bool = True,
-    align_selection: str | None = None,
     timestep_ps: float | None = None,
 ) -> RMSDResult:
     """Compute RMSD over time.
 
+    The trajectory should be aligned before calling this function
+    (see :func:`~mdpp.core.trajectory.align_trajectory`).
+
     Args:
-        traj: Input trajectory.
+        traj: Input trajectory (pre-aligned).
         atom_selection: Atoms used in RMSD calculation.
-        reference_frame: Reference frame index.
-        align: Whether to align the trajectory before RMSD.
-        align_selection: Optional atom selection for alignment.
+        reference_frame: Reference frame index for RMSD.
         timestep_ps: Optional time step in ps to override trajectory time.
 
     Returns:
         RMSDResult containing time and RMSD.
     """
-    working = (
-        align_trajectory(
-            traj,
-            atom_selection=align_selection or atom_selection,
-            reference_frame=reference_frame,
-            inplace=False,
-        )
-        if align
-        else traj
-    )
-    atom_indices = select_atom_indices(working.topology, atom_selection)
+    atom_indices = select_atom_indices(traj.topology, atom_selection)
     rmsd_nm = np.asarray(
         md.rmsd(
-            working,
-            working,
+            traj,
+            traj,
             frame=reference_frame,
             atom_indices=atom_indices,
             precentered=False,
@@ -172,7 +160,7 @@ def compute_rmsd(
         dtype=np.float64,
     )
     return RMSDResult(
-        time_ps=trajectory_time_ps(working, timestep_ps=timestep_ps),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps),
         rmsd_nm=rmsd_nm,
         atom_indices=atom_indices,
     )
@@ -182,38 +170,25 @@ def compute_rmsf(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
-    align: bool = True,
-    align_selection: str | None = None,
-    reference_frame: int = 0,
 ) -> RMSFResult:
     """Compute per-atom RMSF from positional fluctuations.
 
+    The trajectory should be aligned before calling this function
+    (see :func:`~mdpp.core.trajectory.align_trajectory`).
+
     Args:
-        traj: Input trajectory.
+        traj: Input trajectory (pre-aligned).
         atom_selection: Atoms included in RMSF calculation.
-        align: Whether to align trajectory before RMSF.
-        align_selection: Optional atom selection used for alignment.
-        reference_frame: Reference frame index for alignment.
 
     Returns:
         RMSFResult with atom and residue mapping.
     """
-    working = (
-        align_trajectory(
-            traj,
-            atom_selection=align_selection or atom_selection,
-            reference_frame=reference_frame,
-            inplace=False,
-        )
-        if align
-        else traj
-    )
-    atom_indices = select_atom_indices(working.topology, atom_selection)
-    positions_nm = working.xyz[:, atom_indices, :]
+    atom_indices = select_atom_indices(traj.topology, atom_selection)
+    positions_nm = traj.xyz[:, atom_indices, :]
     mean_positions_nm = np.mean(positions_nm, axis=0)
     squared_displacements = np.sum((positions_nm - mean_positions_nm) ** 2, axis=2)
     rmsf_nm = np.sqrt(np.mean(squared_displacements, axis=0, dtype=np.float64))
-    residue_ids = residue_ids_from_indices(working.topology, atom_indices)
+    residue_ids = residue_ids_from_indices(traj.topology, atom_indices)
     return RMSFResult(
         rmsf_nm=np.asarray(rmsf_nm, dtype=np.float64),
         atom_indices=atom_indices,
@@ -225,18 +200,15 @@ def compute_dccm(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
-    align: bool = True,
-    align_selection: str | None = None,
-    reference_frame: int = 0,
 ) -> DCCMResult:
     """Compute dynamic cross-correlation matrix (DCCM).
 
+    The trajectory should be aligned before calling this function
+    (see :func:`~mdpp.core.trajectory.align_trajectory`).
+
     Args:
-        traj: Input trajectory.
+        traj: Input trajectory (pre-aligned).
         atom_selection: Atoms used in DCCM.
-        align: Whether to align trajectory first.
-        align_selection: Optional atom selection used for alignment.
-        reference_frame: Reference frame index for alignment.
 
     Returns:
         DCCMResult with correlation matrix and residue IDs.
@@ -244,22 +216,12 @@ def compute_dccm(
     if traj.n_frames < 2:
         raise ValueError("DCCM requires at least two frames.")
 
-    working = (
-        align_trajectory(
-            traj,
-            atom_selection=align_selection or atom_selection,
-            reference_frame=reference_frame,
-            inplace=False,
-        )
-        if align
-        else traj
-    )
-    atom_indices = select_atom_indices(working.topology, atom_selection)
-    positions_nm = working.xyz[:, atom_indices, :]
+    atom_indices = select_atom_indices(traj.topology, atom_selection)
+    positions_nm = traj.xyz[:, atom_indices, :]
     mean_positions_nm = np.mean(positions_nm, axis=0)
     fluctuation_nm = positions_nm - mean_positions_nm
 
-    covariance = np.einsum("fid,fjd->ij", fluctuation_nm, fluctuation_nm) / float(working.n_frames)
+    covariance = np.einsum("fid,fjd->ij", fluctuation_nm, fluctuation_nm) / float(traj.n_frames)
     standard_deviation = np.sqrt(np.clip(np.diag(covariance), a_min=0.0, a_max=None))
     normalization = np.outer(standard_deviation, standard_deviation)
 
@@ -269,7 +231,7 @@ def compute_dccm(
     correlation[~np.isfinite(correlation)] = 0.0
     np.fill_diagonal(correlation, 1.0)
 
-    residue_ids = residue_ids_from_indices(working.topology, atom_indices)
+    residue_ids = residue_ids_from_indices(traj.topology, atom_indices)
     return DCCMResult(
         correlation=correlation,
         atom_indices=atom_indices,

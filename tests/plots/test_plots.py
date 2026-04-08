@@ -34,9 +34,9 @@ def test_plot_helpers_return_axes(
     hbond_trajectory,
 ) -> None:
     """Each plotting helper should return a valid axis with expected labels."""
-    rmsd_result = compute_rmsd(two_atom_trajectory, atom_selection="name CA", align=False)
-    rmsf_result = compute_rmsf(two_atom_trajectory, atom_selection="name CA", align=False)
-    dccm_result = compute_dccm(correlated_ca_trajectory, atom_selection="name CA", align=False)
+    rmsd_result = compute_rmsd(two_atom_trajectory, atom_selection="name CA")
+    rmsf_result = compute_rmsf(two_atom_trajectory, atom_selection="name CA")
+    dccm_result = compute_dccm(correlated_ca_trajectory, atom_selection="name CA")
     sasa_result = compute_sasa(correlated_ca_trajectory, atom_selection=None, mode="residue")
     hbond_result = compute_hbonds(
         hbond_trajectory,

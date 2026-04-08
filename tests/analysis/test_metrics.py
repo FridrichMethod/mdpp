@@ -20,7 +20,6 @@ def test_compute_rmsd_reference_frame_is_zero(two_atom_trajectory) -> None:
         two_atom_trajectory,
         atom_selection="name CA",
         reference_frame=0,
-        align=False,
     )
 
     assert result.rmsd_nm.shape == (two_atom_trajectory.n_frames,)
@@ -30,7 +29,7 @@ def test_compute_rmsd_reference_frame_is_zero(two_atom_trajectory) -> None:
 
 def test_compute_rmsf_matches_expected_fluctuation(two_atom_trajectory) -> None:
     """RMSF should match a known two-atom fluctuation example."""
-    result = compute_rmsf(two_atom_trajectory, atom_selection="name CA", align=False)
+    result = compute_rmsf(two_atom_trajectory, atom_selection="name CA")
     expected_atom_2_nm = np.sqrt((0.0**2 + 0.1**2 + (-0.1) ** 2) / 3.0)
 
     assert result.rmsf_nm[0] == pytest.approx(0.0, abs=1e-8)
@@ -42,7 +41,7 @@ def test_compute_rmsf_matches_expected_fluctuation(two_atom_trajectory) -> None:
 
 def test_compute_dccm_detects_correlation_patterns(correlated_ca_trajectory) -> None:
     """DCCM should capture correlated and anti-correlated atom pairs."""
-    result = compute_dccm(correlated_ca_trajectory, atom_selection="name CA", align=False)
+    result = compute_dccm(correlated_ca_trajectory, atom_selection="name CA")
 
     assert result.correlation.shape == (3, 3)
     assert np.allclose(np.diag(result.correlation), 1.0)
