@@ -24,6 +24,9 @@ def plot_rmsd(
     ax: Axes | None = None,
     label: str | None = None,
     linewidth: float = 1.5,
+    alpha: float = 1.0,
+    moving_average: int | None = None,
+    ma_linewidth: float = 2.0,
 ) -> Axes:
     """Plot RMSD as a function of time.
 
@@ -31,13 +34,34 @@ def plot_rmsd(
         result: RMSDResult from ``compute_rmsd``.
         ax: Optional matplotlib axis.
         label: Optional legend label.
-        linewidth: Line width.
+        linewidth: Line width for the raw trace.
+        alpha: Opacity of the raw trace (0.0 -- 1.0).
+        moving_average: If set, overlay a moving-average line computed with
+            a centered window of this many frames.
+        ma_linewidth: Line width for the moving-average overlay.
 
     Returns:
         The matplotlib axis.
     """
     axis = get_axis(ax)
-    axis.plot(result.time_ns, result.rmsd_angstrom, label=label, linewidth=linewidth)
+    (line,) = axis.plot(
+        result.time_ns,
+        result.rmsd_angstrom,
+        label=label,
+        linewidth=linewidth,
+        alpha=alpha,
+    )
+    if moving_average is not None and moving_average > 1:
+        kernel = np.ones(moving_average) / moving_average
+        smoothed = np.convolve(result.rmsd_angstrom, kernel, mode="same")
+        ma_label = f"{label} (MA={moving_average})" if label is not None else None
+        axis.plot(
+            result.time_ns,
+            smoothed,
+            color=line.get_color(),
+            linewidth=ma_linewidth,
+            label=ma_label,
+        )
     axis.set_xlabel("Time (ns)")
     axis.set_ylabel("RMSD (Å)")
     if label is not None:
