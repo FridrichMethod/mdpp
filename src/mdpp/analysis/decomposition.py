@@ -155,6 +155,52 @@ def compute_pca(
     )
 
 
+def project_pca(
+    features: ArrayLike,
+    *,
+    fitted: PCAResult,
+) -> PCAResult:
+    """Project new features using a previously fitted PCA.
+
+    The features are standardized using the mean and scale from the
+    fitted PCA, then transformed using its model.  This is the correct
+    way to project a second dataset (e.g. a different system) onto the
+    same principal component axes for direct comparison.
+
+    Args:
+        features: Input feature matrix ``(n_samples, n_features)``.
+            Must have the same number of features as the fitted PCA.
+        fitted: PCAResult from a previous ``compute_pca`` call whose
+            principal component axes will be used.
+
+    Returns:
+        PCAResult with projections onto the fitted PCA axes.  The
+        ``components``, ``explained_variance_ratio``, ``feature_mean``,
+        ``feature_scale``, and ``model`` are shared from ``fitted``.
+
+    Raises:
+        ValueError: If the feature dimension does not match the fitted PCA.
+    """
+    feature_matrix = _as_feature_matrix(features)
+    expected_dim = fitted.feature_mean.shape[0]
+    if feature_matrix.shape[1] != expected_dim:
+        raise ValueError(
+            f"Feature dimension mismatch: got {feature_matrix.shape[1]}, "
+            f"expected {expected_dim} (from fitted PCA)."
+        )
+
+    transformed = (feature_matrix - fitted.feature_mean) / fitted.feature_scale
+    projections = np.asarray(fitted.model.transform(transformed), dtype=np.float64)
+    return PCAResult(
+        projections=projections,
+        components=fitted.components,
+        explained_variance_ratio=fitted.explained_variance_ratio,
+        feature_mean=fitted.feature_mean,
+        feature_scale=fitted.feature_scale,
+        model=fitted.model,
+    )
+
+
 def compute_tica(
     features: ArrayLike,
     *,
