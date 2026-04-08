@@ -9,6 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
 
 from mdpp.analysis.metrics import DeltaRMSFResult
@@ -95,11 +96,13 @@ class TestPlotDeltaRMSFBasic:
 
 class TestPlotDeltaRMSFNoSEM:
     def test_no_sem_no_fill(self) -> None:
-        """Without SEM data, no fill_between collections should be drawn."""
+        """Without SEM data, only the LineCollection should exist (no fill)."""
         result = _make_result([0.01, -0.02, 0.03])
         fig, ax = plt.subplots()
         plot_delta_rmsf(result, ax=ax)
-        assert len(ax.collections) == 0
+        # 1 collection = the colored LineCollection, no PolyCollections from fill_between
+        assert len(ax.collections) == 1
+        assert isinstance(ax.collections[0], LineCollection)
         plt.close(fig)
 
     def test_no_sem_still_has_line(self) -> None:
@@ -156,10 +159,11 @@ class TestPlotDeltaRMSFWithSEM:
             positive_color="orange",
             negative_color="purple",
         )
-        collections = ax.collections
-        assert len(collections) >= 2
-        pos_fc = tuple(collections[0].get_facecolor()[0])  # type: ignore[arg-type]
-        neg_fc = tuple(collections[1].get_facecolor()[0])  # type: ignore[arg-type]
+        # collections[0] = LineCollection, [1:] = fill_between PolyCollections
+        poly_collections = [c for c in ax.collections if not isinstance(c, LineCollection)]
+        assert len(poly_collections) >= 2
+        pos_fc = tuple(poly_collections[0].get_facecolor()[0])  # type: ignore[arg-type]
+        neg_fc = tuple(poly_collections[1].get_facecolor()[0])  # type: ignore[arg-type]
         assert pos_fc == pytest.approx(to_rgba("orange", alpha=0.3))
         assert neg_fc == pytest.approx(to_rgba("purple", alpha=0.3))
         plt.close(fig)
@@ -168,7 +172,8 @@ class TestPlotDeltaRMSFWithSEM:
         result = _make_result([0.01, -0.02], sem=[0.005, 0.003])
         fig, ax = plt.subplots()
         plot_delta_rmsf(result, ax=ax, sem_alpha=0.6)
-        for coll in ax.collections:
+        poly_collections = [c for c in ax.collections if not isinstance(c, LineCollection)]
+        for coll in poly_collections:
             fc = coll.get_facecolor()
             if len(fc) > 0:
                 rgba = tuple(fc[0])  # type: ignore[arg-type]

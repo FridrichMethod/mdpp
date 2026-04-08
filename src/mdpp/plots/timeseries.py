@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.collections import LineCollection
 
 from mdpp.analysis.contacts import NativeContactResult
 from mdpp.analysis.distance import DistanceResult
@@ -471,22 +472,21 @@ def plot_delta_rmsf(
     linewidth: float = 1.5,
     sem_alpha: float = 0.3,
 ) -> Axes:
-    """Plot per-residue RMSF difference as a line with SEM error band.
+    """Plot per-residue RMSF difference as a colored line with SEM band.
 
-    The delta-RMSF line is drawn in black. When SEM data is available
-    (requires >= 2 replicas per system), the +/- 1 SEM band is drawn
-    with ``positive_color`` where delta > 0 (system B more flexible)
-    and ``negative_color`` where delta < 0 (system A more flexible).
+    The line and SEM band are colored per-residue: ``positive_color``
+    where delta > 0 (system B more flexible) and ``negative_color``
+    where delta < 0 (system A more flexible).
 
     Args:
         result: DeltaRMSFResult from ``compute_delta_rmsf``.
         ax: Optional matplotlib axis.
         labels: Tuple of ``(system_a_name, system_b_name)`` used in the
             legend (e.g. ``("BirA", "TurboID")``).
-        positive_color: SEM band color for residues where system B is
-            more flexible (delta > 0).
-        negative_color: SEM band color for residues where system A is
-            more flexible (delta < 0).
+        positive_color: Color for residues where system B is more
+            flexible (delta > 0).
+        negative_color: Color for residues where system A is more
+            flexible (delta < 0).
         linewidth: Line width for the delta-RMSF trace.
         sem_alpha: Opacity of the SEM band (0.0 -- 1.0).
 
@@ -501,7 +501,18 @@ def plot_delta_rmsf(
         else np.arange(drmsf.size, dtype=np.float64) + 1.0
     )
 
-    axis.plot(x_values, drmsf, color="black", linewidth=linewidth)
+    # Color each line segment by the sign of the midpoint
+    points = np.column_stack([x_values, drmsf]).reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    midpoint_y = (drmsf[:-1] + drmsf[1:]) / 2.0
+    colors = [positive_color if y > 0 else negative_color for y in midpoint_y]
+    lc = LineCollection(segments, colors=colors, linewidths=linewidth)  # type: ignore[arg-type]
+    axis.add_collection(lc)
+    axis.autoscale_view()
+
+    # Legend entries via invisible proxy lines
+    axis.plot([], [], color=positive_color, linewidth=linewidth, label=f"{labels[1]} more flexible")
+    axis.plot([], [], color=negative_color, linewidth=linewidth, label=f"{labels[0]} more flexible")
 
     sem = result.sem_angstrom
     if sem is not None:
@@ -516,7 +527,6 @@ def plot_delta_rmsf(
             where=positive,
             alpha=sem_alpha,
             color=positive_color,
-            label=f"{labels[1]} more flexible",
         )
         axis.fill_between(
             x_values,
@@ -525,12 +535,10 @@ def plot_delta_rmsf(
             where=negative,
             alpha=sem_alpha,
             color=negative_color,
-            label=f"{labels[0]} more flexible",
         )
 
     axis.axhline(0, color="black", linewidth=0.8, linestyle="--")
     axis.set_xlabel("Residue ID")
     axis.set_ylabel(r"$\Delta$RMSF (Å)")
-    if sem is not None:
-        axis.legend()
+    axis.legend()
     return axis
