@@ -120,9 +120,9 @@ def plot_rmsf_average(
     This is the physically correct way to combine RMSF values because RMSF is
     the square root of a variance-like quantity.
 
-    The error band shows the standard error of the mean (SEM) of the
-    per-residue RMSF values across replicas, which is the standard metric
-    for quantifying uncertainty in averaged MD observables.
+    The error band is propagated consistently through the same transformation.
+    Given ``avg_rmsf = sqrt(mean(MSF))``, the SEM on the MSF is propagated
+    through the square root via ``sem_rmsf = sem_msf / (2 * avg_rmsf)``.
 
     Args:
         results: List of RMSFResult objects (one per replica). All must have
@@ -148,9 +148,9 @@ def plot_rmsf_average(
     if len(sizes) > 1:
         raise ValueError(f"All RMSFResult arrays must have the same length, got sizes {sizes}.")
 
-    rmsf_stack = np.stack([r.rmsf_angstrom for r in results])
     msf_stack = np.stack([r.rmsf_nm**2 for r in results])
-    avg_rmsf_angstrom = np.sqrt(np.mean(msf_stack, axis=0)) * 10.0
+    avg_msf = np.mean(msf_stack, axis=0)
+    avg_rmsf_angstrom = np.sqrt(avg_msf) * 10.0
 
     axis = get_axis(ax)
     ref = results[0]
@@ -162,7 +162,10 @@ def plot_rmsf_average(
     (line,) = axis.plot(x_values, avg_rmsf_angstrom, label=label, linewidth=linewidth, color=color)
     if show_sem and len(results) >= 2:
         n_replicas = len(results)
-        sem = np.std(rmsf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
+        sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
+        # Propagate SEM through sqrt: d/d(MSF) sqrt(MSF) = 1 / (2 * sqrt(MSF))
+        avg_rmsf_nm = np.sqrt(avg_msf)
+        sem = np.where(avg_rmsf_nm > 0, sem_msf / (2.0 * avg_rmsf_nm), 0.0) * 10.0
         axis.fill_between(
             x_values,
             avg_rmsf_angstrom - sem,
