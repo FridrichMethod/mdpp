@@ -15,6 +15,7 @@ from mdpp.plots.timeseries import (
     plot_radius_of_gyration,
     plot_rmsd,
     plot_rmsf,
+    plot_rmsf_average,
     plot_sasa,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "plot_ramachandran",
     "plot_rmsd",
     "plot_rmsf",
+    "plot_rmsf_average",
     "plot_sasa",
     "view_mol_3d",
     "view_traj_3d",

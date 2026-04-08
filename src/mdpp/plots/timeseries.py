@@ -75,6 +75,7 @@ def plot_rmsf(
     ax: Axes | None = None,
     label: str | None = None,
     linewidth: float = 1.5,
+    alpha: float = 1.0,
 ) -> Axes:
     """Plot per-atom RMSF.
 
@@ -83,6 +84,7 @@ def plot_rmsf(
         ax: Optional matplotlib axis.
         label: Optional legend label.
         linewidth: Line width.
+        alpha: Opacity of the trace (0.0 -- 1.0).
 
     Returns:
         The matplotlib axis.
@@ -93,11 +95,65 @@ def plot_rmsf(
         if result.residue_ids is not None
         else np.arange(result.rmsf_nm.size, dtype=np.float64) + 1.0
     )
-    axis.plot(x_values, result.rmsf_angstrom, label=label, linewidth=linewidth)
+    axis.plot(x_values, result.rmsf_angstrom, label=label, linewidth=linewidth, alpha=alpha)
     axis.set_xlabel("Residue ID")
     axis.set_ylabel("RMSF (Å)")
     if label is not None:
         axis.legend()
+    return axis
+
+
+def plot_rmsf_average(
+    results: list[RMSFResult],
+    *,
+    ax: Axes | None = None,
+    label: str = "average",
+    linewidth: float = 2.0,
+    color: str | None = None,
+) -> Axes:
+    """Plot the average RMSF from multiple replicas.
+
+    Averaging is done in MSF (mean-square fluctuation) space: the per-residue
+    RMSF^2 values are averaged across replicas, then the square root is taken.
+    This is the physically correct way to combine RMSF values because RMSF is
+    the square root of a variance-like quantity.
+
+    Args:
+        results: List of RMSFResult objects (one per replica). All must have
+            the same number of atoms.
+        ax: Optional matplotlib axis.
+        label: Legend label for the average line.
+        linewidth: Line width.
+        color: Optional line color. Defaults to matplotlib's next color.
+
+    Returns:
+        The matplotlib axis.
+
+    Raises:
+        ValueError: If ``results`` is empty or RMSF arrays differ in length.
+    """
+    if not results:
+        raise ValueError("results must not be empty.")
+
+    sizes = {r.rmsf_nm.size for r in results}
+    if len(sizes) > 1:
+        raise ValueError(f"All RMSFResult arrays must have the same length, got sizes {sizes}.")
+
+    msf_stack = np.stack([r.rmsf_nm**2 for r in results])
+    avg_rmsf_nm = np.sqrt(np.mean(msf_stack, axis=0))
+    avg_rmsf_angstrom = avg_rmsf_nm * 10.0
+
+    axis = get_axis(ax)
+    ref = results[0]
+    x_values = (
+        np.asarray(ref.residue_ids, dtype=np.float64)
+        if ref.residue_ids is not None
+        else np.arange(ref.rmsf_nm.size, dtype=np.float64) + 1.0
+    )
+    axis.plot(x_values, avg_rmsf_angstrom, label=label, linewidth=linewidth, color=color)
+    axis.set_xlabel("Residue ID")
+    axis.set_ylabel("RMSF (Å)")
+    axis.legend()
     return axis
 
 
