@@ -25,6 +25,7 @@ def plot_rmsd(
     label: str | None = None,
     linewidth: float = 1.5,
     alpha: float = 1.0,
+    color: str | None = None,
     moving_average: int | None = None,
     ma_linewidth: float = 2.0,
 ) -> Axes:
@@ -36,6 +37,8 @@ def plot_rmsd(
         label: Optional legend label.
         linewidth: Line width for the raw trace.
         alpha: Opacity of the raw trace (0.0 -- 1.0).
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
         moving_average: If set, overlay a moving-average line computed with
             a centered window of this many frames.
         ma_linewidth: Line width for the moving-average overlay.
@@ -51,6 +54,7 @@ def plot_rmsd(
         label=None if use_ma else label,
         linewidth=linewidth,
         alpha=alpha,
+        color=color,
     )
     if use_ma and moving_average is not None:
         kernel = np.ones(moving_average) / moving_average
@@ -76,6 +80,7 @@ def plot_rmsf(
     label: str | None = None,
     linewidth: float = 1.5,
     alpha: float = 1.0,
+    color: str | None = None,
 ) -> Axes:
     """Plot per-atom RMSF.
 
@@ -85,6 +90,8 @@ def plot_rmsf(
         label: Optional legend label.
         linewidth: Line width.
         alpha: Opacity of the trace (0.0 -- 1.0).
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
 
     Returns:
         The matplotlib axis.
@@ -95,7 +102,9 @@ def plot_rmsf(
         if result.residue_ids is not None
         else np.arange(result.rmsf_nm.size, dtype=np.float64) + 1.0
     )
-    axis.plot(x_values, result.rmsf_angstrom, label=label, linewidth=linewidth, alpha=alpha)
+    axis.plot(
+        x_values, result.rmsf_angstrom, label=label, linewidth=linewidth, alpha=alpha, color=color
+    )
     axis.set_xlabel("Residue ID")
     axis.set_ylabel("RMSF (Å)")
     if label is not None:
@@ -130,7 +139,8 @@ def plot_rmsf_average(
         ax: Optional matplotlib axis.
         label: Legend label for the average line.
         linewidth: Line width.
-        color: Optional line color. Defaults to matplotlib's next color.
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
         show_sem: If ``True``, draw a transparent band showing +/- 1 SEM
             around the average. Requires at least 2 replicas.
         sem_alpha: Opacity of the SEM band (0.0 -- 1.0).
@@ -186,6 +196,7 @@ def plot_sasa(
     label: str | None = None,
     aggregate: str = "sum",
     linewidth: float = 1.5,
+    color: str | None = None,
 ) -> Axes:
     """Plot SASA over time.
 
@@ -194,7 +205,12 @@ def plot_sasa(
         ax: Optional matplotlib axis.
         label: Optional legend label.
         aggregate: Aggregation mode: ``"sum"``, ``"mean"``, or ``"none"``.
+            When ``"none"``, each atom/residue trace uses the property cycle
+            and the ``color`` parameter is ignored.
         linewidth: Line width for plotted traces.
+        color: Optional line color for ``"sum"`` and ``"mean"`` aggregation.
+            Ignored when ``aggregate="none"`` (multiple traces use the
+            property cycle). Defaults to matplotlib's next color.
 
     Returns:
         The matplotlib axis.
@@ -202,11 +218,11 @@ def plot_sasa(
     axis = get_axis(ax)
     if aggregate == "sum":
         y_values = np.sum(result.values_nm2, axis=1)
-        axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth)
+        axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth, color=color)
         axis.set_ylabel("SASA (nm²)")
     elif aggregate == "mean":
         y_values = np.mean(result.values_nm2, axis=1)
-        axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth)
+        axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth, color=color)
         axis.set_ylabel("Mean SASA (nm²)")
     elif aggregate == "none":
         for index in range(result.values_nm2.shape[1]):
@@ -232,6 +248,7 @@ def plot_hbond_counts(
     ax: Axes | None = None,
     label: str | None = None,
     linewidth: float = 1.5,
+    color: str | None = None,
 ) -> Axes:
     """Plot hydrogen-bond count over time.
 
@@ -240,12 +257,14 @@ def plot_hbond_counts(
         ax: Optional matplotlib axis.
         label: Optional legend label.
         linewidth: Line width.
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
 
     Returns:
         The matplotlib axis.
     """
     axis = get_axis(ax)
-    axis.plot(result.time_ns, result.count_per_frame, label=label, linewidth=linewidth)
+    axis.plot(result.time_ns, result.count_per_frame, label=label, linewidth=linewidth, color=color)
     axis.set_xlabel("Time (ns)")
     axis.set_ylabel("Hydrogen Bond Count")
     if label is not None:
@@ -300,6 +319,7 @@ def plot_radius_of_gyration(
     ax: Axes | None = None,
     label: str | None = None,
     linewidth: float = 1.5,
+    color: str | None = None,
 ) -> Axes:
     """Plot radius of gyration over time.
 
@@ -308,12 +328,20 @@ def plot_radius_of_gyration(
         ax: Optional matplotlib axis.
         label: Optional legend label.
         linewidth: Line width.
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
 
     Returns:
         The matplotlib axis.
     """
     axis = get_axis(ax)
-    axis.plot(result.time_ns, result.radius_gyration_angstrom, label=label, linewidth=linewidth)
+    axis.plot(
+        result.time_ns,
+        result.radius_gyration_angstrom,
+        label=label,
+        linewidth=linewidth,
+        color=color,
+    )
     axis.set_xlabel("Time (ns)")
     axis.set_ylabel("Radius of Gyration (Å)")
     if label is not None:
@@ -358,6 +386,7 @@ def plot_native_contacts(
     ax: Axes | None = None,
     label: str | None = None,
     linewidth: float = 1.5,
+    color: str | None = None,
 ) -> Axes:
     """Plot fraction of native contacts Q(t) over time.
 
@@ -366,12 +395,14 @@ def plot_native_contacts(
         ax: Optional matplotlib axis.
         label: Optional legend label.
         linewidth: Line width.
+        color: Optional line color. Defaults to matplotlib's next color in
+            the property cycle.
 
     Returns:
         The matplotlib axis.
     """
     axis = get_axis(ax)
-    axis.plot(result.time_ns, result.fraction, label=label, linewidth=linewidth)
+    axis.plot(result.time_ns, result.fraction, label=label, linewidth=linewidth, color=color)
     axis.set_xlabel("Time (ns)")
     axis.set_ylabel("Q(t)")
     axis.set_ylim(-0.05, 1.05)
