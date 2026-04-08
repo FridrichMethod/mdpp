@@ -80,50 +80,58 @@ def load_trajectory(
     topology_path: PathLike | None = None,
     stride: int = 1,
     n_frames: int | None = None,
+    skip: int = 0,
     atom_selection: str | None = None,
 ) -> md.Trajectory:
     """Load a single trajectory and optionally atom-slice it.
 
-    When *n_frames* is provided, uses :func:`mdtraj.iterload` to stream
-    chunks from disk and stops as soon as *n_frames* frames (after stride)
-    have been collected, avoiding reading the full file into memory.
+    When *n_frames* or *skip* is provided, the file is opened directly via
+    mdtraj's format-specific reader (e.g. ``XTCTrajectoryFile``) and
+    ``seek``/``read_as_traj`` are used to read exactly the requested window.
+    Only the requested frames are read into memory.
 
     Args:
         trajectory_path: Path to trajectory file (for example, ``.xtc``).
         topology_path: Optional topology path (for example, ``.pdb``).
         stride: Frame stride.
         n_frames: Optional maximum number of frames to load (after stride).
-            If ``None``, the entire trajectory is loaded.
+            If ``None``, all frames from the skip offset onward are loaded.
+        skip: Number of raw frames to skip from the start of the file before
+            reading. This is applied before stride. Default is 0.
         atom_selection: Optional MDTraj selection for atom slicing after load.
 
     Returns:
         Loaded (and optionally sliced) trajectory.
 
     Raises:
-        ValueError: If ``stride`` is less than 1 or ``n_frames`` is less than 1.
+        ValueError: If ``stride`` is less than 1, ``n_frames`` is less than 1,
+            or ``skip`` is negative.
     """
     if stride < 1:
         raise ValueError("stride must be >= 1.")
     if n_frames is not None and n_frames < 1:
         raise ValueError("n_frames must be >= 1.")
+    if skip < 0:
+        raise ValueError("skip must be >= 0.")
 
     top = None if topology_path is None else str(topology_path)
 
-    if n_frames is None:
+    if n_frames is None and skip == 0:
         trajectory = md.load(str(trajectory_path), top=top, stride=stride)
     else:
-        chunks: list[md.Trajectory] = []
-        loaded = 0
-        chunk_size = min(n_frames, 1000)
-        for chunk in md.iterload(str(trajectory_path), top=top, stride=stride, chunk=chunk_size):
-            need = n_frames - loaded
-            if chunk.n_frames >= need:
-                chunks.append(chunk[:need])
-                loaded += need
-                break
-            chunks.append(chunk)
-            loaded += chunk.n_frames
-        trajectory = md.join(chunks)
+        topology = (
+            md.load_topology(top) if top is not None else md.load_topology(str(trajectory_path))
+        )
+        with md.open(str(trajectory_path)) as fh:
+            if skip > 0:
+                try:
+                    fh.seek(skip)
+                except OSError:
+                    return md.Trajectory(
+                        xyz=np.empty((0, topology.n_atoms, 3), dtype=np.float32),
+                        topology=topology,
+                    )
+            trajectory = fh.read_as_traj(topology, n_frames=n_frames, stride=stride)
 
     if atom_selection is None:
         return trajectory
@@ -133,15 +141,16 @@ def load_trajectory(
 
 
 def _load_trajectory_worker(
-    args: tuple[str, str | None, int, int | None, str | None],
+    args: tuple[str, str | None, int, int | None, int, str | None],
 ) -> md.Trajectory:
     """Worker function for parallel trajectory loading (must be picklable)."""
-    traj_path, top_path, stride, n_frames, atom_selection = args
+    traj_path, top_path, stride, n_frames, skip, atom_selection = args
     return load_trajectory(
         trajectory_path=traj_path,
         topology_path=top_path,
         stride=stride,
         n_frames=n_frames,
+        skip=skip,
         atom_selection=atom_selection,
     )
 
@@ -152,6 +161,7 @@ def load_trajectories(
     topology_paths: Sequence[PathLike | None] | None = None,
     stride: int = 1,
     n_frames: int | None = None,
+    skip: int = 0,
     atom_selection: str | None = None,
     max_workers: int | None = None,
 ) -> list[md.Trajectory]:
@@ -180,6 +190,7 @@ def load_trajectories(
             ``trajectory_paths`` length.
         stride: Frame stride.
         n_frames: Optional maximum number of frames per trajectory (after stride).
+        skip: Number of raw frames to skip from the start of each file.
         atom_selection: Optional atom selection for slicing.
         max_workers: If set, load trajectories in parallel using processes.
             The value controls the maximum number of concurrent worker
@@ -202,6 +213,7 @@ def load_trajectories(
             None if top_path is None else str(top_path),
             stride,
             n_frames,
+            skip,
             atom_selection,
         )
         for traj_path, top_path in zip(trajectory_paths, topology_paths, strict=True)

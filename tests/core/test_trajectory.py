@@ -187,6 +187,175 @@ def test_stride_zero_raises(traj_on_disk: tuple[Path, Path, int]) -> None:
         load_trajectory(xtc, topology_path=pdb, stride=0)
 
 
+# --- skip parameter ---
+
+
+def test_skip_frames(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skipping frames should start reading from the offset."""
+    xtc, pdb, _ = traj_on_disk
+    skipped = load_trajectory(xtc, topology_path=pdb, skip=10, n_frames=5)
+    full = load_trajectory(xtc, topology_path=pdb)
+    assert skipped.n_frames == 5
+    np.testing.assert_allclose(skipped.xyz, full[10:15].xyz, atol=1e-6)
+    np.testing.assert_allclose(skipped.time, full[10:15].time, atol=1e-3)
+
+
+def test_skip_with_stride(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip is applied before stride."""
+    xtc, pdb, _ = traj_on_disk
+    # skip=10, stride=5, n_frames=3 -> raw frames 10, 15, 20
+    skipped = load_trajectory(xtc, topology_path=pdb, skip=10, stride=5, n_frames=3)
+    full = load_trajectory(xtc, topology_path=pdb)
+    assert skipped.n_frames == 3
+    np.testing.assert_allclose(skipped.xyz, full[10::5][:3].xyz, atol=1e-6)
+
+
+def test_skip_without_n_frames(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip alone (no n_frames) should load from offset to end."""
+    xtc, pdb, total = traj_on_disk
+    skipped = load_trajectory(xtc, topology_path=pdb, skip=40)
+    assert skipped.n_frames == total - 40
+
+
+def test_skip_exceeds_total(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip past the end should return an empty or zero-frame trajectory."""
+    xtc, pdb, total = traj_on_disk
+    skipped = load_trajectory(xtc, topology_path=pdb, skip=total + 10, n_frames=5)
+    assert skipped.n_frames == 0
+
+
+def test_skip_zero_is_default(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """skip=0 should behave identically to omitting skip."""
+    xtc, pdb, _ = traj_on_disk
+    with_skip = load_trajectory(xtc, topology_path=pdb, skip=0, n_frames=10)
+    without_skip = load_trajectory(xtc, topology_path=pdb, n_frames=10)
+    np.testing.assert_allclose(with_skip.xyz, without_skip.xyz, atol=1e-6)
+
+
+def test_skip_negative_raises(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Negative skip should raise ValueError."""
+    xtc, pdb, _ = traj_on_disk
+    with pytest.raises(ValueError, match="skip must be >= 0"):
+        load_trajectory(xtc, topology_path=pdb, skip=-1)
+
+
+def test_skip_preserves_time(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skipped frames should have time values from the file, not reset to zero."""
+    xtc, pdb, _ = traj_on_disk
+    traj = load_trajectory(xtc, topology_path=pdb, skip=20, n_frames=3)
+    # Frame times are 0, 10, 20, ..., so frame 20 = 200 ps
+    expected_time = np.array([200.0, 210.0, 220.0])
+    np.testing.assert_allclose(traj.time, expected_time, atol=1e-3)
+
+
+def test_skip_with_stride_preserves_time(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip + stride: time should reflect both the offset and the stride."""
+    xtc, pdb, _ = traj_on_disk
+    # skip=10, stride=5, n_frames=3 -> raw frames 10, 15, 20 -> times 100, 150, 200
+    traj = load_trajectory(xtc, topology_path=pdb, skip=10, stride=5, n_frames=3)
+    expected_time = np.array([100.0, 150.0, 200.0])
+    np.testing.assert_allclose(traj.time, expected_time, atol=1e-3)
+
+
+def test_skip_with_stride_matches_full_load(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip + stride + n_frames should match full[skip::stride][:n_frames]."""
+    xtc, pdb, _ = traj_on_disk
+    skip, stride, n = 5, 3, 7
+    partial = load_trajectory(xtc, topology_path=pdb, skip=skip, stride=stride, n_frames=n)
+    full = load_trajectory(xtc, topology_path=pdb)
+    expected = full[skip::stride][:n]
+    assert partial.n_frames == expected.n_frames
+    np.testing.assert_allclose(partial.xyz, expected.xyz, atol=1e-6)
+    np.testing.assert_allclose(partial.time, expected.time, atol=1e-3)
+
+
+def test_skip_with_atom_selection(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip and atom_selection should both be applied."""
+    xtc, pdb, _ = traj_on_disk
+    traj = load_trajectory(
+        xtc, topology_path=pdb, skip=5, n_frames=10, atom_selection="name CA and resSeq 1"
+    )
+    assert traj.n_frames == 10
+    assert traj.n_atoms == 1
+
+
+def test_skip_n_frames_exceeds_remaining(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """When skip + n_frames exceeds total, return only available frames."""
+    xtc, pdb, total = traj_on_disk
+    traj = load_trajectory(xtc, topology_path=pdb, skip=45, n_frames=100)
+    assert traj.n_frames == total - 45
+
+
+def test_skip_exact_boundary(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skipping exactly to the total should return zero frames."""
+    xtc, pdb, total = traj_on_disk
+    traj = load_trajectory(xtc, topology_path=pdb, skip=total, n_frames=5)
+    assert traj.n_frames == 0
+
+
+def test_skip_last_frame(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skipping to total-1 should return exactly 1 frame."""
+    xtc, pdb, total = traj_on_disk
+    traj = load_trajectory(xtc, topology_path=pdb, skip=total - 1, n_frames=10)
+    assert traj.n_frames == 1
+    full = load_trajectory(xtc, topology_path=pdb)
+    np.testing.assert_allclose(traj.xyz, full[-1:].xyz, atol=1e-6)
+
+
+def test_skip_without_n_frames_with_stride(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Skip + stride without n_frames should load from offset to end with stride."""
+    xtc, pdb, _total = traj_on_disk
+    skip, stride = 10, 5
+    traj = load_trajectory(xtc, topology_path=pdb, skip=skip, stride=stride)
+    full = load_trajectory(xtc, topology_path=pdb)
+    expected = full[skip::stride]
+    assert traj.n_frames == expected.n_frames
+    np.testing.assert_allclose(traj.xyz, expected.xyz, atol=1e-6)
+
+
+# --- load_trajectories with skip ---
+
+
+def test_load_trajectories_skip(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """load_trajectories should pass skip through to each trajectory."""
+    xtc, pdb, _ = traj_on_disk
+    trajs = load_trajectories(
+        [xtc, xtc],
+        topology_paths=[pdb, pdb],
+        skip=10,
+        n_frames=5,
+    )
+    ref = load_trajectory(xtc, topology_path=pdb, skip=10, n_frames=5)
+    assert len(trajs) == 2
+    for traj in trajs:
+        assert traj.n_frames == 5
+        np.testing.assert_allclose(traj.xyz, ref.xyz, atol=1e-6)
+
+
+def test_load_trajectories_skip_parallel(traj_on_disk: tuple[Path, Path, int]) -> None:
+    """Parallel loading with skip should match sequential."""
+    xtc, pdb, _ = traj_on_disk
+    sequential = load_trajectories(
+        [xtc, xtc],
+        topology_paths=[pdb, pdb],
+        skip=15,
+        n_frames=10,
+        stride=2,
+    )
+    parallel = load_trajectories(
+        [xtc, xtc],
+        topology_paths=[pdb, pdb],
+        skip=15,
+        n_frames=10,
+        stride=2,
+        max_workers=2,
+    )
+    for seq, par in zip(sequential, parallel, strict=True):
+        assert seq.n_frames == par.n_frames
+        np.testing.assert_allclose(seq.xyz, par.xyz, atol=1e-6)
+        np.testing.assert_allclose(seq.time, par.time, atol=1e-3)
+
+
 # --- load_trajectories with n_frames ---
 
 
