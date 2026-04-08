@@ -17,6 +17,7 @@ from mdpp.analysis.fes import compute_fes_2d, compute_fes_from_projection
 from mdpp.analysis.hbond import compute_hbonds, format_hbond_triplets
 from mdpp.analysis.metrics import (
     compute_dccm,
+    compute_delta_rmsf,
     compute_radius_of_gyration,
     compute_rmsd,
     compute_rmsf,
@@ -28,6 +29,7 @@ __all__ = [
     "compute_contact_frequency",
     "compute_contacts",
     "compute_dccm",
+    "compute_delta_rmsf",
     "compute_distances",
     "compute_dssp",
     "compute_fes_2d",

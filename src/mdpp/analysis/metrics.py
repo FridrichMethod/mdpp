@@ -50,6 +50,24 @@ class RMSFResult:
 
 
 @dataclass(frozen=True, slots=True)
+class DeltaRMSFResult:
+    """Per-residue RMSF difference between two systems (B minus A).
+
+    Averaging is done in MSF (mean-square fluctuation) space: per-residue
+    RMSF^2 values are averaged across replicas, then the square root is
+    taken.  The delta is computed on the resulting average RMSF values.
+    """
+
+    delta_rmsf_nm: NDArray[np.float64]
+    residue_ids: NDArray[np.int_] | None
+
+    @property
+    def delta_rmsf_angstrom(self) -> NDArray[np.float64]:
+        """Return delta-RMSF values in Angstrom."""
+        return self.delta_rmsf_nm * 10.0
+
+
+@dataclass(frozen=True, slots=True)
 class DCCMResult:
     """Dynamic cross-correlation matrix."""
 
@@ -326,4 +344,106 @@ def compute_radius_of_gyration(
         time_ps=trajectory_time_ps(sliced, timestep_ps=timestep_ps),
         radius_gyration_nm=rg_nm,
         atom_indices=atom_indices,
+    )
+
+
+def _average_rmsf_nm(results: list[RMSFResult]) -> NDArray[np.float64]:
+    """Average RMSF values across replicas in MSF space.
+
+    Returns the per-residue average RMSF in nm, computed as
+    ``sqrt(mean(RMSF^2))``.
+    """
+    msf_stack = np.stack([r.rmsf_nm**2 for r in results])
+    return np.sqrt(np.mean(msf_stack, axis=0)).astype(np.float64)
+
+
+def compute_delta_rmsf(
+    results_a: list[RMSFResult],
+    results_b: list[RMSFResult],
+    *,
+    indices_a: NDArray[np.int_] | None = None,
+    indices_b: NDArray[np.int_] | None = None,
+    residue_ids: NDArray[np.int_] | None = None,
+) -> DeltaRMSFResult:
+    """Compute per-residue RMSF difference between two systems.
+
+    The RMSF for each system is first averaged across replicas in MSF space
+    (``sqrt(mean(RMSF^2))``), then the delta is taken as B minus A.
+    Positive values indicate that system B is more flexible.
+
+    For systems with **identical residue counts**, ``indices_a`` and
+    ``indices_b`` may be omitted and the comparison is element-wise.
+
+    For systems with **different sequences**, supply aligned index arrays
+    so that ``indices_a[i]`` and ``indices_b[i]`` point to the same
+    structural position in each system.  The caller is responsible for
+    generating these mappings (e.g. from a multiple sequence alignment).
+
+    Args:
+        results_a: RMSF results for system A (one per replica).
+        results_b: RMSF results for system B (one per replica).
+        indices_a: Optional 0-based residue indices into system A's RMSF
+            array at aligned positions.  Must have the same length as
+            ``indices_b``.
+        indices_b: Optional 0-based residue indices into system B's RMSF
+            array at aligned positions.
+        residue_ids: Optional residue IDs for the x-axis of the resulting
+            delta-RMSF (e.g. a reference sequence numbering).  When
+            ``None`` and indices are not provided, residue IDs are taken
+            from ``results_a[0]``.  When ``None`` and indices *are*
+            provided, residue IDs are taken from ``results_a[0]`` at the
+            positions given by ``indices_a``.
+
+    Returns:
+        DeltaRMSFResult with the per-residue difference.
+
+    Raises:
+        ValueError: If input lists are empty, replicas within a system
+            have inconsistent lengths, index arrays differ in length, or
+            unindexed systems have different residue counts.
+    """
+    if not results_a:
+        raise ValueError("results_a must not be empty.")
+    if not results_b:
+        raise ValueError("results_b must not be empty.")
+
+    sizes_a = {r.rmsf_nm.size for r in results_a}
+    if len(sizes_a) > 1:
+        raise ValueError(f"results_a replicas have inconsistent sizes: {sizes_a}.")
+    sizes_b = {r.rmsf_nm.size for r in results_b}
+    if len(sizes_b) > 1:
+        raise ValueError(f"results_b replicas have inconsistent sizes: {sizes_b}.")
+
+    avg_a = _average_rmsf_nm(results_a)
+    avg_b = _average_rmsf_nm(results_b)
+
+    if indices_a is not None and indices_b is not None:
+        if indices_a.shape[0] != indices_b.shape[0]:
+            raise ValueError(
+                f"indices_a and indices_b must have the same length, "
+                f"got {indices_a.shape[0]} and {indices_b.shape[0]}."
+            )
+        avg_a = avg_a[indices_a]
+        avg_b = avg_b[indices_b]
+
+        if residue_ids is None:
+            ref = results_a[0]
+            if ref.residue_ids is not None:
+                residue_ids = ref.residue_ids[indices_a]
+    elif indices_a is not None or indices_b is not None:
+        raise ValueError("indices_a and indices_b must both be provided or both be None.")
+    else:
+        if avg_a.shape[0] != avg_b.shape[0]:
+            raise ValueError(
+                f"Systems have different residue counts ({avg_a.shape[0]} vs "
+                f"{avg_b.shape[0]}). Provide indices_a and indices_b to map "
+                f"aligned positions."
+            )
+        if residue_ids is None:
+            residue_ids = results_a[0].residue_ids
+
+    delta = avg_b - avg_a
+    return DeltaRMSFResult(
+        delta_rmsf_nm=delta,
+        residue_ids=residue_ids,
     )

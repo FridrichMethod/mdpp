@@ -10,6 +10,7 @@ from mdpp.analysis.contacts import NativeContactResult
 from mdpp.analysis.distance import DistanceResult
 from mdpp.analysis.hbond import HBondResult
 from mdpp.analysis.metrics import (
+    DeltaRMSFResult,
     RadiusOfGyrationResult,
     RMSDResult,
     RMSFResult,
@@ -457,4 +458,67 @@ def plot_energy(
         axis.legend()
     elif len(columns) == 1:
         axis.set_ylabel(columns[0])
+    return axis
+
+
+def plot_delta_rmsf(
+    result: DeltaRMSFResult,
+    *,
+    ax: Axes | None = None,
+    labels: tuple[str, str] = ("system A", "system B"),
+    positive_color: str = "crimson",
+    negative_color: str = "steelblue",
+    alpha: float = 0.5,
+) -> Axes:
+    """Plot per-residue RMSF difference as a filled area chart.
+
+    Positive regions (system B more flexible) are filled with
+    ``positive_color``; negative regions (system A more flexible) are
+    filled with ``negative_color``.
+
+    Args:
+        result: DeltaRMSFResult from ``compute_delta_rmsf``.
+        ax: Optional matplotlib axis.
+        labels: Tuple of ``(system_a_name, system_b_name)`` used in the
+            legend (e.g. ``("BirA", "TurboID")``).
+        positive_color: Fill color for residues where system B is more
+            flexible (delta > 0).
+        negative_color: Fill color for residues where system A is more
+            flexible (delta < 0).
+        alpha: Opacity of the filled regions (0.0 -- 1.0).
+
+    Returns:
+        The matplotlib axis.
+    """
+    axis = get_axis(ax)
+    drmsf = result.delta_rmsf_angstrom
+    x_values = (
+        np.asarray(result.residue_ids, dtype=np.float64)
+        if result.residue_ids is not None
+        else np.arange(drmsf.size, dtype=np.float64) + 1.0
+    )
+    positive = (drmsf > 0).tolist()
+    negative = (drmsf < 0).tolist()
+    axis.fill_between(
+        x_values,
+        0,
+        drmsf,
+        where=positive,
+        alpha=alpha,
+        color=positive_color,
+        label=f"{labels[1]} more flexible",
+    )
+    axis.fill_between(
+        x_values,
+        0,
+        drmsf,
+        where=negative,
+        alpha=alpha,
+        color=negative_color,
+        label=f"{labels[0]} more flexible",
+    )
+    axis.axhline(0, color="black", linewidth=0.8, linestyle="--")
+    axis.set_xlabel("Residue ID")
+    axis.set_ylabel(r"$\Delta$RMSF (Å)")
+    axis.legend()
     return axis
