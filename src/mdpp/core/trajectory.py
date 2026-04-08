@@ -78,54 +78,59 @@ def load_trajectory(
     trajectory_path: PathLike,
     *,
     topology_path: PathLike | None = None,
+    start: int = 0,
+    stop: int | None = None,
     stride: int = 1,
-    n_frames: int | None = None,
-    skip: int = 0,
     atom_selection: str | None = None,
 ) -> md.Trajectory:
     """Load a single trajectory and optionally atom-slice it.
 
-    When *n_frames* or *skip* is provided, the file is opened directly via
+    Frame selection follows Python's ``range(start, stop, stride)``
+    convention: *start* is included, *stop* is excluded, and *stride*
+    controls the step size.  All three refer to **raw frame indices** in
+    the trajectory file.
+
+    When *start* or *stop* is provided, the file is opened directly via
     mdtraj's format-specific reader (e.g. ``XTCTrajectoryFile``) and
-    ``seek``/``read_as_traj`` are used to read exactly the requested window.
-    Only the requested frames are read into memory.
+    ``seek``/``read_as_traj`` are used to read exactly the requested
+    window.  Only the selected frames are read into memory.
 
     Args:
         trajectory_path: Path to trajectory file (for example, ``.xtc``).
         topology_path: Optional topology path (for example, ``.pdb``).
-        stride: Frame stride.
-        n_frames: Optional maximum number of frames to load (after stride).
-            If ``None``, all frames from the skip offset onward are loaded.
-        skip: Number of raw frames to skip from the start of the file before
-            reading. This is applied before stride. Default is 0.
+        start: First raw frame index to load (inclusive). Default is 0.
+        stop: Raw frame index at which to stop loading (exclusive). If
+            ``None``, read to the end of the file.
+        stride: Frame stride (step size). Default is 1.
         atom_selection: Optional MDTraj selection for atom slicing after load.
 
     Returns:
         Loaded (and optionally sliced) trajectory.
 
     Raises:
-        ValueError: If ``stride`` is less than 1, ``n_frames`` is less than 1,
-            or ``skip`` is negative.
+        ValueError: If ``stride`` is less than 1, ``start`` is negative,
+            or ``stop`` is not greater than ``start``.
     """
     if stride < 1:
         raise ValueError("stride must be >= 1.")
-    if n_frames is not None and n_frames < 1:
-        raise ValueError("n_frames must be >= 1.")
-    if skip < 0:
-        raise ValueError("skip must be >= 0.")
+    if start < 0:
+        raise ValueError("start must be >= 0.")
+    if stop is not None and stop <= start:
+        raise ValueError("stop must be greater than start.")
 
     top = None if topology_path is None else str(topology_path)
 
-    if n_frames is None and skip == 0:
+    if start == 0 and stop is None:
         trajectory = md.load(str(trajectory_path), top=top, stride=stride)
     else:
         topology = (
             md.load_topology(top) if top is not None else md.load_topology(str(trajectory_path))
         )
+        n_frames = len(range(start, stop, stride)) if stop is not None else None
         with md.open(str(trajectory_path)) as fh:
-            if skip > 0:
+            if start > 0:
                 try:
-                    fh.seek(skip)
+                    fh.seek(start)
                 except OSError:
                     return md.Trajectory(
                         xyz=np.empty((0, topology.n_atoms, 3), dtype=np.float32),
@@ -144,13 +149,13 @@ def _load_trajectory_worker(
     args: tuple[str, str | None, int, int | None, int, str | None],
 ) -> md.Trajectory:
     """Worker function for parallel trajectory loading (must be picklable)."""
-    traj_path, top_path, stride, n_frames, skip, atom_selection = args
+    traj_path, top_path, start, stop, stride, atom_selection = args
     return load_trajectory(
         trajectory_path=traj_path,
         topology_path=top_path,
+        start=start,
+        stop=stop,
         stride=stride,
-        n_frames=n_frames,
-        skip=skip,
         atom_selection=atom_selection,
     )
 
@@ -159,13 +164,17 @@ def load_trajectories(
     trajectory_paths: Sequence[PathLike],
     *,
     topology_paths: Sequence[PathLike | None] | None = None,
+    start: int = 0,
+    stop: int | None = None,
     stride: int = 1,
-    n_frames: int | None = None,
-    skip: int = 0,
     atom_selection: str | None = None,
     max_workers: int | None = None,
 ) -> list[md.Trajectory]:
     """Load a list of trajectories with a shared interface.
+
+    Frame selection follows Python's ``range(start, stop, stride)``
+    convention: *start* is included, *stop* is excluded, and *stride*
+    controls the step size.  All three refer to **raw frame indices**.
 
     When *max_workers* is set, trajectories are loaded in parallel using
     :class:`multiprocessing.Pool` (process-based parallelism).
@@ -200,9 +209,10 @@ def load_trajectories(
         trajectory_paths: Trajectory paths.
         topology_paths: Optional topology paths. If provided, must match
             ``trajectory_paths`` length.
-        stride: Frame stride.
-        n_frames: Optional maximum number of frames per trajectory (after stride).
-        skip: Number of raw frames to skip from the start of each file.
+        start: First raw frame index to load (inclusive). Default is 0.
+        stop: Raw frame index at which to stop (exclusive). If ``None``,
+            read to the end of each file.
+        stride: Frame stride (step size). Default is 1.
         atom_selection: Optional atom selection for slicing.
         max_workers: If set, load trajectories in parallel using processes.
             The value controls the maximum number of concurrent worker
@@ -223,9 +233,9 @@ def load_trajectories(
         (
             str(traj_path),
             None if top_path is None else str(top_path),
+            start,
+            stop,
             stride,
-            n_frames,
-            skip,
             atom_selection,
         )
         for traj_path, top_path in zip(trajectory_paths, topology_paths, strict=True)
