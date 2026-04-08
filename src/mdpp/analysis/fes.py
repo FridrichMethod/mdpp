@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from mdpp.constants import DEFAULT_TEMPERATURE_K, GAS_CONSTANT_KJ_MOL_K
+
 type BinsType = int | tuple[int, int]
 type RangeType = tuple[tuple[float, float], tuple[float, float]] | None
 
@@ -39,8 +41,7 @@ def compute_fes_2d(
     *,
     bins: BinsType = 100,
     value_range: RangeType = None,
-    temperature_k: float = 300.0,
-    gas_constant_kj_mol_k: float = 0.00831446261815324,
+    temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
 ) -> FES2DResult:
@@ -52,7 +53,6 @@ def compute_fes_2d(
         bins: Histogram bin count.
         value_range: Optional ``((x_min, x_max), (y_min, y_max))`` range.
         temperature_k: Temperature in Kelvin.
-        gas_constant_kj_mol_k: Gas constant in ``kJ/mol/K``.
         min_probability: Lower bound to avoid ``log(0)``.
         mask_unsampled: If True, unsampled bins are set to ``NaN``.
 
@@ -61,8 +61,6 @@ def compute_fes_2d(
     """
     if temperature_k <= 0.0:
         raise ValueError("temperature_k must be positive.")
-    if gas_constant_kj_mol_k <= 0.0:
-        raise ValueError("gas_constant_kj_mol_k must be positive.")
     if min_probability <= 0.0:
         raise ValueError("min_probability must be positive.")
 
@@ -87,7 +85,7 @@ def compute_fes_2d(
         raise ValueError("No sampled bins remain. Reduce min_probability or adjust bins.")
 
     clipped_probability = np.clip(probability_density, min_probability, None)
-    free_energy_kj_mol = -gas_constant_kj_mol_k * temperature_k * np.log(clipped_probability)
+    free_energy_kj_mol = -GAS_CONSTANT_KJ_MOL_K * temperature_k * np.log(clipped_probability)
     if mask_unsampled:
         free_energy_kj_mol = np.where(observed_mask, free_energy_kj_mol, np.nan)
 
@@ -111,8 +109,7 @@ def compute_fes_from_projection(
     y_index: int = 1,
     bins: BinsType = 100,
     value_range: RangeType = None,
-    temperature_k: float = 300.0,
-    gas_constant_kj_mol_k: float = 0.00831446261815324,
+    temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
 ) -> FES2DResult:
@@ -125,7 +122,6 @@ def compute_fes_from_projection(
         bins: Histogram bin count.
         value_range: Optional histogram range.
         temperature_k: Temperature in Kelvin.
-        gas_constant_kj_mol_k: Gas constant in ``kJ/mol/K``.
         min_probability: Lower bound to avoid ``log(0)``.
         mask_unsampled: If True, unsampled bins are set to ``NaN``.
 
@@ -144,7 +140,6 @@ def compute_fes_from_projection(
         bins=bins,
         value_range=value_range,
         temperature_k=temperature_k,
-        gas_constant_kj_mol_k=gas_constant_kj_mol_k,
         min_probability=min_probability,
         mask_unsampled=mask_unsampled,
     )
