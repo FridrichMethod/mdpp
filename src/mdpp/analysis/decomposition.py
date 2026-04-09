@@ -54,16 +54,15 @@ class TICAResult:
 
 def _as_feature_matrix(
     features: ArrayLike,
-) -> NDArray[np.float64]:
-    """Validate and coerce a feature matrix.
-
-    Always converts to float64 because downstream estimators (sklearn PCA,
-    deeptime TICA) require float64 internally.
+) -> NDArray[np.floating]:
+    """Validate a feature matrix, preserving the input dtype.
 
     Args:
-        features: Input feature array.
+        features: Input feature array (float32 or float64).
     """
-    feature_matrix = np.asarray(features, dtype=np.float64)
+    feature_matrix = np.asarray(features)
+    if not np.issubdtype(feature_matrix.dtype, np.floating):
+        feature_matrix = feature_matrix.astype(np.float32)
     if feature_matrix.ndim != 2:
         raise ValueError("features must be a 2D array with shape (n_samples, n_features).")
     if feature_matrix.shape[0] < 2:
@@ -306,8 +305,7 @@ def compute_pca(
 ) -> PCAResult:
     """Compute PCA projection from feature vectors.
 
-    Sklearn PCA requires float64 internally; the *dtype* parameter
-    controls the dtype of the **output** arrays only.
+    Sklearn PCA (>= 1.8) preserves input dtype (float32 or float64).
 
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
@@ -332,7 +330,7 @@ def compute_pca(
         feature_scale = np.where(feature_scale > 0.0, feature_scale, 1.0)
         transformed = (feature_matrix - feature_mean) / feature_scale
     else:
-        feature_scale = np.ones(feature_matrix.shape[1], dtype=np.float64)
+        feature_scale = np.ones(feature_matrix.shape[1], dtype=feature_matrix.dtype)
         transformed = feature_matrix - feature_mean
 
     model = PCA(n_components=n_components)
@@ -360,9 +358,6 @@ def project_pca(
     way to project a second dataset (e.g. a different system) onto the
     same principal component axes for direct comparison.
 
-    Sklearn PCA requires float64 internally; the *dtype* parameter
-    controls the dtype of the **output** arrays only.
-
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
             Must have the same number of features as the fitted PCA.
@@ -388,10 +383,7 @@ def project_pca(
             f"expected {expected_dim} (from fitted PCA)."
         )
 
-    # Standardize in float64 for numerical stability, then cast output.
-    feature_mean_f64 = np.asarray(fitted.feature_mean, dtype=np.float64)
-    feature_scale_f64 = np.asarray(fitted.feature_scale, dtype=np.float64)
-    transformed = (feature_matrix - feature_mean_f64) / feature_scale_f64
+    transformed = (feature_matrix - fitted.feature_mean) / fitted.feature_scale
     projections = np.asarray(fitted.model.transform(transformed), dtype=resolved)
     return PCAResult(
         projections=projections,
@@ -436,9 +428,11 @@ def compute_tica(
 
     from deeptime.decomposition import TICA
 
+    # Deeptime covariance estimation requires float64 internally.
+    feature_f64 = feature_matrix.astype(np.float64)
     estimator = TICA(lagtime=lagtime, dim=n_components)
-    model = estimator.fit(feature_matrix).fetch_model()
-    projections = np.asarray(model.transform(feature_matrix), dtype=resolved)
+    model = estimator.fit(feature_f64).fetch_model()
+    projections = np.asarray(model.transform(feature_f64), dtype=resolved)
     return TICAResult(
         projections=projections,
         lagtime=lagtime,
