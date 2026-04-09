@@ -121,22 +121,35 @@ def featurize_backbone_torsions(
     return TorsionFeatures(values=values, labels=labels)
 
 
+type DistanceBackend = str
+
+
 def _pairwise_distances_numba(
     xyz: NDArray[np.float32],
     pairs: NDArray[np.int_],
 ) -> NDArray[np.float64]:
-    """Compute pairwise distances using a Numba-parallel kernel.
+    """Compute non-periodic pairwise distances using a Numba-parallel kernel.
 
-    Parallelises over frames using ``prange``, giving ~5x speedup over
-    mdtraj's single-threaded C/SSE implementation for non-periodic systems.
+    Parallelises the frame loop using ``prange``, giving ~5x speedup over
+    mdtraj's single-threaded C/SSE kernel on multi-core machines.
+
+    **Limitations compared to mdtraj:**
+
+    - No periodic boundary condition (minimum image convention) support.
+      Use ``backend="mdtraj"`` if the trajectory has unit-cell information
+      and PBC distances are required.
+    - Pair indices are not bounds-checked at the Numba level; out-of-range
+      indices will produce garbage or segfault.
+    - Returns float64 (mdtraj returns float32).
 
     Args:
-        xyz: Coordinates array of shape ``(n_frames, n_atoms, 3)``.
-        pairs: Pair indices of shape ``(n_pairs, 2)``.
+        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``, typically
+            ``traj.xyz`` in nm.
+        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
 
     Returns:
-        Distance matrix of shape ``(n_frames, n_pairs)`` in the same
-        length unit as *xyz* (typically nm for mdtraj trajectories).
+        Distances of shape ``(n_frames, n_pairs)`` in the same unit as
+        *xyz* (nm for mdtraj trajectories).
     """
     from numba import njit, prange
 
@@ -160,31 +173,75 @@ def _pairwise_distances_numba(
     return _kernel(xyz, pairs)
 
 
+def _pairwise_distances_mdtraj(
+    traj: md.Trajectory,
+    pairs: NDArray[np.int_],
+    *,
+    periodic: bool,
+) -> NDArray[np.float64]:
+    """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
+
+    Supports periodic boundary conditions via minimum image convention
+    when the trajectory contains unit-cell information.
+
+    Args:
+        traj: Atom-sliced trajectory.
+        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Whether to apply minimum image convention.
+
+    Returns:
+        Distances of shape ``(n_frames, n_pairs)`` as float64.
+    """
+    return np.asarray(
+        md.compute_distances(traj, pairs, periodic=periodic),
+        dtype=np.float64,
+    )
+
+
 def featurize_ca_distances(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
+    backend: DistanceBackend = "numba",
+    periodic: bool = False,
 ) -> DistanceFeatures:
     """Featurize all pairwise distances between selected atoms.
 
     Computes the ``N*(N-1)/2`` pairwise distances for the selected atoms
     at each frame, producing a feature matrix suitable for PCA or TICA.
 
-    Uses a Numba-parallel kernel that distributes frames across all
-    available CPU cores.  This is ~5x faster than mdtraj's
-    ``compute_distances`` for non-periodic systems on multi-core machines.
+    Two backends are available:
+
+    ``"numba"`` (default)
+        Numba-parallel kernel that distributes frames across all CPU
+        cores.  ~5x faster than mdtraj for non-periodic systems on
+        multi-core machines.  **Does not support periodic boundary
+        conditions** -- the *periodic* parameter is ignored.
+
+    ``"mdtraj"``
+        mdtraj's optimised C/SSE ``compute_distances``.  Supports
+        periodic boundary conditions via minimum image convention when
+        the trajectory contains unit-cell information.  Single-threaded.
 
     Args:
         traj: Input trajectory.
         atom_selection: MDTraj selection string for the atoms to include.
             Defaults to ``"name CA"`` for alpha-carbon distances.
+        backend: Distance computation backend. One of ``"numba"``
+            (default, fast, non-periodic) or ``"mdtraj"`` (PBC-capable).
+        periodic: Whether to apply minimum image convention. Only
+            effective with ``backend="mdtraj"``.
 
     Returns:
         DistanceFeatures with values, atom pairs, and atom indices.
 
     Raises:
-        ValueError: If the selection matches fewer than 2 atoms.
+        ValueError: If the selection matches fewer than 2 atoms, or an
+            unknown backend is requested.
     """
+    if backend not in ("numba", "mdtraj"):
+        raise ValueError(f"Unknown backend {backend!r}. Use 'numba' or 'mdtraj'.")
+
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     if atom_indices.size < 2:
         raise ValueError(
@@ -198,7 +255,12 @@ def featurize_ca_distances(
         dtype=np.int_,
     )
     sliced = traj.atom_slice(atom_indices)
-    values = _pairwise_distances_numba(sliced.xyz, pairs)
+
+    if backend == "numba":
+        values = _pairwise_distances_numba(sliced.xyz, pairs)
+    else:
+        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic)
+
     return DistanceFeatures(values=values, pairs=pairs, atom_indices=atom_indices)
 
 
