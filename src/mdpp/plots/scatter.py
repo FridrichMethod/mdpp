@@ -112,3 +112,95 @@ def plot_ramachandran(
     axis.axvline(0, color="gray", linewidth=0.5, linestyle="--")
     axis.set_aspect("equal")
     return axis
+
+
+def plot_pca_scree(
+    *results: PCAResult,
+    labels: list[str] | None = None,
+    colors: list[str] | None = None,
+    ax: Axes | None = None,
+) -> Axes:
+    """Plot a scree plot (variance explained per principal component).
+
+    Multiple PCA results can be overlaid as grouped bars for comparison.
+
+    Args:
+        *results: One or more PCAResult objects.
+        labels: Optional legend labels, one per result.
+        colors: Optional bar colors, one per result.
+        ax: Optional matplotlib axis.
+
+    Returns:
+        The matplotlib axis.
+    """
+    axis = get_axis(ax)
+    n_results = len(results)
+    bar_width = 0.8 / max(n_results, 1)
+
+    for idx, result in enumerate(results):
+        n_pcs = result.explained_variance_ratio.size
+        pcs = np.arange(1, n_pcs + 1, dtype=np.float64)
+        offset = (idx - (n_results - 1) / 2) * bar_width
+        label = labels[idx] if labels is not None and idx < len(labels) else None
+        color = colors[idx] if colors is not None and idx < len(colors) else None
+        axis.bar(
+            pcs + offset,
+            result.explained_variance_ratio * 100,
+            width=bar_width,
+            label=label,
+            color=color,
+        )
+
+    axis.set_xlabel("Principal Component")
+    axis.set_ylabel("Variance Explained (%)")
+    if n_results > 0:
+        axis.set_xticks(np.arange(1, results[0].explained_variance_ratio.size + 1))
+    if labels is not None:
+        axis.legend()
+    return axis
+
+
+def plot_pca_cumulative_variance(
+    *results: PCAResult,
+    labels: list[str] | None = None,
+    colors: list[str] | None = None,
+    thresholds: list[float] | None = None,
+    ax: Axes | None = None,
+) -> Axes:
+    """Plot cumulative explained variance as a function of the number of PCs.
+
+    Args:
+        *results: One or more PCAResult objects.
+        labels: Optional legend labels, one per result.
+        colors: Optional line colors, one per result.
+        thresholds: Optional horizontal reference lines (e.g. ``[80, 90]``
+            for 80% and 90% thresholds). Drawn as dashed gray lines.
+        ax: Optional matplotlib axis.
+
+    Returns:
+        The matplotlib axis.
+    """
+    if thresholds is None:
+        thresholds = [80, 90]
+
+    axis = get_axis(ax)
+
+    for idx, result in enumerate(results):
+        n_pcs = result.explained_variance_ratio.size
+        pcs = np.arange(1, n_pcs + 1, dtype=np.float64)
+        cumulative = np.cumsum(result.explained_variance_ratio) * 100
+        label = labels[idx] if labels is not None and idx < len(labels) else None
+        color = colors[idx] if colors is not None and idx < len(colors) else None
+        axis.plot(pcs, cumulative, "o-", label=label, color=color, markersize=4)
+
+    for threshold in thresholds:
+        axis.axhline(threshold, color="gray", linestyle="--", linewidth=0.8)
+
+    axis.set_xlabel("Number of PCs")
+    axis.set_ylabel("Cumulative Variance (%)")
+    axis.set_ylim(0, 100)
+    if n_pcs := (results[0].explained_variance_ratio.size if results else 0):
+        axis.set_xticks(np.arange(1, n_pcs + 1))
+    if labels is not None:
+        axis.legend()
+    return axis

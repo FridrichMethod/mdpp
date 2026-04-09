@@ -10,6 +10,7 @@ from mdpp.analysis.decomposition import (
     compute_pca,
     compute_tica,
     featurize_backbone_torsions,
+    featurize_ca_distances,
     project_pca,
 )
 from mdpp.analysis.distance import compute_distances, compute_minimum_distance
@@ -46,6 +47,7 @@ __all__ = [
     "compute_sasa",
     "compute_tica",
     "featurize_backbone_torsions",
+    "featurize_ca_distances",
     "format_hbond_triplets",
     "project_pca",
 ]

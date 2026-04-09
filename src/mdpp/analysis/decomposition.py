@@ -14,6 +14,15 @@ from mdpp.core.trajectory import select_atom_indices
 
 
 @dataclass(frozen=True, slots=True)
+class DistanceFeatures:
+    """Pairwise distance features (e.g. CA-CA distances)."""
+
+    values: NDArray[np.float64]
+    pairs: NDArray[np.int_]
+    atom_indices: NDArray[np.int_]
+
+
+@dataclass(frozen=True, slots=True)
 class TorsionFeatures:
     """Backbone torsion features."""
 
@@ -110,6 +119,44 @@ def featurize_backbone_torsions(
 
     values = np.hstack(blocks).astype(np.float64, copy=False)
     return TorsionFeatures(values=values, labels=labels)
+
+
+def featurize_ca_distances(
+    traj: md.Trajectory,
+    *,
+    atom_selection: str = "name CA",
+) -> DistanceFeatures:
+    """Featurize all pairwise distances between selected atoms.
+
+    Computes the ``N*(N-1)/2`` pairwise distances for the selected atoms
+    at each frame, producing a feature matrix suitable for PCA or TICA.
+
+    Args:
+        traj: Input trajectory.
+        atom_selection: MDTraj selection string for the atoms to include.
+            Defaults to ``"name CA"`` for alpha-carbon distances.
+
+    Returns:
+        DistanceFeatures with values, atom pairs, and atom indices.
+
+    Raises:
+        ValueError: If the selection matches fewer than 2 atoms.
+    """
+    atom_indices = select_atom_indices(traj.topology, atom_selection)
+    if atom_indices.size < 2:
+        raise ValueError(
+            f"At least 2 atoms are required for pairwise distances, "
+            f"got {atom_indices.size} from selection {atom_selection!r}."
+        )
+
+    n_atoms = atom_indices.size
+    pairs = np.array(
+        [(i, j) for i in range(n_atoms) for j in range(i + 1, n_atoms)],
+        dtype=np.int_,
+    )
+    sliced = traj.atom_slice(atom_indices)
+    values = np.asarray(md.compute_distances(sliced, pairs), dtype=np.float64)
+    return DistanceFeatures(values=values, pairs=pairs, atom_indices=atom_indices)
 
 
 def compute_pca(
