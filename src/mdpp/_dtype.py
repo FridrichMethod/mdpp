@@ -1,30 +1,21 @@
 """Package-wide floating-point dtype configuration.
 
-Resolution order (highest to lowest precedence):
-1. Explicit ``dtype`` parameter on a function call
-2. ``default_dtype()`` context manager scope
-3. ``set_default_dtype()`` global setting
-4. Package default: ``np.float32``
+Default is ``np.float32`` (matches MD simulation precision).
+Use ``set_default_dtype(np.float64)`` to switch globally, or pass
+``dtype=np.float64`` to individual functions.
 """
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from contextlib import contextmanager
-from contextvars import ContextVar
-
 import numpy as np
 
 _VALID_DTYPES = frozenset({np.dtype(np.float32), np.dtype(np.float64)})
-_DEFAULT = np.dtype(np.float32)
-_default_dtype: ContextVar[np.dtype[np.floating]] = ContextVar(
-    "mdpp_default_dtype", default=_DEFAULT
-)
+_default_dtype = np.dtype(np.float32)
 
 
 def get_default_dtype() -> np.dtype[np.floating]:
     """Return the current default float dtype."""
-    return _default_dtype.get()
+    return _default_dtype
 
 
 def set_default_dtype(dtype: type[np.floating] | np.dtype[np.floating]) -> None:
@@ -36,35 +27,11 @@ def set_default_dtype(dtype: type[np.floating] | np.dtype[np.floating]) -> None:
     Raises:
         ValueError: If *dtype* is not float32 or float64.
     """
+    global _default_dtype  # noqa: PLW0603
     resolved = np.dtype(dtype)
     if resolved not in _VALID_DTYPES:
         raise ValueError(f"dtype must be float32 or float64, got {resolved}.")
-    _default_dtype.set(resolved)
-
-
-@contextmanager
-def default_dtype(
-    dtype: type[np.floating] | np.dtype[np.floating],
-) -> Generator[None]:
-    """Context manager for scoped dtype override.
-
-    Args:
-        dtype: ``np.float32`` or ``np.float64``.
-
-    Example::
-
-        with default_dtype(np.float64):
-            result = compute_rmsd(traj)  # uses float64
-        # reverts to previous default here
-    """
-    resolved = np.dtype(dtype)
-    if resolved not in _VALID_DTYPES:
-        raise ValueError(f"dtype must be float32 or float64, got {resolved}.")
-    token = _default_dtype.set(resolved)
-    try:
-        yield
-    finally:
-        _default_dtype.reset(token)
+    _default_dtype = resolved
 
 
 def resolve_dtype(
@@ -72,8 +39,7 @@ def resolve_dtype(
 ) -> np.dtype[np.floating]:
     """Resolve the effective dtype for a function call.
 
-    If *dtype* is explicitly provided, validate and return it.
-    Otherwise, return the current default from the ContextVar.
+    Returns *dtype* if explicitly provided, otherwise the global default.
 
     Args:
         dtype: Explicit dtype override, or ``None`` to use the default.
@@ -85,7 +51,7 @@ def resolve_dtype(
         ValueError: If *dtype* is not float32, float64, or None.
     """
     if dtype is None:
-        return _default_dtype.get()
+        return _default_dtype
     resolved = np.dtype(dtype)
     if resolved not in _VALID_DTYPES:
         raise ValueError(f"dtype must be float32 or float64, got {resolved}.")
