@@ -11,17 +11,18 @@ This file provides guidance for Claude Code (claude-code, claude terminal) when 
 ```
 src/mdpp/
 ├── _types.py        # shared type aliases (StrPath, PathLike)
+├── constants.py     # physical constants (GAS_CONSTANT_KJ_MOL_K, DEFAULT_TEMPERATURE_K)
 ├── core/            # trajectory I/O, XVG/EDR parsers
 │   ├── trajectory.py    # load_trajectory, load_trajectories, align_trajectory,
 │   │                     # select_atom_indices, residue_ids_from_indices, trajectory_time_ps
 │   └── parsers.py       # read_xvg, read_edr (thin wrappers around panedr/numpy)
 ├── analysis/        # compute_* functions returning frozen dataclass results
-│   ├── metrics.py       # RMSD, RMSF, DCCM, SASA, radius of gyration
+│   ├── metrics.py       # RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration
 │   ├── hbond.py         # hydrogen bond detection
 │   ├── contacts.py      # inter-residue contacts, native contacts Q(t)
 │   ├── distance.py      # pairwise distances, minimum distance
 │   ├── dssp.py          # secondary structure (DSSP)
-│   ├── decomposition.py # PCA, TICA, backbone torsion featurization
+│   ├── decomposition.py # PCA (with projection), TICA, backbone torsion featurization
 │   ├── fes.py           # 2D free energy surfaces
 │   └── clustering.py    # RMSD matrix, GROMOS clustering
 ├── chem/            # small-molecule cheminformatics (RDKit-based)

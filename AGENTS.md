@@ -46,6 +46,7 @@ Source is under `src/mdpp/` using the src-layout convention:
 | Subpackage | Purpose | Key patterns |
 |---|---|---|
 | `core/` | Trajectory I/O, file parsers | `load_trajectory`, `load_trajectories`, `read_xvg`, `read_edr` |
+| `constants.py` | Physical constants | `GAS_CONSTANT_KJ_MOL_K`, `DEFAULT_TEMPERATURE_K` |
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
 | `chem/` | Small-molecule cheminformatics | `MolSupplier`, `calc_descs`, `gen_fp`, `calc_sim`, `is_pains` |
 | `plots/` | Visualization (2D, 3D, molecules) | `plot_*(result, *, ax=None) -> Axes`, `draw_mol`, `view_mol_3d` |

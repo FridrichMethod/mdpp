@@ -25,6 +25,19 @@ result = compute_rmsf(traj, atom_selection="name CA")
 # result.residue_ids: corresponding residue IDs
 ```
 
+## Delta-RMSF
+
+Compare flexibility between two systems (e.g. apo vs holo):
+
+```python
+from mdpp.analysis.metrics import compute_rmsf, compute_delta_rmsf
+
+rmsf_apo = [compute_rmsf(traj) for traj in apo_replicas]
+rmsf_holo = [compute_rmsf(traj) for traj in holo_replicas]
+delta = compute_delta_rmsf(rmsf_holo, rmsf_apo, compute_sem=True, name_a="holo", name_b="apo")
+# delta.delta_rmsf_angstrom: per-residue flexibility change
+```
+
 ## Dynamic Cross-Correlation Matrix (DCCM)
 
 ```python
@@ -48,8 +61,8 @@ print(result.total_nm2.mean())  # average total SASA
 ```python
 from mdpp.analysis.metrics import compute_radius_of_gyration
 
-result = compute_radius_of_gyration(traj, atom_selection="protein")
-# result.radius_gyration_angstrom: Rg per frame
+result = compute_radius_of_gyration(traj)
+# result.radius_gyration_angstrom: Rg per frame in Angstrom
 ```
 
 ## Hydrogen Bonds
@@ -57,7 +70,7 @@ result = compute_radius_of_gyration(traj, atom_selection="protein")
 ```python
 from mdpp.analysis.hbond import compute_hbonds, format_hbond_triplets
 
-result = compute_hbonds(traj, method="baker_hubbard")
+result = compute_hbonds(traj)  # default method: baker_hubbard
 labels = format_hbond_triplets(traj.topology, result.triplets)
 # result.occupancy: fraction of frames each bond is present
 ```
@@ -78,7 +91,7 @@ result = compute_contacts(traj, scheme="closest-heavy")
 ```python
 from mdpp.analysis.contacts import compute_contact_frequency
 
-frequency, pairs = compute_contact_frequency(traj, cutoff_nm=0.45)
+frequency, pairs = compute_contact_frequency(traj, cutoff_nm=0.45, scheme="closest-heavy")
 ```
 
 ### Native contacts (Q value)
@@ -86,7 +99,7 @@ frequency, pairs = compute_contact_frequency(traj, cutoff_nm=0.45)
 ```python
 from mdpp.analysis.contacts import compute_native_contacts
 
-result = compute_native_contacts(traj, reference_frame=0, cutoff_nm=0.45)
+result = compute_native_contacts(traj, reference_frame=0, cutoff_nm=0.45, scheme="closest-heavy")
 # result.fraction: Q(t) per frame
 ```
 
@@ -130,6 +143,15 @@ features = featurize_backbone_torsions(traj, periodic=True)
 pca_result = compute_pca(features.values, n_components=2)
 ```
 
+### Project new data onto fitted PCA
+
+```python
+from mdpp.analysis.decomposition import project_pca
+
+new_features = featurize_backbone_torsions(new_traj, periodic=True)
+projected = project_pca(new_features.values, fitted=pca_result)
+```
+
 ### TICA (time-lagged independent component analysis)
 
 ```python
@@ -143,8 +165,8 @@ tica_result = compute_tica(features.values, lagtime=10, n_components=2)
 ```python
 from mdpp.analysis.fes import compute_fes_from_projection
 
-fes = compute_fes_from_projection(pca_result.projections, temperature_k=300.0)
-# fes.free_energy_kj_mol: 2D free energy in kJ/mol
+fes = compute_fes_from_projection(pca_result.projections)
+# fes.free_energy_kj_mol: 2D free energy in kJ/mol (default T=298.15 K)
 ```
 
 ## Conformational Clustering

@@ -11,7 +11,7 @@ from mdpp.plots import plot_rmsd, plot_rmsf, plot_sasa, plot_radius_of_gyration
 
 ax = plot_rmsd(rmsd_result, label="backbone")
 ax = plot_rmsf(rmsf_result)
-ax = plot_sasa(sasa_result, aggregate="sum")
+ax = plot_sasa(sasa_result)
 ax = plot_radius_of_gyration(rg_result)
 ```
 
@@ -21,7 +21,7 @@ ax = plot_radius_of_gyration(rg_result)
 from mdpp.plots import plot_hbond_counts, plot_hbond_occupancy
 
 ax = plot_hbond_counts(hbond_result)
-ax = plot_hbond_occupancy(hbond_result, top_n=10, labels=hbond_labels)
+ax = plot_hbond_occupancy(hbond_result, top_n=10)
 ```
 
 ### Distance time series
@@ -29,7 +29,7 @@ ax = plot_hbond_occupancy(hbond_result, top_n=10, labels=hbond_labels)
 ```python
 from mdpp.plots import plot_distances
 
-ax = plot_distances(distance_result, pair_labels=["CA10-CA50", "CA20-CA80"])
+ax = plot_distances(distance_result)
 ```
 
 ### Native contacts Q(t)
@@ -37,7 +37,7 @@ ax = plot_distances(distance_result, pair_labels=["CA10-CA50", "CA20-CA80"])
 ```python
 from mdpp.plots import plot_native_contacts
 
-ax = plot_native_contacts(native_contact_result, label="Q(t)")
+ax = plot_native_contacts(native_contact_result)
 ```
 
 ### Energy plots
@@ -49,7 +49,7 @@ from mdpp.core import read_xvg
 from mdpp.plots import plot_energy
 
 df = read_xvg("energy.xvg")
-ax = plot_energy(df, columns=["Potential", "Kinetic En."])
+ax = plot_energy(df, columns=["Potential", "Kinetic En."])  # columns selects which terms to plot
 ```
 
 ## Matrix Plots
@@ -62,9 +62,18 @@ from mdpp.plots import plot_dccm
 ax = plot_dccm(dccm_result, cmap="RdBu_r")
 ```
 
+### Delta-RMSF
+
+```python
+from mdpp.plots import plot_delta_rmsf
+
+ax = plot_delta_rmsf(delta_rmsf_result)
+```
+
 ### Contact map
 
 ```python
+from mdpp.analysis.contacts import compute_contact_frequency
 from mdpp.plots import plot_contact_map, contact_frequency_to_matrix
 
 frequency, pairs = compute_contact_frequency(traj)
@@ -127,7 +136,7 @@ img = draw_mol(mol, pattern=pattern, highlight=True)
 from mdpp.plots import draw_mols
 
 mols = [Chem.MolFromSmiles(smi) for smi in smiles_list]
-img = draw_mols(mols, legends=names, mols_per_row=4, output_file="grid.png")
+img = draw_mols(mols, mols_per_row=4)
 ```
 
 ## 3D Visualization

@@ -12,7 +12,7 @@ from mdpp.core import load_trajectory
 traj = load_trajectory("md.xtc", topology_path="topol.gro")
 ```
 
-With atom selection (loads all atoms, then slices):
+With atom selection and striding:
 
 ```python
 traj = load_trajectory(
@@ -23,35 +23,23 @@ traj = load_trajectory(
 )
 ```
 
-For very large trajectories, use `n_frames` to load only the first N frames
-(after stride) without reading the full file into memory:
+Use `start` and `stop` to skip equilibration or limit the frame range.
+Frame selection follows Python's `range(start, stop, stride)` convention:
 
 ```python
+# Skip the first 1000 frames, read up to frame 5000, every 10th frame
 traj = load_trajectory(
     "md.xtc",
     topology_path="topol.gro",
+    start=1000,
+    stop=5000,
     stride=10,
-    n_frames=1000,
 )
 ```
 
-Use `skip` to discard initial frames (e.g. equilibration) without reading
-them into memory. `skip` counts raw frames and is applied before `stride`:
-
-```python
-# Skip the first 10,000 frames, then read 1,000 frames with stride=10
-traj = load_trajectory(
-    "md.xtc",
-    topology_path="topol.gro",
-    skip=10_000,
-    stride=10,
-    n_frames=1000,
-)
-```
-
-Under the hood, `n_frames` and `skip` use mdtraj's format-specific reader
-(`md.open` + `seek` + `read_as_traj`) which reads exactly the requested
-frames in a single pass -- no chunking, no full-file load.
+When `atom_selection` is provided, only the selected atoms are loaded
+(atom indices are passed directly to mdtraj's reader, avoiding a
+full-atom load followed by slicing).
 
 ### Multiple trajectories
 
@@ -74,7 +62,6 @@ trajs = load_trajectories(
     ["run1.xtc", "run2.xtc", "run3.xtc"],
     topology_paths=["topol.gro", "topol.gro", "topol.gro"],
     stride=10,
-    n_frames=1000,
     max_workers=3,
 )
 ```

@@ -94,15 +94,14 @@ print(f"Largest cluster: {len(result.clusters[0])} molecules")
 
 ### Cluster fingerprints (Numba-parallel)
 
-For large datasets, use the Numba-accelerated path with numpy arrays:
+For large datasets, use the Numba-accelerated path with numpy bit arrays:
 
 ```python
 import numpy as np
 from mdpp.chem import cluster_fps_parallel
 
-# Convert to numpy array (n_mols, n_bits)
-fp_array = np.array([list(fp.ToBitString()) for fp in fps], dtype=np.int8)
-result = cluster_fps_parallel(fp_array, cutoff=0.6)
+fps_array = np.array([list(fp.ToBitString()) for fp in fps], dtype=np.int8)
+result = cluster_fps_parallel(fps_array, cutoff=0.6, similarity_metric="tanimoto")
 ```
 
 ## Similarity

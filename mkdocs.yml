@@ -49,6 +49,7 @@ nav:
       - Cheminformatics: api/chem.md
       - Plots: api/plots.md
       - Preparation: api/prep.md
+      - Constants: api/constants.md
   - Resources: resources.md
 
 markdown_extensions:

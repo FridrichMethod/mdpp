@@ -9,10 +9,11 @@ mdpp provides a collection of Python utilities for molecular dynamics simulation
 ```
 mdpp
 ├── core        # Trajectory I/O, XVG/EDR parsers
-├── analysis    # RMSD, RMSF, DCCM, SASA, contacts, DSSP, FES, PCA/TICA, clustering
+├── analysis    # RMSD, RMSF, delta-RMSF, DCCM, SASA, contacts, DSSP, FES, PCA/TICA, clustering
 ├── chem        # Molecular descriptors, fingerprints, similarity, PAINS filters, file I/O
 ├── plots       # Publication-ready 2D plots, molecule drawings, interactive 3D views
 ├── prep        # Protein fixing, pKa prediction, ligand parameterization, trajectory manipulation
+├── constants   # Physical constants (gas constant, default temperature)
 └── scripts     # Repository shell scripts for GROMACS, OpenFE, and BrownDye
 ```
 

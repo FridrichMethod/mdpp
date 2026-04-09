@@ -9,6 +9,7 @@ alwaysApply: true
 
 ```
 src/mdpp/
+├── constants.py # physical constants (GAS_CONSTANT_KJ_MOL_K, DEFAULT_TEMPERATURE_K)
 ├── core/        # trajectory I/O (load_trajectory, align), file parsers (read_xvg, read_edr)
 ├── analysis/    # compute_* functions returning frozen dataclass results
 ├── plots/       # plot_* functions returning matplotlib Axes

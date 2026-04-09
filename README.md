@@ -25,8 +25,8 @@
 
 ## Highlights
 
-- **Trajectory analysis** — RMSD, RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
-- **Dimensionality reduction** — PCA, TICA, backbone torsion featurization, free energy surfaces
+- **Trajectory analysis** — RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
+- **Dimensionality reduction** — PCA (with projection), TICA, backbone torsion featurization, free energy surfaces
 - **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
 - **Cheminformatics** — molecular descriptors, PAINS filters, fingerprints (Morgan/ECFP), Tanimoto similarity, Butina clustering
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
@@ -110,7 +110,7 @@ from mdpp.chem import MolSupplier, calc_descs, gen_fp, calc_sim, is_pains
 
 for mol in MolSupplier("compounds.sdf"):
     descs = calc_descs(mol)                 # molecular descriptors (MW, LogP, TPSA, ...)
-    fp = gen_fp(mol, method="ecfp4")        # ECFP4 fingerprint
+    fp = gen_fp(mol, fp_type="ecfp4")       # ECFP4 fingerprint
     print(f"PAINS: {is_pains(mol)}")        # structural alert filter
 ```
 
@@ -119,10 +119,11 @@ for mol in MolSupplier("compounds.sdf"):
 ```
 mdpp
 ├── core         Trajectory I/O · XVG/EDR parsers · atom selection · alignment
-├── analysis     RMSD · RMSF · DCCM · SASA · Rg · H-bonds · contacts · DSSP · PCA · TICA · FES · clustering
+├── analysis     RMSD · RMSF · delta-RMSF · DCCM · SASA · Rg · H-bonds · contacts · DSSP · PCA · TICA · FES · clustering
 ├── chem         Descriptors · PAINS filters · fingerprints · similarity · molecule file I/O
 ├── plots        Time series · heatmaps · FES contours · scatter · contact maps · 2D/3D molecules
 ├── prep         PDB fixing · pKa prediction · ligand topology · trajectory merge/slice/subsample
+├── constants    Physical constants (gas constant, default temperature)
 └── scripts      Repository shell helpers for GROMACS, OpenFE, and BrownDye
 ```
 
