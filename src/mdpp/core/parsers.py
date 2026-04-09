@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from mdpp._dtype import resolve_dtype
 from mdpp._types import StrPath
 
 _LEGEND_PATTERN = re.compile(r's(\d+)\s+legend\s+"(.+)"', re.IGNORECASE)
@@ -80,7 +81,11 @@ def _build_column_names(meta: _XVGMetadata, n_cols: int) -> list[str]:
     return columns
 
 
-def read_xvg(path: StrPath) -> pd.DataFrame:
+def read_xvg(
+    path: StrPath,
+    *,
+    dtype: type[np.floating] | None = None,
+) -> pd.DataFrame:
     """Read a GROMACS XVG file into a DataFrame.
 
     Parses metadata lines (lines starting with ``@``) to extract column labels
@@ -88,15 +93,17 @@ def read_xvg(path: StrPath) -> pd.DataFrame:
 
     Args:
         path: Path to a ``.xvg`` file.
+        dtype: Float dtype for the data. If ``None``, uses the package default.
 
     Returns:
         DataFrame whose first column is typically time and remaining columns
         are labeled from the XVG legend entries (or ``"col_0"``, ``"col_1"``,
         etc. when legends are absent).
     """
+    resolved = resolve_dtype(dtype)
     meta, data_lines = _parse_xvg_lines(path)
 
-    data = np.loadtxt(data_lines, dtype=np.float64)
+    data = np.loadtxt(data_lines, dtype=resolved)
     if data.ndim == 1:
         data = data.reshape(1, -1)
 

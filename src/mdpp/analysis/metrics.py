@@ -8,6 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp.core.trajectory import (
     residue_ids_from_indices,
     select_atom_indices,
@@ -19,17 +20,17 @@ from mdpp.core.trajectory import (
 class RMSDResult:
     """RMSD time series."""
 
-    time_ps: NDArray[np.float64]
-    rmsd_nm: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    rmsd_nm: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
     @property
-    def rmsd_angstrom(self) -> NDArray[np.float64]:
+    def rmsd_angstrom(self) -> NDArray[np.floating]:
         """Return RMSD values in Angstrom."""
         return self.rmsd_nm * 10.0
 
@@ -38,12 +39,12 @@ class RMSDResult:
 class RMSFResult:
     """Per-atom RMSF values."""
 
-    rmsf_nm: NDArray[np.float64]
+    rmsf_nm: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
     residue_ids: NDArray[np.int_] | None
 
     @property
-    def rmsf_angstrom(self) -> NDArray[np.float64]:
+    def rmsf_angstrom(self) -> NDArray[np.floating]:
         """Return RMSF values in Angstrom."""
         return self.rmsf_nm * 10.0
 
@@ -61,17 +62,17 @@ class DeltaRMSFResult:
     to give the SEM on the delta.
     """
 
-    delta_rmsf_nm: NDArray[np.float64]
+    delta_rmsf_nm: NDArray[np.floating]
     residue_ids: NDArray[np.int_] | None
-    sem_nm: NDArray[np.float64] | None
+    sem_nm: NDArray[np.floating] | None
 
     @property
-    def delta_rmsf_angstrom(self) -> NDArray[np.float64]:
+    def delta_rmsf_angstrom(self) -> NDArray[np.floating]:
         """Return delta-RMSF values in Angstrom."""
         return self.delta_rmsf_nm * 10.0
 
     @property
-    def sem_angstrom(self) -> NDArray[np.float64] | None:
+    def sem_angstrom(self) -> NDArray[np.floating] | None:
         """Return SEM on the delta-RMSF in Angstrom."""
         if self.sem_nm is None:
             return None
@@ -82,7 +83,7 @@ class DeltaRMSFResult:
 class DCCMResult:
     """Dynamic cross-correlation matrix."""
 
-    correlation: NDArray[np.float64]
+    correlation: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
     residue_ids: NDArray[np.int_] | None
 
@@ -91,19 +92,19 @@ class DCCMResult:
 class SASAResult:
     """Solvent accessible surface area."""
 
-    time_ps: NDArray[np.float64]
-    values_nm2: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    values_nm2: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
     mode: str
     residue_ids: NDArray[np.int_] | None
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
     @property
-    def total_nm2(self) -> NDArray[np.float64]:
+    def total_nm2(self) -> NDArray[np.floating]:
         """Return summed SASA for each frame."""
         return np.sum(self.values_nm2, axis=1)
 
@@ -112,17 +113,17 @@ class SASAResult:
 class RadiusOfGyrationResult:
     """Radius of gyration time series."""
 
-    time_ps: NDArray[np.float64]
-    radius_gyration_nm: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    radius_gyration_nm: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
     @property
-    def radius_gyration_angstrom(self) -> NDArray[np.float64]:
+    def radius_gyration_angstrom(self) -> NDArray[np.floating]:
         """Return radius of gyration values in Angstrom."""
         return self.radius_gyration_nm * 10.0
 
@@ -133,6 +134,7 @@ def compute_rmsd(
     atom_selection: str = "backbone",
     reference_frame: int = 0,
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> RMSDResult:
     """Compute RMSD over time.
 
@@ -144,10 +146,13 @@ def compute_rmsd(
         atom_selection: Atoms used in RMSD calculation.
         reference_frame: Reference frame index for RMSD.
         timestep_ps: Optional time step in ps to override trajectory time.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         RMSDResult containing time and RMSD.
     """
+    resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     rmsd_nm = np.asarray(
         md.rmsd(
@@ -157,10 +162,10 @@ def compute_rmsd(
             atom_indices=atom_indices,
             precentered=False,
         ),
-        dtype=np.float64,
+        dtype=resolved,
     )
     return RMSDResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         rmsd_nm=rmsd_nm,
         atom_indices=atom_indices,
     )
@@ -170,6 +175,7 @@ def compute_rmsf(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
+    dtype: type[np.floating] | None = None,
 ) -> RMSFResult:
     """Compute per-atom RMSF from positional fluctuations.
 
@@ -179,10 +185,13 @@ def compute_rmsf(
     Args:
         traj: Input trajectory (pre-aligned).
         atom_selection: Atoms included in RMSF calculation.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         RMSFResult with atom and residue mapping.
     """
+    resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     positions_nm = traj.xyz[:, atom_indices, :]
     mean_positions_nm = np.mean(positions_nm, axis=0)
@@ -190,7 +199,7 @@ def compute_rmsf(
     rmsf_nm = np.sqrt(np.mean(squared_displacements, axis=0, dtype=np.float64))
     residue_ids = residue_ids_from_indices(traj.topology, atom_indices)
     return RMSFResult(
-        rmsf_nm=np.asarray(rmsf_nm, dtype=np.float64),
+        rmsf_nm=np.asarray(rmsf_nm, dtype=resolved),
         atom_indices=atom_indices,
         residue_ids=residue_ids,
     )
@@ -200,19 +209,27 @@ def compute_dccm(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
+    dtype: type[np.floating] | None = None,
 ) -> DCCMResult:
     """Compute dynamic cross-correlation matrix (DCCM).
 
     The trajectory should be aligned before calling this function
     (see :func:`~mdpp.core.trajectory.align_trajectory`).
 
+    Covariance is always computed in float64 for numerical stability;
+    the final correlation matrix is cast to the resolved *dtype*.
+
     Args:
         traj: Input trajectory (pre-aligned).
         atom_selection: Atoms used in DCCM.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         DCCMResult with correlation matrix and residue IDs.
     """
+    resolved = resolve_dtype(dtype)
+
     if traj.n_frames < 2:
         raise ValueError("DCCM requires at least two frames.")
 
@@ -221,6 +238,7 @@ def compute_dccm(
     mean_positions_nm = np.mean(positions_nm, axis=0)
     fluctuation_nm = positions_nm - mean_positions_nm
 
+    # Covariance computed in float64 for numerical stability.
     covariance = np.einsum("fid,fjd->ij", fluctuation_nm, fluctuation_nm) / float(traj.n_frames)
     standard_deviation = np.sqrt(np.clip(np.diag(covariance), a_min=0.0, a_max=None))
     normalization = np.outer(standard_deviation, standard_deviation)
@@ -230,6 +248,9 @@ def compute_dccm(
     correlation = np.asarray(correlation, dtype=np.float64)
     correlation[~np.isfinite(correlation)] = 0.0
     np.fill_diagonal(correlation, 1.0)
+
+    # Cast to output dtype after all float64 arithmetic.
+    correlation = np.asarray(correlation, dtype=resolved)
 
     residue_ids = residue_ids_from_indices(traj.topology, atom_indices)
     return DCCMResult(
@@ -247,6 +268,7 @@ def compute_sasa(
     probe_radius: float = 0.14,
     n_sphere_points: int = 960,
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> SASAResult:
     """Compute solvent-accessible surface area via Shrake-Rupley.
 
@@ -257,10 +279,14 @@ def compute_sasa(
         probe_radius: Probe radius in nm.
         n_sphere_points: Number of sphere points per atom.
         timestep_ps: Optional timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         SASAResult containing frame-resolved values.
     """
+    resolved = resolve_dtype(dtype)
+
     if mode not in {"atom", "residue"}:
         raise ValueError("mode must be either 'atom' or 'residue'.")
 
@@ -277,7 +303,7 @@ def compute_sasa(
             probe_radius=probe_radius,
             n_sphere_points=n_sphere_points,
         ),
-        dtype=np.float64,
+        dtype=resolved,
     )
     residue_ids = None
     if mode == "residue":
@@ -287,7 +313,7 @@ def compute_sasa(
         )
 
     return SASAResult(
-        time_ps=trajectory_time_ps(sliced, timestep_ps=timestep_ps),
+        time_ps=trajectory_time_ps(sliced, timestep_ps=timestep_ps, dtype=resolved),
         values_nm2=values_nm2,
         atom_indices=atom_indices,
         mode=mode,
@@ -300,6 +326,7 @@ def compute_radius_of_gyration(
     *,
     atom_selection: str = "protein",
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> RadiusOfGyrationResult:
     """Compute radius of gyration over time.
 
@@ -307,15 +334,18 @@ def compute_radius_of_gyration(
         traj: Input trajectory.
         atom_selection: Atom selection used to compute radius of gyration.
         timestep_ps: Optional timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         RadiusOfGyrationResult with per-frame values.
     """
+    resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     sliced = traj.atom_slice(atom_indices)
-    rg_nm = np.asarray(md.compute_rg(sliced), dtype=np.float64)
+    rg_nm = np.asarray(md.compute_rg(sliced), dtype=resolved)
     return RadiusOfGyrationResult(
-        time_ps=trajectory_time_ps(sliced, timestep_ps=timestep_ps),
+        time_ps=trajectory_time_ps(sliced, timestep_ps=timestep_ps, dtype=resolved),
         radius_gyration_nm=rg_nm,
         atom_indices=atom_indices,
     )
@@ -323,8 +353,18 @@ def compute_radius_of_gyration(
 
 def _average_rmsf_with_sem(
     results: list[RMSFResult],
-) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
+    *,
+    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
+) -> tuple[NDArray[np.floating], NDArray[np.floating] | None]:
     """Average RMSF across replicas in MSF space and propagate SEM.
+
+    Computation is performed in float64 for numerical stability (MSF
+    averaging through sqrt); the outputs are cast to *dtype*.
+
+    Args:
+        results: RMSF results from each replica.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         (avg_rmsf_nm, sem_rmsf_nm).  SEM is ``None`` when fewer than 2
@@ -333,16 +373,20 @@ def _average_rmsf_with_sem(
     The SEM on MSF is propagated through the sqrt transform:
     ``sem_rmsf = sem_msf / (2 * avg_rmsf)``.
     """
-    msf_stack = np.stack([r.rmsf_nm**2 for r in results])
+    resolved = resolve_dtype(dtype)
+
+    # Compute in float64 for numerical stability.
+    msf_stack = np.stack([r.rmsf_nm.astype(np.float64) ** 2 for r in results])
     avg_msf = np.mean(msf_stack, axis=0)
-    avg_rmsf = np.sqrt(avg_msf).astype(np.float64)
+    avg_rmsf = np.sqrt(avg_msf).astype(resolved)
 
     if len(results) < 2:
         return avg_rmsf, None
 
     n_replicas = len(results)
     sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
-    sem_rmsf = np.where(avg_rmsf > 0, sem_msf / (2.0 * avg_rmsf), 0.0).astype(np.float64)
+    avg_rmsf_f64 = np.sqrt(avg_msf)
+    sem_rmsf = np.where(avg_rmsf_f64 > 0, sem_msf / (2.0 * avg_rmsf_f64), 0.0).astype(resolved)
     return avg_rmsf, sem_rmsf
 
 
@@ -362,6 +406,7 @@ def compute_delta_rmsf(
     indices_a: NDArray[np.int_] | None = None,
     indices_b: NDArray[np.int_] | None = None,
     residue_ids: NDArray[np.int_] | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> DeltaRMSFResult:
     """Compute per-residue RMSF difference between two systems.
 
@@ -397,6 +442,8 @@ def compute_delta_rmsf(
             from ``results_a[0]``.  When ``None`` and indices *are*
             provided, residue IDs are taken from ``results_a[0]`` at the
             positions given by ``indices_a``.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         DeltaRMSFResult with the per-residue difference and SEM.
@@ -406,11 +453,13 @@ def compute_delta_rmsf(
             have inconsistent lengths, index arrays differ in length, or
             unindexed systems have different residue counts.
     """
+    resolved = resolve_dtype(dtype)
+
     _validate_rmsf_replicas(results_a, "results_a")
     _validate_rmsf_replicas(results_b, "results_b")
 
-    avg_a, sem_a = _average_rmsf_with_sem(results_a)
-    avg_b, sem_b = _average_rmsf_with_sem(results_b)
+    avg_a, sem_a = _average_rmsf_with_sem(results_a, dtype=resolved)
+    avg_b, sem_b = _average_rmsf_with_sem(results_b, dtype=resolved)
 
     if indices_a is not None and indices_b is not None:
         if indices_a.shape[0] != indices_b.shape[0]:
@@ -444,9 +493,11 @@ def compute_delta_rmsf(
     delta = avg_b - avg_a
 
     # Combine SEMs in quadrature (independent systems)
-    sem: NDArray[np.float64] | None = None
+    sem: NDArray[np.floating] | None = None
     if sem_a is not None and sem_b is not None:
-        sem = np.sqrt(sem_a**2 + sem_b**2).astype(np.float64)
+        sem = np.sqrt(sem_a.astype(np.float64) ** 2 + sem_b.astype(np.float64) ** 2).astype(
+            resolved
+        )
 
     return DeltaRMSFResult(
         delta_rmsf_nm=delta,

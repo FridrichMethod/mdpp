@@ -8,6 +8,8 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
+
 
 @dataclass(frozen=True, slots=True)
 class DSSPResult:
@@ -27,7 +29,7 @@ class DSSPResult:
 
     assignments: NDArray[np.str_]
     residue_ids: NDArray[np.int_]
-    frequency: NDArray[np.float64]
+    frequency: NDArray[np.floating]
     categories: list[str]
 
 
@@ -35,6 +37,7 @@ def compute_dssp(
     traj: md.Trajectory,
     *,
     simplified: bool = True,
+    dtype: type[np.floating] | None = None,
 ) -> DSSPResult:
     """Compute per-residue secondary structure assignments across frames.
 
@@ -42,10 +45,13 @@ def compute_dssp(
         traj: Input trajectory.
         simplified: If ``True``, use 3-state classification (H=helix,
             E=sheet, C=coil). Otherwise use the full 8-state DSSP codes.
+        dtype: Output float dtype for frequency array. If ``None``, uses
+            the package default.
 
     Returns:
         DSSPResult with per-frame assignments and per-residue frequencies.
     """
+    resolved = resolve_dtype(dtype)
     assignments = md.compute_dssp(traj, simplified=simplified)
     assignments = np.asarray(assignments, dtype=np.str_)
 
@@ -60,7 +66,7 @@ def compute_dssp(
         categories = sorted({str(code) for code in assignments.ravel()})
 
     n_residues = assignments.shape[1]
-    frequency = np.zeros((n_residues, len(categories)), dtype=np.float64)
+    frequency = np.zeros((n_residues, len(categories)), dtype=resolved)
     for cat_index, cat in enumerate(categories):
         frequency[:, cat_index] = np.mean(assignments == cat, axis=0)
 

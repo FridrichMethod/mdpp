@@ -8,6 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp.core.trajectory import trajectory_time_ps
 
 
@@ -15,12 +16,12 @@ from mdpp.core.trajectory import trajectory_time_ps
 class ContactResult:
     """Per-frame inter-residue contact distances."""
 
-    time_ps: NDArray[np.float64]
-    distances_nm: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    distances_nm: NDArray[np.floating]
     residue_pairs: NDArray[np.int_]
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
@@ -29,13 +30,13 @@ class ContactResult:
 class NativeContactResult:
     """Fraction of native contacts (Q) over time."""
 
-    time_ps: NDArray[np.float64]
-    fraction: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    fraction: NDArray[np.floating]
     native_pairs: NDArray[np.int_]
     cutoff_nm: float
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
@@ -47,6 +48,7 @@ def compute_contacts(
     scheme: str = "closest-heavy",
     periodic: bool = True,
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> ContactResult:
     """Compute inter-residue contact distances over time.
 
@@ -58,10 +60,12 @@ def compute_contacts(
             One of ``"closest-heavy"``, ``"closest"``, ``"ca"``, or ``"sidechain-heavy"``.
         periodic: Whether to apply periodic boundary conditions.
         timestep_ps: Optional frame timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         ContactResult with per-frame distances and residue pair indices.
     """
+    resolved = resolve_dtype(dtype)
     distances, pairs = md.compute_contacts(
         traj,
         contacts=contacts,
@@ -69,8 +73,8 @@ def compute_contacts(
         periodic=periodic,
     )
     return ContactResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps),
-        distances_nm=np.asarray(distances, dtype=np.float64),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        distances_nm=np.asarray(distances, dtype=resolved),
         residue_pairs=np.asarray(pairs, dtype=np.int_),
     )
 
@@ -81,7 +85,8 @@ def compute_contact_frequency(
     cutoff_nm: float = 0.45,
     scheme: str = "closest-heavy",
     periodic: bool = True,
-) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
+    dtype: type[np.floating] | None = None,
+) -> tuple[NDArray[np.floating], NDArray[np.int_]]:
     """Compute the fraction of frames each residue pair is in contact.
 
     Args:
@@ -89,12 +94,14 @@ def compute_contact_frequency(
         cutoff_nm: Distance threshold in nm below which a contact is counted.
         scheme: Contact scheme passed to ``mdtraj.compute_contacts``.
         periodic: Whether to apply periodic boundary conditions.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         A tuple of ``(frequency, residue_pairs)`` where ``frequency`` has
         shape ``(n_pairs,)`` with values in ``[0, 1]`` and ``residue_pairs``
         has shape ``(n_pairs, 2)``.
     """
+    resolved = resolve_dtype(dtype)
     distances, pairs = md.compute_contacts(
         traj,
         contacts="all",
@@ -102,7 +109,7 @@ def compute_contact_frequency(
         periodic=periodic,
     )
     frequency = np.mean(distances < cutoff_nm, axis=0, dtype=np.float64)
-    return np.asarray(frequency, dtype=np.float64), np.asarray(pairs, dtype=np.int_)
+    return np.asarray(frequency, dtype=resolved), np.asarray(pairs, dtype=np.int_)
 
 
 def compute_native_contacts(
@@ -113,6 +120,7 @@ def compute_native_contacts(
     scheme: str = "closest-heavy",
     periodic: bool = True,
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> NativeContactResult:
     """Compute the fraction of native contacts Q(t) over time.
 
@@ -127,6 +135,7 @@ def compute_native_contacts(
         scheme: Contact scheme for ``mdtraj.compute_contacts``.
         periodic: Whether to apply periodic boundary conditions.
         timestep_ps: Optional frame timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         NativeContactResult with per-frame Q values.
@@ -155,11 +164,12 @@ def compute_native_contacts(
 
     native_pairs = pairs[native_mask]
     native_distances = distances[:, native_mask]
+    resolved = resolve_dtype(dtype)
     fraction = np.mean(native_distances < cutoff_nm, axis=1, dtype=np.float64)
 
     return NativeContactResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps),
-        fraction=np.asarray(fraction, dtype=np.float64),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        fraction=np.asarray(fraction, dtype=resolved),
         native_pairs=np.asarray(native_pairs, dtype=np.int_),
         cutoff_nm=float(cutoff_nm),
     )

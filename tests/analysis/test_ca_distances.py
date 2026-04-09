@@ -79,8 +79,12 @@ class TestFeaturizeCaDistances:
         assert result.values.shape[1] == 1
         assert result.atom_indices.size == 2
 
-    def test_dtype_float64(self, ca_trajectory: md.Trajectory) -> None:
+    def test_default_dtype_float32(self, ca_trajectory: md.Trajectory) -> None:
         result = featurize_ca_distances(ca_trajectory)
+        assert result.values.dtype == np.float32
+
+    def test_explicit_dtype_float64(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, dtype=np.float64)
         assert result.values.dtype == np.float64
 
     def test_single_atom_raises(self) -> None:
@@ -231,7 +235,7 @@ class TestMdtrajKernel:
         result = _pairwise_distances_mdtraj(traj, pairs, periodic=True)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-5)
 
-    def test_output_dtype_float64(self) -> None:
+    def test_default_dtype_float32(self) -> None:
         topology = md.Topology()
         chain = topology.add_chain()
         for _ in range(2):
@@ -240,6 +244,17 @@ class TestMdtrajKernel:
         traj = md.Trajectory(xyz=np.zeros((2, 2, 3), dtype=np.float32), topology=topology)
         pairs = np.array([[0, 1]], dtype=np.int_)
         result = _pairwise_distances_mdtraj(traj, pairs, periodic=False)
+        assert result.dtype == np.float32
+
+    def test_explicit_dtype_float64(self) -> None:
+        topology = md.Topology()
+        chain = topology.add_chain()
+        for _ in range(2):
+            res = topology.add_residue("ALA", chain)
+            topology.add_atom("CA", md.element.carbon, res)
+        traj = md.Trajectory(xyz=np.zeros((2, 2, 3), dtype=np.float32), topology=topology)
+        pairs = np.array([[0, 1]], dtype=np.int_)
+        result = _pairwise_distances_mdtraj(traj, pairs, periodic=False, dtype=np.float64)
         assert result.dtype == np.float64
 
 

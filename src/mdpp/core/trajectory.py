@@ -8,6 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp._types import PathLike
 
 
@@ -53,24 +54,28 @@ def trajectory_time_ps(
     traj: md.Trajectory,
     *,
     timestep_ps: float | None = None,
-) -> NDArray[np.float64]:
+    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
+) -> NDArray[np.floating]:
     """Return per-frame time values in picoseconds.
 
     Args:
         traj: Input trajectory.
         timestep_ps: Optional fixed timestep to enforce. If provided, generated
             time values are ``np.arange(n_frames) * timestep_ps``.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         Time array in picoseconds.
     """
+    resolved = resolve_dtype(dtype)
     if timestep_ps is not None:
-        return np.arange(traj.n_frames, dtype=np.float64) * float(timestep_ps)
+        return np.arange(traj.n_frames, dtype=resolved) * float(timestep_ps)
 
-    time_ps = np.asarray(traj.time, dtype=np.float64)
+    time_ps = np.asarray(traj.time, dtype=resolved)
     if time_ps.shape[0] == traj.n_frames:
         return time_ps
-    return np.arange(traj.n_frames, dtype=np.float64)
+    return np.arange(traj.n_frames, dtype=resolved)
 
 
 def load_trajectory(

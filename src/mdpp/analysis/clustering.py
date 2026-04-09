@@ -8,6 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp.core.trajectory import select_atom_indices
 
 
@@ -15,11 +16,11 @@ from mdpp.core.trajectory import select_atom_indices
 class RMSDMatrixResult:
     """Pairwise RMSD matrix between trajectory frames."""
 
-    rmsd_matrix_nm: NDArray[np.float64]
+    rmsd_matrix_nm: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
 
     @property
-    def rmsd_matrix_angstrom(self) -> NDArray[np.float64]:
+    def rmsd_matrix_angstrom(self) -> NDArray[np.floating]:
         """Return the RMSD matrix in Angstrom."""
         return self.rmsd_matrix_nm * 10.0
 
@@ -37,19 +38,22 @@ def compute_rmsd_matrix(
     traj: md.Trajectory,
     *,
     atom_selection: str = "backbone",
+    dtype: type[np.floating] | None = None,
 ) -> RMSDMatrixResult:
     """Compute an all-vs-all RMSD matrix between trajectory frames.
 
     Args:
         traj: Input trajectory.
         atom_selection: Atoms used for RMSD calculation.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         RMSDMatrixResult with a symmetric ``(n_frames, n_frames)`` matrix.
     """
+    resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     n_frames = traj.n_frames
-    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=np.float64)
+    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=resolved)
 
     for i in range(n_frames):
         rmsd_matrix[i] = md.rmsd(traj, traj, frame=i, atom_indices=atom_indices)
@@ -61,7 +65,7 @@ def compute_rmsd_matrix(
 
 
 def cluster_conformations(
-    rmsd_matrix: NDArray[np.float64],
+    rmsd_matrix: NDArray[np.floating],
     *,
     method: str = "gromos",
     cutoff_nm: float = 0.15,

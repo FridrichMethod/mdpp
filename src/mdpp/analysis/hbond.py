@@ -8,6 +8,7 @@ import mdtraj as md
 import numpy as np
 from numpy.typing import NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp.core.trajectory import trajectory_time_ps
 
 
@@ -15,17 +16,17 @@ from mdpp.core.trajectory import trajectory_time_ps
 class HBondResult:
     """Hydrogen-bond detection results."""
 
-    time_ps: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
     triplets: NDArray[np.int_]
     presence: NDArray[np.bool_]
     count_per_frame: NDArray[np.int_]
-    occupancy: NDArray[np.float64]
+    occupancy: NDArray[np.floating]
     method: str
     distance_cutoff_nm: float
     angle_cutoff_deg: float
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
         """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
@@ -124,6 +125,7 @@ def compute_hbonds(
     distance_cutoff_nm: float = 0.25,
     angle_cutoff_deg: float = 120.0,
     timestep_ps: float | None = None,
+    dtype: type[np.floating] | None = None,
 ) -> HBondResult:
     """Compute hydrogen bonds and per-frame counts.
 
@@ -137,6 +139,7 @@ def compute_hbonds(
         distance_cutoff_nm: H...A distance cutoff used for presence matrix.
         angle_cutoff_deg: D-H...A angle cutoff used for presence matrix.
         timestep_ps: Optional frame timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         HBondResult containing detected bonds, occupancy, and per-frame counts.
@@ -175,18 +178,19 @@ def compute_hbonds(
             periodic=periodic,
         )
 
+    resolved = resolve_dtype(dtype)
     count_per_frame = np.sum(presence, axis=1, dtype=np.int_)
     occupancy = (
         np.mean(presence, axis=0, dtype=np.float64)
         if presence.shape[1] > 0
-        else np.empty((0,), dtype=np.float64)
+        else np.empty((0,), dtype=resolved)
     )
     return HBondResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
         triplets=triplets,
         presence=presence,
         count_per_frame=np.asarray(count_per_frame, dtype=np.int_),
-        occupancy=np.asarray(occupancy, dtype=np.float64),
+        occupancy=np.asarray(occupancy, dtype=resolved),
         method=method,
         distance_cutoff_nm=distance_cutoff_nm,
         angle_cutoff_deg=angle_cutoff_deg,

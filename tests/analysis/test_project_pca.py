@@ -14,7 +14,7 @@ def reference_pca() -> tuple[np.ndarray, np.ndarray, PCAResult]:
     rng = np.random.default_rng(42)
     features_a = rng.normal(size=(100, 10))
     features_b = rng.normal(loc=1.0, size=(80, 10))
-    fitted = compute_pca(features_a, n_components=2)
+    fitted = compute_pca(features_a, n_components=2, dtype=np.float64)
     return features_a, features_b, fitted
 
 
@@ -50,7 +50,7 @@ class TestProjectPCA:
     ) -> None:
         """Projecting the same data used for fitting should reproduce the original projections."""
         features_a, _, fitted = reference_pca
-        result = project_pca(features_a, fitted=fitted)
+        result = project_pca(features_a, fitted=fitted, dtype=np.float64)
         np.testing.assert_allclose(result.projections, fitted.projections, atol=1e-10)
 
     def test_different_data_gives_different_projections(
@@ -84,9 +84,9 @@ class TestProjectPCA:
         rng = np.random.default_rng(99)
         features_a = rng.normal(size=(50, 5))
         features_b = rng.normal(size=(30, 5))
-        fitted = compute_pca(features_a, n_components=2, standardize=False)
-        result = project_pca(features_b, fitted=fitted)
+        fitted = compute_pca(features_a, n_components=2, standardize=False, dtype=np.float64)
+        result = project_pca(features_b, fitted=fitted, dtype=np.float64)
         assert result.projections.shape == (30, 2)
         # Self-projection should still match
-        self_proj = project_pca(features_a, fitted=fitted)
+        self_proj = project_pca(features_a, fitted=fitted, dtype=np.float64)
         np.testing.assert_allclose(self_proj.projections, fitted.projections, atol=1e-10)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from mdpp._dtype import resolve_dtype
 from mdpp.constants import DEFAULT_TEMPERATURE_K, GAS_CONSTANT_KJ_MOL_K
 
 type BinsType = int | tuple[int, int]
@@ -17,20 +18,20 @@ type RangeType = tuple[tuple[float, float], tuple[float, float]] | None
 class FES2DResult:
     """2D free-energy surface derived from a histogram."""
 
-    free_energy_kj_mol: NDArray[np.float64]
-    probability_density: NDArray[np.float64]
-    x_edges: NDArray[np.float64]
-    y_edges: NDArray[np.float64]
+    free_energy_kj_mol: NDArray[np.floating]
+    probability_density: NDArray[np.floating]
+    x_edges: NDArray[np.floating]
+    y_edges: NDArray[np.floating]
     observed_mask: NDArray[np.bool_]
     temperature_k: float
 
     @property
-    def x_centers(self) -> NDArray[np.float64]:
+    def x_centers(self) -> NDArray[np.floating]:
         """Return x-axis bin centers."""
         return 0.5 * (self.x_edges[:-1] + self.x_edges[1:])
 
     @property
-    def y_centers(self) -> NDArray[np.float64]:
+    def y_centers(self) -> NDArray[np.floating]:
         """Return y-axis bin centers."""
         return 0.5 * (self.y_edges[:-1] + self.y_edges[1:])
 
@@ -44,8 +45,12 @@ def compute_fes_2d(
     temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
+    dtype: type[np.floating] | None = None,
 ) -> FES2DResult:
     """Compute a 2D free-energy surface from two collective variables.
+
+    The histogram, log-probability, and energy calculations are performed
+    in float64 for numerical stability. Output arrays are cast to *dtype*.
 
     Args:
         x_values: Samples for CV1.
@@ -55,10 +60,12 @@ def compute_fes_2d(
         temperature_k: Temperature in Kelvin.
         min_probability: Lower bound to avoid ``log(0)``.
         mask_unsampled: If True, unsampled bins are set to ``NaN``.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         FES2DResult with free energy shifted so its minimum is 0.
     """
+    resolved = resolve_dtype(dtype)
     if temperature_k <= 0.0:
         raise ValueError("temperature_k must be positive.")
     if min_probability <= 0.0:
@@ -93,10 +100,10 @@ def compute_fes_2d(
     free_energy_kj_mol = free_energy_kj_mol - float(minimum)
 
     return FES2DResult(
-        free_energy_kj_mol=np.asarray(free_energy_kj_mol, dtype=np.float64),
-        probability_density=probability_density,
-        x_edges=np.asarray(x_edges, dtype=np.float64),
-        y_edges=np.asarray(y_edges, dtype=np.float64),
+        free_energy_kj_mol=np.asarray(free_energy_kj_mol, dtype=resolved),
+        probability_density=np.asarray(probability_density, dtype=resolved),
+        x_edges=np.asarray(x_edges, dtype=resolved),
+        y_edges=np.asarray(y_edges, dtype=resolved),
         observed_mask=np.asarray(observed_mask, dtype=bool),
         temperature_k=float(temperature_k),
     )
@@ -112,6 +119,7 @@ def compute_fes_from_projection(
     temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
+    dtype: type[np.floating] | None = None,
 ) -> FES2DResult:
     """Compute a 2D FES from a projection matrix.
 
@@ -124,6 +132,7 @@ def compute_fes_from_projection(
         temperature_k: Temperature in Kelvin.
         min_probability: Lower bound to avoid ``log(0)``.
         mask_unsampled: If True, unsampled bins are set to ``NaN``.
+        dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
         FES2DResult computed from selected projection components.
@@ -142,4 +151,5 @@ def compute_fes_from_projection(
         temperature_k=temperature_k,
         min_probability=min_probability,
         mask_unsampled=mask_unsampled,
+        dtype=dtype,
     )

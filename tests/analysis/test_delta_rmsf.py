@@ -102,7 +102,7 @@ class TestComputeDeltaRMSFIdentical:
         a1 = _make_rmsf([0.1, 0.3])
         a2 = _make_rmsf([0.3, 0.1])
         b = _make_rmsf([0.2, 0.2])
-        result = compute_delta_rmsf([a1, a2], [b])
+        result = compute_delta_rmsf([a1, a2], [b], dtype=np.float64)
 
         avg_a = np.sqrt(np.mean([np.array([0.1, 0.3]) ** 2, np.array([0.3, 0.1]) ** 2], axis=0))
         expected = np.array([0.2, 0.2]) - avg_a

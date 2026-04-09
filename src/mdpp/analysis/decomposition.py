@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from sklearn.decomposition import PCA
 
+from mdpp._dtype import resolve_dtype
 from mdpp.core.trajectory import select_atom_indices
 
 
@@ -17,7 +18,7 @@ from mdpp.core.trajectory import select_atom_indices
 class DistanceFeatures:
     """Pairwise distance features (e.g. CA-CA distances)."""
 
-    values: NDArray[np.float64]
+    values: NDArray[np.floating]
     pairs: NDArray[np.int_]
     atom_indices: NDArray[np.int_]
 
@@ -26,7 +27,7 @@ class DistanceFeatures:
 class TorsionFeatures:
     """Backbone torsion features."""
 
-    values: NDArray[np.float64]
+    values: NDArray[np.floating]
     labels: list[str]
 
 
@@ -34,11 +35,11 @@ class TorsionFeatures:
 class PCAResult:
     """Principal component analysis outputs."""
 
-    projections: NDArray[np.float64]
-    components: NDArray[np.float64]
-    explained_variance_ratio: NDArray[np.float64]
-    feature_mean: NDArray[np.float64]
-    feature_scale: NDArray[np.float64]
+    projections: NDArray[np.floating]
+    components: NDArray[np.floating]
+    explained_variance_ratio: NDArray[np.floating]
+    feature_mean: NDArray[np.floating]
+    feature_scale: NDArray[np.floating]
     model: PCA
 
 
@@ -46,13 +47,22 @@ class PCAResult:
 class TICAResult:
     """Time-lagged independent component analysis outputs."""
 
-    projections: NDArray[np.float64]
+    projections: NDArray[np.floating]
     lagtime: int
     model: Any
 
 
-def _as_feature_matrix(features: ArrayLike) -> NDArray[np.float64]:
-    """Validate and coerce a feature matrix."""
+def _as_feature_matrix(
+    features: ArrayLike,
+) -> NDArray[np.float64]:
+    """Validate and coerce a feature matrix.
+
+    Always converts to float64 because downstream estimators (sklearn PCA,
+    deeptime TICA) require float64 internally.
+
+    Args:
+        features: Input feature array.
+    """
     feature_matrix = np.asarray(features, dtype=np.float64)
     if feature_matrix.ndim != 2:
         raise ValueError("features must be a 2D array with shape (n_samples, n_features).")
@@ -68,6 +78,7 @@ def featurize_backbone_torsions(
     *,
     atom_selection: str | None = "protein",
     periodic: bool = True,
+    dtype: type[np.floating] | None = None,
 ) -> TorsionFeatures:
     """Featurize backbone phi/psi torsions.
 
@@ -75,6 +86,8 @@ def featurize_backbone_torsions(
         traj: Input trajectory.
         atom_selection: Optional atom selection before featurization.
         periodic: If True, return sin/cos embedding for periodic torsions.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         TorsionFeatures with values and labels.
@@ -82,6 +95,8 @@ def featurize_backbone_torsions(
     Raises:
         ValueError: If no phi/psi torsions are available.
     """
+    resolved = resolve_dtype(dtype)
+
     if atom_selection is None:
         sliced = traj
     else:
@@ -91,7 +106,7 @@ def featurize_backbone_torsions(
     _, phi = md.compute_phi(sliced)
     _, psi = md.compute_psi(sliced)
 
-    blocks: list[NDArray[np.float64]] = []
+    blocks: list[NDArray[np.floating]] = []
     labels: list[str] = []
 
     phi_count = int(phi.shape[1]) if phi.ndim == 2 else 0
@@ -117,7 +132,7 @@ def featurize_backbone_torsions(
     if not blocks:
         raise ValueError("No phi/psi torsions were found for the selected atoms.")
 
-    values = np.hstack(blocks).astype(np.float64, copy=False)
+    values = np.hstack(blocks).astype(resolved, copy=False)
     return TorsionFeatures(values=values, labels=labels)
 
 
@@ -186,7 +201,8 @@ def _pairwise_distances_mdtraj(
     pairs: NDArray[np.int_],
     *,
     periodic: bool,
-) -> NDArray[np.float64]:
+    dtype: type[np.floating] | None = None,
+) -> NDArray[np.floating]:
     """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
 
     Supports periodic boundary conditions via minimum image convention
@@ -196,13 +212,16 @@ def _pairwise_distances_mdtraj(
         traj: Atom-sliced trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
         periodic: Whether to apply minimum image convention.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` as float64.
+        Distances of shape ``(n_frames, n_pairs)``.
     """
+    resolved = resolve_dtype(dtype)
     return np.asarray(
         md.compute_distances(traj, pairs, periodic=periodic),
-        dtype=np.float64,
+        dtype=resolved,
     )
 
 
@@ -212,6 +231,7 @@ def featurize_ca_distances(
     atom_selection: str = "name CA",
     backend: DistanceBackend = "numba",
     periodic: bool = False,
+    dtype: type[np.floating] | None = None,
 ) -> DistanceFeatures:
     """Featurize all pairwise distances between selected atoms.
 
@@ -239,6 +259,8 @@ def featurize_ca_distances(
             (default, fast, non-periodic) or ``"mdtraj"`` (PBC-capable).
         periodic: Whether to apply minimum image convention. Only
             effective with ``backend="mdtraj"``.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         DistanceFeatures with values, atom pairs, and atom indices.
@@ -247,6 +269,8 @@ def featurize_ca_distances(
         ValueError: If the selection matches fewer than 2 atoms, or an
             unknown backend is requested.
     """
+    resolved = resolve_dtype(dtype)
+
     if backend not in ("numba", "mdtraj"):
         raise ValueError(f"Unknown backend {backend!r}. Use 'numba' or 'mdtraj'.")
 
@@ -265,9 +289,10 @@ def featurize_ca_distances(
     sliced = traj.atom_slice(atom_indices)
 
     if backend == "numba":
-        values = _pairwise_distances_numba(sliced.xyz, pairs)
+        # Numba JIT kernel always outputs float64; cast to resolved dtype.
+        values = np.asarray(_pairwise_distances_numba(sliced.xyz, pairs), dtype=resolved)
     else:
-        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic)
+        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic, dtype=dtype)
 
     return DistanceFeatures(values=values, pairs=pairs, atom_indices=atom_indices)
 
@@ -277,17 +302,24 @@ def compute_pca(
     *,
     n_components: int = 2,
     standardize: bool = True,
+    dtype: type[np.floating] | None = None,
 ) -> PCAResult:
     """Compute PCA projection from feature vectors.
+
+    Sklearn PCA requires float64 internally; the *dtype* parameter
+    controls the dtype of the **output** arrays only.
 
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
         n_components: Number of principal components.
         standardize: Whether to z-score features before PCA.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         PCAResult containing projections and explained variance ratio.
     """
+    resolved = resolve_dtype(dtype)
     feature_matrix = _as_feature_matrix(features)
     if n_components < 1:
         raise ValueError("n_components must be >= 1.")
@@ -304,13 +336,13 @@ def compute_pca(
         transformed = feature_matrix - feature_mean
 
     model = PCA(n_components=n_components)
-    projections = np.asarray(model.fit_transform(transformed), dtype=np.float64)
+    projections = np.asarray(model.fit_transform(transformed), dtype=resolved)
     return PCAResult(
         projections=projections,
-        components=np.asarray(model.components_, dtype=np.float64),
-        explained_variance_ratio=np.asarray(model.explained_variance_ratio_, dtype=np.float64),
-        feature_mean=np.asarray(feature_mean, dtype=np.float64),
-        feature_scale=np.asarray(feature_scale, dtype=np.float64),
+        components=np.asarray(model.components_, dtype=resolved),
+        explained_variance_ratio=np.asarray(model.explained_variance_ratio_, dtype=resolved),
+        feature_mean=np.asarray(feature_mean, dtype=resolved),
+        feature_scale=np.asarray(feature_scale, dtype=resolved),
         model=model,
     )
 
@@ -319,6 +351,7 @@ def project_pca(
     features: ArrayLike,
     *,
     fitted: PCAResult,
+    dtype: type[np.floating] | None = None,
 ) -> PCAResult:
     """Project new features using a previously fitted PCA.
 
@@ -327,11 +360,16 @@ def project_pca(
     way to project a second dataset (e.g. a different system) onto the
     same principal component axes for direct comparison.
 
+    Sklearn PCA requires float64 internally; the *dtype* parameter
+    controls the dtype of the **output** arrays only.
+
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
             Must have the same number of features as the fitted PCA.
         fitted: PCAResult from a previous ``compute_pca`` call whose
             principal component axes will be used.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         PCAResult with projections onto the fitted PCA axes.  The
@@ -341,6 +379,7 @@ def project_pca(
     Raises:
         ValueError: If the feature dimension does not match the fitted PCA.
     """
+    resolved = resolve_dtype(dtype)
     feature_matrix = _as_feature_matrix(features)
     expected_dim = fitted.feature_mean.shape[0]
     if feature_matrix.shape[1] != expected_dim:
@@ -349,8 +388,11 @@ def project_pca(
             f"expected {expected_dim} (from fitted PCA)."
         )
 
-    transformed = (feature_matrix - fitted.feature_mean) / fitted.feature_scale
-    projections = np.asarray(fitted.model.transform(transformed), dtype=np.float64)
+    # Standardize in float64 for numerical stability, then cast output.
+    feature_mean_f64 = np.asarray(fitted.feature_mean, dtype=np.float64)
+    feature_scale_f64 = np.asarray(fitted.feature_scale, dtype=np.float64)
+    transformed = (feature_matrix - feature_mean_f64) / feature_scale_f64
+    projections = np.asarray(fitted.model.transform(transformed), dtype=resolved)
     return PCAResult(
         projections=projections,
         components=fitted.components,
@@ -366,17 +408,24 @@ def compute_tica(
     *,
     lagtime: int,
     n_components: int = 2,
+    dtype: type[np.floating] | None = None,
 ) -> TICAResult:
     """Compute TICA projection from feature vectors.
+
+    Deeptime requires float64 internally; the *dtype* parameter
+    controls the dtype of the **output** arrays only.
 
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
         lagtime: Lag time in frames.
         n_components: Number of independent components.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         TICAResult containing projected coordinates and fitted model.
     """
+    resolved = resolve_dtype(dtype)
     feature_matrix = _as_feature_matrix(features)
     if lagtime < 1:
         raise ValueError("lagtime must be >= 1.")
@@ -389,7 +438,7 @@ def compute_tica(
 
     estimator = TICA(lagtime=lagtime, dim=n_components)
     model = estimator.fit(feature_matrix).fetch_model()
-    projections = np.asarray(model.transform(feature_matrix), dtype=np.float64)
+    projections = np.asarray(model.transform(feature_matrix), dtype=resolved)
     return TICAResult(
         projections=projections,
         lagtime=lagtime,
