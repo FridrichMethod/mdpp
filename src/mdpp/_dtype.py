@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from mdpp._types import DtypeArg
+
 _VALID_DTYPES = frozenset({np.dtype(np.float32), np.dtype(np.float64)})
 _default_dtype = np.dtype(np.float32)
 
@@ -37,7 +39,9 @@ def get_default_dtype() -> np.dtype[np.floating]:
     return _default_dtype
 
 
-def set_default_dtype(dtype: type[np.floating] | np.dtype[np.floating]) -> None:
+def set_default_dtype(
+    dtype: type[np.floating] | np.dtype[np.floating],
+) -> None:  # not DtypeArg (None disallowed)
     """Set the package-wide default float dtype.
 
     Args:
@@ -54,7 +58,7 @@ def set_default_dtype(dtype: type[np.floating] | np.dtype[np.floating]) -> None:
 
 
 def resolve_dtype(
-    dtype: type[np.floating] | np.dtype[np.floating] | None,
+    dtype: DtypeArg,
 ) -> np.dtype[np.floating]:
     """Resolve the effective dtype for a function call.
 

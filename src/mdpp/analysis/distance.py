@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import select_atom_indices, trajectory_time_ps
 
 
@@ -37,7 +38,7 @@ def compute_distances(
     atom_pairs: ArrayLike,
     periodic: bool = True,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DistanceResult:
     """Compute pairwise distances between atom pairs over time.
 
@@ -71,7 +72,7 @@ def compute_minimum_distance(
     group2: str,
     periodic: bool = True,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DistanceResult:
     """Compute the minimum distance between two atom groups per frame.
 

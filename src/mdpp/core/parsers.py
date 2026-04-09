@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from mdpp._dtype import resolve_dtype
-from mdpp._types import StrPath
+from mdpp._types import DtypeArg, StrPath
 
 _LEGEND_PATTERN = re.compile(r's(\d+)\s+legend\s+"(.+)"', re.IGNORECASE)
 
@@ -84,7 +84,7 @@ def _build_column_names(meta: _XVGMetadata, n_cols: int) -> list[str]:
 def read_xvg(
     path: StrPath,
     *,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> pd.DataFrame:
     """Read a GROMACS XVG file into a DataFrame.
 

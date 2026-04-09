@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import trajectory_time_ps
 
 
@@ -125,7 +126,7 @@ def compute_hbonds(
     distance_cutoff_nm: float = 0.25,
     angle_cutoff_deg: float = 120.0,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> HBondResult:
     """Compute hydrogen bonds and per-frame counts.
 

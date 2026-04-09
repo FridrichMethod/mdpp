@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
-from mdpp._types import PathLike
+from mdpp._types import DtypeArg, PathLike
 
 
 def select_atom_indices(topology: md.Topology, selection: str) -> NDArray[np.int_]:
@@ -54,7 +54,7 @@ def trajectory_time_ps(
     traj: md.Trajectory,
     *,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> NDArray[np.floating]:
     """Return per-frame time values in picoseconds.
 

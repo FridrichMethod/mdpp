@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import select_atom_indices
 
 
@@ -38,7 +39,7 @@ def compute_rmsd_matrix(
     traj: md.Trajectory,
     *,
     atom_selection: str = "backbone",
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> RMSDMatrixResult:
     """Compute an all-vs-all RMSD matrix between trajectory frames.
 

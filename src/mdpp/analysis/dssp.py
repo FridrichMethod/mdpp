@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +38,7 @@ def compute_dssp(
     traj: md.Trajectory,
     *,
     simplified: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DSSPResult:
     """Compute per-residue secondary structure assignments across frames.
 

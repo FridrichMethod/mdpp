@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import (
     residue_ids_from_indices,
     select_atom_indices,
@@ -134,7 +135,7 @@ def compute_rmsd(
     atom_selection: str = "backbone",
     reference_frame: int = 0,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> RMSDResult:
     """Compute RMSD over time.
 
@@ -175,7 +176,7 @@ def compute_rmsf(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> RMSFResult:
     """Compute per-atom RMSF from positional fluctuations.
 
@@ -209,7 +210,7 @@ def compute_dccm(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DCCMResult:
     """Compute dynamic cross-correlation matrix (DCCM).
 
@@ -267,7 +268,7 @@ def compute_sasa(
     probe_radius: float = 0.14,
     n_sphere_points: int = 960,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> SASAResult:
     """Compute solvent-accessible surface area via Shrake-Rupley.
 
@@ -325,7 +326,7 @@ def compute_radius_of_gyration(
     *,
     atom_selection: str = "protein",
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> RadiusOfGyrationResult:
     """Compute radius of gyration over time.
 
@@ -353,7 +354,7 @@ def compute_radius_of_gyration(
 def _average_rmsf_with_sem(
     results: list[RMSFResult],
     *,
-    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating] | None]:
     """Average RMSF across replicas in MSF space and propagate SEM.
 
@@ -400,7 +401,7 @@ def compute_delta_rmsf(
     indices_a: NDArray[np.int_] | None = None,
     indices_b: NDArray[np.int_] | None = None,
     residue_ids: NDArray[np.int_] | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DeltaRMSFResult:
     """Compute per-residue RMSF difference between two systems.
 

@@ -11,6 +11,7 @@ from numpy.typing import ArrayLike, NDArray
 from sklearn.decomposition import PCA
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import select_atom_indices
 
 
@@ -77,7 +78,7 @@ def featurize_backbone_torsions(
     *,
     atom_selection: str | None = "protein",
     periodic: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> TorsionFeatures:
     """Featurize backbone phi/psi torsions.
 
@@ -205,7 +206,7 @@ def _pairwise_distances_mdtraj(
     pairs: NDArray[np.int_],
     *,
     periodic: bool,
-    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> NDArray[np.floating]:
     """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
 
@@ -235,7 +236,7 @@ def featurize_ca_distances(
     atom_selection: str = "name CA",
     backend: DistanceBackend = "numba",
     periodic: bool = False,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> DistanceFeatures:
     """Featurize all pairwise distances between selected atoms.
 
@@ -306,7 +307,7 @@ def compute_pca(
     *,
     n_components: int = 2,
     standardize: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> PCAResult:
     """Compute PCA projection from feature vectors.
 
@@ -354,7 +355,7 @@ def project_pca(
     features: ArrayLike,
     *,
     fitted: PCAResult,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> PCAResult:
     """Project new features using a previously fitted PCA.
 
@@ -405,7 +406,7 @@ def compute_tica(
     *,
     lagtime: int,
     n_components: int = 2,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> TICAResult:
     """Compute TICA projection from feature vectors.
 

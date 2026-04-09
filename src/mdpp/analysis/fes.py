@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.constants import DEFAULT_TEMPERATURE_K, GAS_CONSTANT_KJ_MOL_K
 
 type BinsType = int | tuple[int, int]
@@ -45,7 +46,7 @@ def compute_fes_2d(
     temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> FES2DResult:
     """Compute a 2D free-energy surface from two collective variables.
 
@@ -118,7 +119,7 @@ def compute_fes_from_projection(
     temperature_k: float = DEFAULT_TEMPERATURE_K,
     min_probability: float = 1e-12,
     mask_unsampled: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> FES2DResult:
     """Compute a 2D FES from a projection matrix.
 

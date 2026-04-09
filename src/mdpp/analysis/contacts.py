@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
 from mdpp.core.trajectory import trajectory_time_ps
 
 
@@ -48,7 +49,7 @@ def compute_contacts(
     scheme: str = "closest-heavy",
     periodic: bool = True,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> ContactResult:
     """Compute inter-residue contact distances over time.
 
@@ -85,7 +86,7 @@ def compute_contact_frequency(
     cutoff_nm: float = 0.45,
     scheme: str = "closest-heavy",
     periodic: bool = True,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> tuple[NDArray[np.floating], NDArray[np.int_]]:
     """Compute the fraction of frames each residue pair is in contact.
 
@@ -120,7 +121,7 @@ def compute_native_contacts(
     scheme: str = "closest-heavy",
     periodic: bool = True,
     timestep_ps: float | None = None,
-    dtype: type[np.floating] | None = None,
+    dtype: DtypeArg = None,
 ) -> NativeContactResult:
     """Compute the fraction of native contacts Q(t) over time.
 
