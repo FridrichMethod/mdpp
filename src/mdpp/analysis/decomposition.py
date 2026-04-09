@@ -147,6 +147,11 @@ def _pairwise_distances_numba(
     Parallelises the frame loop using ``prange``, giving ~5x speedup over
     mdtraj's single-threaded C/SSE kernel on multi-core machines.
 
+    The kernel outputs float64 because Numba maps Python ``float()``
+    casts to double precision in its type system.  Changing the output
+    dtype would require a separate JIT specialization.  Callers cast
+    the result to the resolved dtype after the kernel returns.
+
     **Limitations compared to mdtraj:**
 
     - No periodic boundary condition (minimum image convention) support.
@@ -404,8 +409,9 @@ def compute_tica(
 ) -> TICAResult:
     """Compute TICA projection from feature vectors.
 
-    Deeptime requires float64 internally; the *dtype* parameter
-    controls the dtype of the **output** arrays only.
+    Deeptime upcasts to float64 internally for covariance estimation,
+    so the input dtype does not affect numerical accuracy.  The *dtype*
+    parameter controls the dtype of the **output** arrays only.
 
     Args:
         features: Input feature matrix ``(n_samples, n_features)``.
@@ -428,11 +434,9 @@ def compute_tica(
 
     from deeptime.decomposition import TICA
 
-    # Deeptime covariance estimation requires float64 internally.
-    feature_f64 = feature_matrix.astype(np.float64)
     estimator = TICA(lagtime=lagtime, dim=n_components)
-    model = estimator.fit(feature_f64).fetch_model()
-    projections = np.asarray(model.transform(feature_f64), dtype=resolved)
+    model = estimator.fit(feature_matrix).fetch_model()
+    projections = np.asarray(model.transform(feature_matrix), dtype=resolved)
     return TICAResult(
         projections=projections,
         lagtime=lagtime,

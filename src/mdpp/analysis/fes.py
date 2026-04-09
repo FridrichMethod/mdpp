@@ -49,8 +49,9 @@ def compute_fes_2d(
 ) -> FES2DResult:
     """Compute a 2D free-energy surface from two collective variables.
 
-    The histogram, log-probability, and energy calculations are performed
-    in float64 for numerical stability. Output arrays are cast to *dtype*.
+    ``np.histogram2d`` returns float64 probability density regardless of
+    input dtype, so the log/energy arithmetic naturally runs in float64.
+    Output arrays are cast to *dtype*.
 
     Args:
         x_values: Samples for CV1.
@@ -71,8 +72,8 @@ def compute_fes_2d(
     if min_probability <= 0.0:
         raise ValueError("min_probability must be positive.")
 
-    x_array = np.ravel(np.asarray(x_values, dtype=np.float64))
-    y_array = np.ravel(np.asarray(y_values, dtype=np.float64))
+    x_array = np.ravel(np.asarray(x_values))
+    y_array = np.ravel(np.asarray(y_values))
     if x_array.shape != y_array.shape:
         raise ValueError("x_values and y_values must have matching shape.")
     if x_array.size < 2:
@@ -85,8 +86,6 @@ def compute_fes_2d(
         range=value_range,
         density=True,
     )
-    probability_density = np.asarray(probability_density, dtype=np.float64)
-
     observed_mask = probability_density > min_probability
     if mask_unsampled and not np.any(observed_mask):
         raise ValueError("No sampled bins remain. Reduce min_probability or adjust bins.")
@@ -137,7 +136,7 @@ def compute_fes_from_projection(
     Returns:
         FES2DResult computed from selected projection components.
     """
-    projection_array = np.asarray(projection, dtype=np.float64)
+    projection_array = np.asarray(projection)
     if projection_array.ndim != 2:
         raise ValueError("projection must be a 2D array.")
     if projection_array.shape[1] <= max(x_index, y_index):

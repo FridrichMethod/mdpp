@@ -108,7 +108,7 @@ def compute_contact_frequency(
         scheme=scheme,
         periodic=periodic,
     )
-    frequency = np.mean(distances < cutoff_nm, axis=0, dtype=np.float64)
+    frequency = np.mean(distances < cutoff_nm, axis=0)
     return np.asarray(frequency, dtype=resolved), np.asarray(pairs, dtype=np.int_)
 
 
@@ -165,7 +165,7 @@ def compute_native_contacts(
     native_pairs = pairs[native_mask]
     native_distances = distances[:, native_mask]
     resolved = resolve_dtype(dtype)
-    fraction = np.mean(native_distances < cutoff_nm, axis=1, dtype=np.float64)
+    fraction = np.mean(native_distances < cutoff_nm, axis=1)
 
     return NativeContactResult(
         time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),

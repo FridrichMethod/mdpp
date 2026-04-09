@@ -1,6 +1,25 @@
 """Package-wide floating-point dtype configuration.
 
-Default is ``np.float32`` (matches MD simulation precision).
+Default is ``np.float32``, which matches the precision of MD trajectory
+coordinates (mdtraj stores ``traj.xyz`` as float32) and is sufficient
+for all analysis operations in this package.
+
+Float64 is **not** forced anywhere in the analysis pipeline.  The only
+places where float64 appears are:
+
+- **Numba JIT kernel** (``decomposition._pairwise_distances_numba``):
+  the compiled kernel outputs float64 due to Numba's ``float()`` cast
+  semantics; callers cast the result to the resolved dtype afterward.
+- **Deeptime TICA** (``decomposition.compute_tica``): deeptime upcasts
+  to float64 internally for covariance estimation -- no explicit cast
+  is needed from our side.
+- **``np.histogram2d``** (``fes.compute_fes_2d``): returns float64
+  probability density regardless of input dtype (edges follow the
+  input dtype); the downstream log and energy arithmetic therefore
+  runs in float64 naturally.
+- **``np.mean`` on boolean arrays** (contacts, h-bonds): NumPy defaults
+  to float64 for boolean reductions.
+
 Use ``set_default_dtype(np.float64)`` to switch globally, or pass
 ``dtype=np.float64`` to individual functions.
 """

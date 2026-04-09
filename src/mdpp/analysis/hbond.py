@@ -181,9 +181,7 @@ def compute_hbonds(
     resolved = resolve_dtype(dtype)
     count_per_frame = np.sum(presence, axis=1, dtype=np.int_)
     occupancy = (
-        np.mean(presence, axis=0, dtype=np.float64)
-        if presence.shape[1] > 0
-        else np.empty((0,), dtype=resolved)
+        np.mean(presence, axis=0) if presence.shape[1] > 0 else np.empty((0,), dtype=resolved)
     )
     return HBondResult(
         time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
