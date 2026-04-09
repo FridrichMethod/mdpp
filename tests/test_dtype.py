@@ -26,10 +26,9 @@ class TestSetDefaultDtype:
     """Tests for set_default_dtype."""
 
     def test_set_default_dtype_float64(self) -> None:
-        set_default_dtype(np.float64)
-        assert get_default_dtype() == np.dtype(np.float64)
-        # Restore default for other tests.
-        set_default_dtype(np.float32)
+        with default_dtype(np.float32):  # restore on exit
+            set_default_dtype(np.float64)
+            assert get_default_dtype() == np.dtype(np.float64)
 
     def test_set_default_dtype_invalid_raises(self) -> None:
         with pytest.raises(ValueError, match="float32 or float64"):
@@ -47,10 +46,13 @@ class TestDefaultDtypeContextManager:
 
     def test_context_manager_restores_on_exception(self) -> None:
         assert get_default_dtype() == np.dtype(np.float32)
-        with pytest.raises(RuntimeError, match="boom"), default_dtype(np.float64):
-            assert get_default_dtype() == np.dtype(np.float64)
-            raise RuntimeError("boom")
-        assert get_default_dtype() == np.dtype(np.float32)  # type: ignore[unreachable]
+        try:
+            with default_dtype(np.float64):
+                assert get_default_dtype() == np.dtype(np.float64)
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert get_default_dtype() == np.dtype(np.float32)
 
 
 class TestResolveDtype:

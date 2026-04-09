@@ -73,7 +73,7 @@ def compute_contacts(
         periodic=periodic,
     )
     return ContactResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         distances_nm=np.asarray(distances, dtype=resolved),
         residue_pairs=np.asarray(pairs, dtype=np.int_),
     )
@@ -168,7 +168,7 @@ def compute_native_contacts(
     fraction = np.mean(native_distances < cutoff_nm, axis=1, dtype=np.float64)
 
     return NativeContactResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         fraction=np.asarray(fraction, dtype=resolved),
         native_pairs=np.asarray(native_pairs, dtype=np.int_),
         cutoff_nm=float(cutoff_nm),

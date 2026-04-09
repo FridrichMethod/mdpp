@@ -201,7 +201,7 @@ def _pairwise_distances_mdtraj(
     pairs: NDArray[np.int_],
     *,
     periodic: bool,
-    dtype: type[np.floating] | None = None,
+    dtype: type[np.floating] | np.dtype[np.floating] | None = None,
 ) -> NDArray[np.floating]:
     """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
 
@@ -292,7 +292,7 @@ def featurize_ca_distances(
         # Numba JIT kernel always outputs float64; cast to resolved dtype.
         values = np.asarray(_pairwise_distances_numba(sliced.xyz, pairs), dtype=resolved)
     else:
-        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic, dtype=dtype)
+        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic, dtype=resolved)
 
     return DistanceFeatures(values=values, pairs=pairs, atom_indices=atom_indices)
 

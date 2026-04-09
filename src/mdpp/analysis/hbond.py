@@ -186,7 +186,7 @@ def compute_hbonds(
         else np.empty((0,), dtype=resolved)
     )
     return HBondResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         triplets=triplets,
         presence=presence,
         count_per_frame=np.asarray(count_per_frame, dtype=np.int_),

@@ -58,7 +58,7 @@ def compute_distances(
 
     distances = md.compute_distances(traj, pairs, periodic=periodic)
     return DistanceResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         distances_nm=np.asarray(distances, dtype=resolved),
         atom_pairs=pairs,
     )
@@ -106,7 +106,7 @@ def compute_minimum_distance(
     closest_pair = pairs[min_indices[0]].reshape(1, 2)
 
     return DistanceResult(
-        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=dtype),
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         distances_nm=np.asarray(min_distances.reshape(-1, 1), dtype=resolved),
         atom_pairs=closest_pair,
     )
