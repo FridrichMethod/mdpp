@@ -138,8 +138,6 @@ def _pairwise_distances_numba(
     - No periodic boundary condition (minimum image convention) support.
       Use ``backend="mdtraj"`` if the trajectory has unit-cell information
       and PBC distances are required.
-    - Pair indices are not bounds-checked at the Numba level; out-of-range
-      indices will produce garbage or segfault.
     - Returns float64 (mdtraj returns float32).
 
     Args:
@@ -150,7 +148,17 @@ def _pairwise_distances_numba(
     Returns:
         Distances of shape ``(n_frames, n_pairs)`` in the same unit as
         *xyz* (nm for mdtraj trajectories).
+
+    Raises:
+        ValueError: If any pair index is out of range.
     """
+    n_atoms = xyz.shape[1]
+    if pairs.size > 0 and (np.any(pairs < 0) or np.any(pairs >= n_atoms)):
+        raise ValueError(
+            f"atom_pairs must contain indices in [0, {n_atoms}), "
+            f"got range [{int(pairs.min())}, {int(pairs.max())}]."
+        )
+
     from numba import njit, prange
 
     @njit(parallel=True, cache=True)

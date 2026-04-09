@@ -183,6 +183,24 @@ class TestNumbaKernel:
         result = _pairwise_distances_numba(xyz, pairs)
         assert result.dtype == np.float64
 
+    def test_out_of_range_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[0, 5]], dtype=np.int_)  # 5 >= 3 atoms
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_numba(xyz, pairs)
+
+    def test_negative_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[-1, 1]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_numba(xyz, pairs)
+
+    def test_empty_pairs(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.empty((0, 2), dtype=np.int_)
+        result = _pairwise_distances_numba(xyz, pairs)
+        assert result.shape == (2, 0)
+
 
 class TestMdtrajKernel:
     """Direct tests on _pairwise_distances_mdtraj."""
