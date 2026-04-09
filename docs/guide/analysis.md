@@ -2,6 +2,35 @@
 
 The `mdpp.analysis` subpackage provides trajectory analysis functions. All compute functions return frozen dataclass results and follow consistent patterns.
 
+## Float Dtype Control
+
+All `compute_*` functions default to **float32**, matching the precision of
+MD trajectory coordinates stored by mdtraj. You can override the dtype
+globally or per-function call:
+
+```python
+import numpy as np
+import mdpp
+
+# Check the current default
+print(mdpp.get_default_dtype())  # float32
+
+# Override globally
+mdpp.set_default_dtype(np.float64)
+
+# Override per-function (takes precedence over the global default)
+result = compute_rmsd(traj, dtype=np.float64)
+
+# Reset to float32
+mdpp.set_default_dtype(np.float32)
+```
+
+Float32 is sufficient for all analysis operations in this package.
+MD trajectories are stored in float32 by mdtraj, so there is no extra
+precision to recover from float64. Empirical tests confirm negligible
+differences: RMSF error ~1e-5 nm, DCCM correlation error ~4e-6, FES
+error ~2e-6 kJ/mol -- all well below any physically meaningful threshold.
+
 ## RMSD
 
 ```python

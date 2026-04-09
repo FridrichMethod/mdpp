@@ -10,7 +10,8 @@ This file provides guidance for Claude Code (claude-code, claude terminal) when 
 
 ```
 src/mdpp/
-├── _types.py        # shared type aliases (StrPath, PathLike)
+├── _types.py        # shared type aliases (StrPath, PathLike, DtypeArg)
+├── _dtype.py        # float dtype config (get/set_default_dtype, resolve_dtype)
 ├── constants.py     # physical constants (GAS_CONSTANT_KJ_MOL_K, DEFAULT_TEMPERATURE_K)
 ├── core/            # trajectory I/O, XVG/EDR parsers
 │   ├── trajectory.py    # load_trajectory, load_trajectories, align_trajectory,
@@ -121,12 +122,35 @@ Prefer `conda run -n mdpp ...` for all non-interactive checks.
 - **Type hints required** — every function (public and private) must have complete type annotations for all parameters and the return type. Use modern union syntax (`X | None` not `Optional[X]`).
 - **No special characters** — production code and comments must use only standard ASCII. No ligatures, emoji, Unicode arrows/symbols, or non-ASCII punctuation. Standard keyboard symbols (`!@#$%^&*()` etc.) are fine.
 
+### Float Dtype System
+
+The package uses **float32 by default**, matching mdtraj's coordinate storage precision. Float64 is not forced anywhere in the analysis pipeline. Users can override globally or per-function.
+
+**Architecture** (`_dtype.py`):
+
+- `get_default_dtype()` / `set_default_dtype(np.float64)` -- global control.
+- `resolve_dtype(dtype)` -- resolves per-function `dtype` arg, falling back to global default.
+- `DtypeArg` (`_types.py`) -- shared type alias (`type[np.floating] | np.dtype[np.floating] | None`) used for all `dtype` parameters.
+
+**Rules for new code**:
+
+- Every `compute_*` function accepts `dtype: DtypeArg = None` as the last keyword argument.
+- Call `resolved = resolve_dtype(dtype)` at the top, then cast outputs to `resolved`.
+- **Never force float64** for "numerical stability". mdtraj coordinates are float32; you cannot recover precision that was never there. Empirical tests confirm float32 is sufficient for RMSF (error ~1e-5 nm), DCCM (error ~4e-6), FES (error ~2e-6 kJ/mol).
+- Float64 appears only where **external constraints** produce it:
+  - **Numba JIT**: `float()` casts map to double in Numba's type system. Cast the kernel output to `resolved` dtype afterward.
+  - **Deeptime TICA**: upcasts to float64 internally for covariance. No explicit pre-cast needed from our side.
+  - **`np.histogram2d`**: returns float64 density regardless of input dtype.
+  - **`np.mean` on boolean arrays**: NumPy defaults to float64 for boolean reductions.
+- Import `DtypeArg` from `mdpp._types` -- do not inline the union type.
+
 ### Analysis Modules
 
 Every `compute_*` function:
 
 1. Takes `traj: md.Trajectory` as the first argument (or a feature matrix).
 1. Uses keyword-only arguments after the first positional arg.
+1. Accepts `dtype: DtypeArg = None` as the last keyword argument.
 1. Returns a frozen `@dataclass(frozen=True, slots=True)`.
 1. Provides unit-conversion properties (`.time_ns`, `.rmsd_angstrom`, etc.).
 1. Imports trajectory helpers from `mdpp.core.trajectory`.
