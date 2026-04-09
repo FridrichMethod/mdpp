@@ -193,10 +193,11 @@ def compute_rmsf(
     """
     resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
-    positions_nm = traj.xyz[:, atom_indices, :]
+    # Upcast to float64 for sum-of-squares accumulation stability
+    positions_nm = traj.xyz[:, atom_indices, :].astype(np.float64)
     mean_positions_nm = np.mean(positions_nm, axis=0)
     squared_displacements = np.sum((positions_nm - mean_positions_nm) ** 2, axis=2)
-    rmsf_nm = np.sqrt(np.mean(squared_displacements, axis=0, dtype=np.float64))
+    rmsf_nm = np.sqrt(np.mean(squared_displacements, axis=0))
     residue_ids = residue_ids_from_indices(traj.topology, atom_indices)
     return RMSFResult(
         rmsf_nm=np.asarray(rmsf_nm, dtype=resolved),
@@ -234,11 +235,11 @@ def compute_dccm(
         raise ValueError("DCCM requires at least two frames.")
 
     atom_indices = select_atom_indices(traj.topology, atom_selection)
-    positions_nm = traj.xyz[:, atom_indices, :]
+    # Upcast to float64 before covariance: einsum on float32 loses precision.
+    positions_nm = traj.xyz[:, atom_indices, :].astype(np.float64)
     mean_positions_nm = np.mean(positions_nm, axis=0)
     fluctuation_nm = positions_nm - mean_positions_nm
 
-    # Covariance computed in float64 for numerical stability.
     covariance = np.einsum("fid,fjd->ij", fluctuation_nm, fluctuation_nm) / float(traj.n_frames)
     standard_deviation = np.sqrt(np.clip(np.diag(covariance), a_min=0.0, a_max=None))
     normalization = np.outer(standard_deviation, standard_deviation)
