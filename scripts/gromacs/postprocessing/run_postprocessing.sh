@@ -9,6 +9,17 @@ RED='\033[31m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+PRODUCTION=step5_production
+
+usage() {
+    printf '%bUsage: %s [-j N] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
+    printf '%b  -j N  Limit to N parallel jobs (default: unlimited)%b\n' "${RED}" "${RESET}" >&2
+    printf '%b\nRecursively finds simulation directories containing %s.tpr under <directory>.%b\n' "${RED}" "${PRODUCTION}" "${RESET}" >&2
+    printf '%bExample: %s -j 4 results/md/replica2%b\n' "${RED}" "$0" "${RESET}" >&2
+    exit 1
+}
+
+# Max parallel jobs. 0 = unlimited (all subdirectories launch simultaneously).
 MAX_JOBS=0
 
 while getopts "j:" opt; do
@@ -20,19 +31,12 @@ while getopts "j:" opt; do
             }
             MAX_JOBS="${OPTARG}"
             ;;
-        *)
-            printf '%bUsage: %s [-j max_parallel] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
-            exit 1
-            ;;
+        *) usage ;;
     esac
 done
 shift $((OPTIND - 1))
 
-if [[ $# -ne 1 ]]; then
-    printf '%bUsage: %s [-j max_parallel] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
-    printf '%bExample: %s -j 4 results/md/replica2%b\n' "${RED}" "$0" "${RESET}" >&2
-    exit 1
-fi
+[[ $# -eq 1 ]] || usage
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="$(realpath "$1")"
@@ -49,9 +53,11 @@ RUNNING=0
 declare -A WAITED
 declare -A PID_NAME
 
-for subdir in "${TARGET_DIR}"/*/; do
+# Discover simulation directories by locating ${PRODUCTION}.tpr recursively.
+mapfile -t SIM_DIRS < <(find "${TARGET_DIR}" -name "${PRODUCTION}.tpr" -type f -printf '%h\n' | sort -u)
+
+for subdir in "${SIM_DIRS[@]}"; do
     [[ -d "${subdir}" ]] || continue
-    compgen -G "${subdir}"/*.xtc >/dev/null || continue
 
     while [[ ${MAX_JOBS} -gt 0 && ${RUNNING} -ge ${MAX_JOBS} ]]; do
         DONE_PID=""
@@ -63,16 +69,18 @@ for subdir in "${TARGET_DIR}"/*/; do
         RUNNING=$((RUNNING - 1))
     done
 
+    label="${subdir#"${TARGET_DIR}"/}"
+
     (
         cd "${subdir}"
-        printf '%b[%s]%b %bStarting:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${BLUE}" "${RESET}" "${BOLD}" "$(basename "${subdir}")" "${RESET}"
+        printf '%b[%s]%b %bStarting:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${BLUE}" "${RESET}" "${BOLD}" "${label}" "${RESET}"
         bash "${SCRIPT_DIR}/gmx_postprocessing_fast.sh"
-        printf '%b[%s]%b %bFinished:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${GREEN}" "${RESET}" "${BOLD}" "$(basename "${subdir}")" "${RESET}"
+        printf '%b[%s]%b %bFinished:%b %b%s%b\n' "${GRAY}" "$(date '+%H:%M:%S')" "${RESET}" "${GREEN}" "${RESET}" "${BOLD}" "${label}" "${RESET}"
     ) &
 
     PIDS+=($!)
-    SUBDIRS+=("$(basename "${subdir}")")
-    PID_NAME[$!]="$(basename "${subdir}")"
+    SUBDIRS+=("${label}")
+    PID_NAME[$!]="${label}"
 
     RUNNING=$((RUNNING + 1))
 done

@@ -28,17 +28,23 @@ def _make_executable(path: Path) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
+PRODUCTION = "step5_production"
+
+
 def _setup_workspace(
     tmp_path: Path,
     subdirs: list[str],
     *,
-    with_xtc: bool = True,
+    with_tpr: bool = True,
     failing: set[str] | None = None,
 ) -> tuple[Path, Path]:
     """Build a fake postprocessing workspace.
 
     Copies run_postprocessing.sh into a temp script dir alongside a stub
     gmx_postprocessing_fast.sh so SCRIPT_DIR resolution picks up the stub.
+
+    ``subdirs`` may contain nested paths (e.g. ``"a/b/c"``); intermediate
+    directories are created automatically via ``mkdir(parents=True)``.
 
     Returns (target_dir, script_copy_path).
     """
@@ -63,14 +69,14 @@ def _setup_workspace(
     stub_path.write_text(stub)
     _make_executable(stub_path)
 
-    # Build target directory with subdirs.
+    # Build target directory with subdirs (supports nested paths).
     target = tmp_path / "target"
     target.mkdir()
     for name in subdirs:
         d = target / name
-        d.mkdir()
-        if with_xtc:
-            (d / "production.xtc").write_text("")
+        d.mkdir(parents=True, exist_ok=True)
+        if with_tpr:
+            (d / f"{PRODUCTION}.tpr").write_text("")
 
     return target, script_copy
 
@@ -122,12 +128,12 @@ class TestNoSubdirs:
         assert "All 0 jobs completed" in _strip_ansi(result.stdout)
 
 
-class TestSubdirsWithoutXtc:
-    """Subdirectories without .xtc files are skipped."""
+class TestSubdirsWithoutTpr:
+    """Subdirectories without step5_production.tpr are skipped."""
 
-    def test_no_xtc_skipped(self, tmp_path: Path) -> None:
-        target, script = _setup_workspace(tmp_path, ["has_xtc", "no_xtc"], with_xtc=False)
-        (target / "has_xtc" / "traj.xtc").write_text("")
+    def test_no_tpr_skipped(self, tmp_path: Path) -> None:
+        target, script = _setup_workspace(tmp_path, ["has_tpr", "no_tpr"], with_tpr=False)
+        (target / "has_tpr" / f"{PRODUCTION}.tpr").write_text("")
         result = _run(script, str(target), cwd=tmp_path)
         assert result.returncode == 0
         assert "All 1 jobs completed" in _strip_ansi(result.stdout)
@@ -161,3 +167,37 @@ class TestMaxJobsFlag:
         result = _run(script, "-j", "2", str(target), cwd=tmp_path)
         assert result.returncode == 0
         assert "All 4 jobs completed" in _strip_ansi(result.stdout)
+
+
+class TestRecursiveDiscovery:
+    """Simulation directories are found recursively via step5_production.tpr."""
+
+    def test_nested_dirs_discovered(self, tmp_path: Path) -> None:
+        """Directories with .tpr files at any depth are processed."""
+        target, script = _setup_workspace(
+            tmp_path,
+            ["level1/level2/sim1", "level1/level2/sim2", "top_sim"],
+        )
+        result = _run(script, str(target), cwd=tmp_path)
+        assert result.returncode == 0
+        assert "All 3 jobs completed" in _strip_ansi(result.stdout)
+
+    def test_intermediate_dirs_without_tpr_skipped(self, tmp_path: Path) -> None:
+        """Intermediate directories that have no .tpr are not processed."""
+        target, script = _setup_workspace(
+            tmp_path,
+            ["parent/child"],
+            with_tpr=False,
+        )
+        # Only the leaf has the TPR
+        (target / "parent" / "child" / f"{PRODUCTION}.tpr").write_text("")
+        result = _run(script, str(target), cwd=tmp_path)
+        assert result.returncode == 0
+        assert "All 1 jobs completed" in _strip_ansi(result.stdout)
+
+    def test_labels_show_relative_path(self, tmp_path: Path) -> None:
+        """Output labels show path relative to target, not just basename."""
+        target, script = _setup_workspace(tmp_path, ["a/b/c"])
+        result = _run(script, str(target), cwd=tmp_path)
+        out = _strip_ansi(result.stdout)
+        assert "a/b/c" in out
