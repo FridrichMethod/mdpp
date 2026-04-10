@@ -197,7 +197,7 @@ class TestUnknownOption:
         (tmp_path / "transformations").mkdir()
 
         result = _run(slurm_env, "--foo", cwd=tmp_path)
-        assert "Unknown option" in result.stderr
+        assert "unknown option" in result.stderr
 
 
 class TestNonJsonFilesIgnored:

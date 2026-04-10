@@ -26,34 +26,56 @@ RESTART=false
 
 usage() {
     cat <<'EOF'
-Usage: check_status.sh [-j N] [-t TARGET_NS] [-r ROOT] [-R]
+Usage: check_status.sh [-j N] [-t TARGET_NS] [-r ROOT] [-R] [-h]
 
 Options:
-    -j N        Number of parallel workers (default: 8)
-    -t TARGET   Target production time in ns; if provided, skip gmx dump on TPR
-    -r ROOT     Root directory to search (default: .)
-    -R          Restart failed simulations via sbatch
-    -h          Show this help
+    -j, --jobs N       Number of parallel workers (default: 8)
+    -t, --target N     Target production time in ns; if provided, skip gmx dump on TPR
+    -r, --root DIR     Root directory to search (default: .)
+    -R, --restart      Restart failed simulations via sbatch
+    -h, --help         Show this help
 EOF
 }
 
-while getopts ":j:t:r:Rh" opt; do
-    case "$opt" in
-        j) JOBS="$OPTARG" ;;
-        t) TARGET_NS="$OPTARG" ;;
-        r) ROOT="$OPTARG" ;;
-        R) RESTART=true ;;
-        h)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j | --jobs)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+                exit 2
+            }
+            JOBS="$2"
+            shift 2
+            ;;
+        -t | --target)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+                exit 2
+            }
+            TARGET_NS="$2"
+            shift 2
+            ;;
+        -r | --root)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+                exit 2
+            }
+            ROOT="$2"
+            shift 2
+            ;;
+        -R | --restart)
+            RESTART=true
+            shift
+            ;;
+        -h | --help)
             usage
             exit 0
             ;;
-        \?)
-            echo "Error: invalid option -$OPTARG" >&2
-            usage
-            exit 2
-            ;;
-        :)
-            echo "Error: option -$OPTARG requires an argument" >&2
+        *)
+            echo "Error: unknown option: $1" >&2
             usage
             exit 2
             ;;

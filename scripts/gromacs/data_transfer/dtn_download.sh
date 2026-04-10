@@ -7,9 +7,9 @@ usage() {
 Usage: ${0##*/} [-j N] [-n] [-h] REMOTE_DIR LOCAL_DIR
 
 Options:
-    -j N    Number of parallel rsync jobs (default: 4)
-    -n      Dry run (show what would be transferred)
-    -h      Show this help
+    -j, --jobs N    Number of parallel rsync jobs (default: 4)
+    -n, --dry-run   Dry run (show what would be transferred)
+    -h, --help      Show this help
 
 Example:
     ${0##*/} -j 4 /scratch/users/\$USER/md_runs /data/local/md_runs
@@ -24,28 +24,32 @@ DRY_RUN=""
 
 SSH_OPTS="ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInterval=60"
 
-while getopts ":j:nh" opt; do
-    case "$opt" in
-        j)
-            [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j | --jobs)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+            }
+            [[ "$2" =~ ^[1-9][0-9]*$ ]] || {
                 echo "Error: -j requires a positive integer" >&2
                 usage
             }
-            JOBS="$OPTARG"
+            JOBS="$2"
+            shift 2
             ;;
-        n) DRY_RUN="--dry-run" ;;
-        h) usage ;;
-        \?)
-            echo "Error: invalid option -$OPTARG" >&2
+        -n | --dry-run)
+            DRY_RUN="--dry-run"
+            shift
+            ;;
+        -h | --help) usage ;;
+        -*)
+            echo "Error: unknown option: $1" >&2
             usage
             ;;
-        :)
-            echo "Error: option -$OPTARG requires an argument" >&2
-            usage
-            ;;
+        *) break ;;
     esac
 done
-shift $((OPTIND - 1))
 [[ $# -eq 2 ]] || usage
 
 REMOTE_DIR="$1"

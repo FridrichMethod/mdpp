@@ -13,7 +13,8 @@ PRODUCTION=step5_production
 
 usage() {
     printf '%bUsage: %s [-j N] <directory>%b\n' "${RED}" "$0" "${RESET}" >&2
-    printf '%b  -j N  Limit to N parallel jobs (default: unlimited)%b\n' "${RED}" "${RESET}" >&2
+    printf '%b  -j, --jobs N  Limit to N parallel jobs (default: unlimited)%b\n' "${RED}" "${RESET}" >&2
+    printf '%b  -h, --help    Show this help%b\n' "${RED}" "${RESET}" >&2
     printf '%b\nRecursively finds simulation directories containing %s.tpr under <directory>.%b\n' "${RED}" "${PRODUCTION}" "${RESET}" >&2
     printf '%bExample: %s -j 4 results/md/replica2%b\n' "${RED}" "$0" "${RESET}" >&2
     exit 1
@@ -22,27 +23,28 @@ usage() {
 # Max parallel jobs. 0 = unlimited (all subdirectories launch simultaneously).
 MAX_JOBS=0
 
-while getopts ":j:h" opt; do
-    case "${opt}" in
-        j)
-            [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j | --jobs)
+            [[ $# -lt 2 ]] && {
+                printf '%bError: %s requires an argument%b\n' "${RED}" "$1" "${RESET}" >&2
+                usage
+            }
+            [[ "$2" =~ ^[1-9][0-9]*$ ]] || {
                 printf '%bError: -j requires a positive integer%b\n' "${RED}" "${RESET}" >&2
                 exit 1
             }
-            MAX_JOBS="${OPTARG}"
+            MAX_JOBS="$2"
+            shift 2
             ;;
-        h) usage ;;
-        \?)
-            printf '%bError: invalid option -%s%b\n' "${RED}" "$OPTARG" "${RESET}" >&2
+        -h | --help) usage ;;
+        -*)
+            printf '%bError: unknown option: %s%b\n' "${RED}" "$1" "${RESET}" >&2
             usage
             ;;
-        :)
-            printf '%bError: option -%s requires an argument%b\n' "${RED}" "$OPTARG" "${RESET}" >&2
-            usage
-            ;;
+        *) break ;;
     esac
 done
-shift $((OPTIND - 1))
 
 [[ $# -eq 1 ]] || usage
 

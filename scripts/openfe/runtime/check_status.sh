@@ -37,32 +37,46 @@ PREEMPT_GRACE_MINUTES=10
 
 usage() {
     cat <<'EOF'
-Usage: check_status.sh [-j N] [-r ROOT] [-R]
+Usage: check_status.sh [-j N] [-r ROOT] [-R] [-h]
 
 Options:
-    -j N        Number of parallel workers (default: 8)
-    -r ROOT     Root directory (default: .)
-    -R          Restart failed replicas via sbatch
-    -h          Show this help
+    -j, --jobs N       Number of parallel workers (default: 8)
+    -r, --root DIR     Root directory (default: .)
+    -R, --restart      Restart failed replicas via sbatch
+    -h, --help         Show this help
 EOF
 }
 
-while getopts ":j:r:Rh" opt; do
-    case "$opt" in
-        j) JOBS="$OPTARG" ;;
-        r) ROOT="$OPTARG" ;;
-        R) RESTART=true ;;
-        h)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j | --jobs)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+                exit 2
+            }
+            JOBS="$2"
+            shift 2
+            ;;
+        -r | --root)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+                exit 2
+            }
+            ROOT="$2"
+            shift 2
+            ;;
+        -R | --restart)
+            RESTART=true
+            shift
+            ;;
+        -h | --help)
             usage
             exit 0
             ;;
-        \?)
-            echo "Error: invalid option -$OPTARG" >&2
-            usage
-            exit 2
-            ;;
-        :)
-            echo "Error: option -$OPTARG requires an argument" >&2
+        *)
+            echo "Error: unknown option: $1" >&2
             usage
             exit 2
             ;;

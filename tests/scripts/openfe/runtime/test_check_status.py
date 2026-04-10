@@ -378,7 +378,7 @@ class TestInvalidOption:
     ) -> None:
         result = _run(slurm_env, "-Z", root=openfe_workspace["root"])
         assert result.returncode == 2
-        assert "invalid option" in result.stderr
+        assert "unknown option" in result.stderr
 
 
 class TestPreemptionDetection:

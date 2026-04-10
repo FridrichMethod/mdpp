@@ -363,7 +363,7 @@ class TestInvalidOption:
 
         result = _run(gmx_env, "-Z", root=root)
         assert result.returncode == 2
-        assert "invalid option" in result.stderr
+        assert "unknown option" in result.stderr
 
 
 class TestNoSimDirs:
