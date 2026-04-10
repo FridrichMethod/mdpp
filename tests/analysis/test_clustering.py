@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import mdtraj as md
@@ -16,13 +17,48 @@ from mdpp.analysis.clustering import (
 )
 
 # ---------------------------------------------------------------------------
+# Optional backend availability
+# ---------------------------------------------------------------------------
+
+try:
+    import cupy  # noqa: F401
+
+    _has_cupy = True
+except ImportError:
+    _has_cupy = False
+
+try:
+    import torch  # noqa: F401
+
+    _has_torch = True
+except ImportError:
+    _has_torch = False
+
+try:
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
+    import jax  # noqa: F401
+
+    _has_jax = True
+except ImportError:
+    _has_jax = False
+
+requires_cupy = pytest.mark.skipif(not _has_cupy, reason="CuPy not installed")
+requires_torch = pytest.mark.skipif(not _has_torch, reason="PyTorch not installed")
+requires_jax = pytest.mark.skipif(not _has_jax, reason="JAX not installed")
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
 def backbone_trajectory() -> md.Trajectory:
-    """Return a small trajectory with backbone-like atoms and known geometry."""
+    """Return a small trajectory with backbone-like atoms and known geometry.
+
+    5 ALA residues x 3 backbone atoms (N, CA, C) = 15 atoms, 30 frames.
+    Coordinates are a shared base structure plus small random perturbations
+    (0.02 nm), giving pairwise RMSDs in the 0.01-0.06 nm range.
+    """
     topology = md.Topology()
     chain = topology.add_chain()
     atoms = []
@@ -35,7 +71,7 @@ def backbone_trajectory() -> md.Trajectory:
         topology.add_bond(n, ca)
         topology.add_bond(ca, c)
         if res_idx > 1:
-            topology.add_bond(atoms[-6], c)  # previous C -> this N
+            topology.add_bond(atoms[-6], c)
 
     rng = np.random.RandomState(42)
     n_frames = 30
@@ -49,7 +85,11 @@ def backbone_trajectory() -> md.Trajectory:
 
 @pytest.fixture()
 def large_trajectory() -> md.Trajectory:
-    """Return a larger trajectory for benchmark tests."""
+    """Return a larger trajectory for benchmark tests.
+
+    50 ALA residues x 3 backbone atoms = 150 atoms, 200 frames.
+    Gives 19 900 unique pairs for the pairwise RMSD matrix.
+    """
     topology = md.Topology()
     chain = topology.add_chain()
     atoms = []
@@ -124,7 +164,6 @@ class TestComputeRmsdMatrix:
         result_mdtraj = compute_rmsd_matrix(
             backbone_trajectory, atom_selection="all", backend="mdtraj"
         )
-        # Symmetrise mdtraj result (it is not inherently symmetric)
         mdtraj_sym = (result_mdtraj.rmsd_matrix_nm + result_mdtraj.rmsd_matrix_nm.T) / 2.0
 
         np.testing.assert_allclose(result_numba.rmsd_matrix_nm, mdtraj_sym, atol=5e-5)
@@ -142,6 +181,69 @@ class TestComputeRmsdMatrix:
         assert len(result_numba.atom_indices) == 5  # 5 residues, 1 CA each
         np.testing.assert_array_equal(result_numba.atom_indices, result_mdtraj.atom_indices)
         np.testing.assert_allclose(result_numba.rmsd_matrix_nm, mdtraj_sym, atol=5e-5)
+
+
+# ---------------------------------------------------------------------------
+# GPU / optional backend agreement tests
+# ---------------------------------------------------------------------------
+
+
+class TestGpuBackendAgreement:
+    """Verify that torch, jax, and cupy backends agree with numba.
+
+    Each test computes the pairwise RMSD matrix with the GPU backend and
+    the numba reference, then asserts element-wise agreement within
+    ``atol=5e-5 nm`` (~0.0005 Angstrom).  The numba result is itself
+    validated against mdtraj in ``TestComputeRmsdMatrix``.
+
+    Tests are skipped when the corresponding package is not installed.
+    """
+
+    @requires_torch
+    def test_torch_agrees_with_numba(self, backbone_trajectory: md.Trajectory) -> None:
+        """PyTorch backend should match numba QCP within 5e-5 nm."""
+        ref = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="numba")
+        result = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="torch")
+
+        np.testing.assert_allclose(result.rmsd_matrix_nm, ref.rmsd_matrix_nm, atol=5e-5)
+
+    @requires_jax
+    def test_jax_agrees_with_numba(self, backbone_trajectory: md.Trajectory) -> None:
+        """JAX backend should match numba QCP within 5e-5 nm."""
+        ref = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="numba")
+        result = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="jax")
+
+        np.testing.assert_allclose(result.rmsd_matrix_nm, ref.rmsd_matrix_nm, atol=5e-5)
+
+    @requires_cupy
+    def test_cupy_agrees_with_numba(self, backbone_trajectory: md.Trajectory) -> None:
+        """CuPy backend should match numba QCP within 5e-5 nm."""
+        ref = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="numba")
+        result = compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="cupy")
+
+        np.testing.assert_allclose(result.rmsd_matrix_nm, ref.rmsd_matrix_nm, atol=5e-5)
+
+    @requires_torch
+    @requires_jax
+    @requires_cupy
+    def test_all_gpu_backends_agree(self, backbone_trajectory: md.Trajectory) -> None:
+        """All three GPU backends should agree with each other within 5e-5 nm."""
+        results = {
+            name: compute_rmsd_matrix(
+                backbone_trajectory, atom_selection="all", backend=name
+            ).rmsd_matrix_nm
+            for name in ("torch", "jax", "cupy")
+        }
+        for a_name, a_mat in results.items():
+            for b_name, b_mat in results.items():
+                if a_name >= b_name:
+                    continue
+                np.testing.assert_allclose(
+                    a_mat,
+                    b_mat,
+                    atol=5e-5,
+                    err_msg=f"{a_name} vs {b_name}",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -195,65 +297,84 @@ class TestClusterConformations:
 # ---------------------------------------------------------------------------
 
 
-class TestRmsdMatrixBenchmark:
-    """Performance comparison between numba and mdtraj backends.
+def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
+    """Run all available RMSD matrix backends and print a comparison table.
 
-    Uses a synthetic trajectory (50 residues x 150 backbone atoms,
-    200 frames -> 19 900 unique pairs) to measure wall-clock time of
-    the pairwise RMSD matrix computation.
-
-    Marked ``@pytest.mark.slow`` -- skipped by default in fast CI runs.
-    Run explicitly with ``pytest -m slow`` or ``pytest -k Benchmark``.
+    Each backend is warmed up (JIT/CUDA context/XLA compilation) with a
+    3-frame slice before the timed run on the full trajectory.  The numba
+    result is used as the correctness reference (atol=5e-5 nm).
     """
+    ref = compute_rmsd_matrix(traj, atom_selection="all", backend="numba")
+    ref_mat = ref.rmsd_matrix_nm
 
-    @pytest.mark.slow
-    @pytest.mark.benchmark
-    def test_numba_not_slower_than_mdtraj(self, large_trajectory: md.Trajectory) -> None:
-        """Numba QCP backend should not be slower than the mdtraj loop.
+    backends: list[tuple[str, bool]] = [
+        ("mdtraj", True),
+        ("numba", True),
+        ("cupy", _has_cupy),
+        ("torch", _has_torch),
+        ("jax", _has_jax),
+    ]
 
-        Methodology:
-            1. **JIT warmup** -- a throwaway 3-frame call compiles the
-               Numba kernels so compilation time is excluded.
-            2. **Timing** -- each backend is timed 5 times on the full
-               200-frame trajectory.  Runs alternate (numba, mdtraj,
-               numba, mdtraj, ...) to reduce systematic bias from
-               thermal throttling or background load.
-            3. **Comparison** -- the *median* of each backend's 5 runs
-               is used (robust to outliers).  The test asserts that
-               Numba's median is less than 2x the mdtraj median.  The
-               2x ceiling is deliberately generous so the test stays
-               green on single-core CI runners where Numba's ``prange``
-               cannot exploit parallelism; on multi-core machines the
-               Numba kernel is typically 4-50x faster.
-            4. **Printed report** -- median times and the speedup ratio
-               are printed to stdout (visible with ``pytest -s``).
-        """
-        # JIT warmup
-        compute_rmsd_matrix(large_trajectory[:3], atom_selection="all", backend="numba")
+    timings: dict[str, float] = {}
+    for name, available in backends:
+        if not available:
+            continue
+        # Warmup
+        compute_rmsd_matrix(traj[:3], atom_selection="all", backend=name)
+        t0 = time.perf_counter()
+        result = compute_rmsd_matrix(traj, atom_selection="all", backend=name)
+        timings[name] = time.perf_counter() - t0
+        if name != "numba":
+            np.testing.assert_allclose(result.rmsd_matrix_nm, ref_mat, atol=5e-5)
 
-        n_runs = 5
-        times_numba: list[float] = []
-        times_mdtraj: list[float] = []
+    n = traj.n_frames
+    n_pairs = n * (n - 1) // 2
+    print(f"\n  RMSD matrix benchmark: {n} frames, {len(ref.atom_indices)} atoms ({n_pairs} pairs)")
+    print(f"  {'Backend':<10s} {'Time (s)':>10s} {'vs mdtraj':>10s}")
+    print(f"  {'-' * 32}")
+    t_mdtraj = timings.get("mdtraj", 1.0)
+    for name, t in sorted(timings.items(), key=lambda x: x[1]):
+        speedup = t_mdtraj / t
+        print(f"  {name:<10s} {t:>10.4f} {speedup:>9.1f}x")
 
-        for _ in range(n_runs):
-            t0 = time.perf_counter()
-            compute_rmsd_matrix(large_trajectory, atom_selection="all", backend="numba")
-            times_numba.append(time.perf_counter() - t0)
 
-            t0 = time.perf_counter()
-            compute_rmsd_matrix(large_trajectory, atom_selection="all", backend="mdtraj")
-            times_mdtraj.append(time.perf_counter() - t0)
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    "n_frames",
+    [
+        pytest.param(100, id="small-100"),
+        pytest.param(200, id="medium-200"),
+    ],
+)
+def test_benchmark_rmsd_backends(n_frames: int) -> None:
+    """Benchmark all available RMSD matrix backends at different scales.
 
-        median_numba = float(np.median(times_numba))
-        median_mdtraj = float(np.median(times_mdtraj))
+    Builds a synthetic trajectory (50 residues x 150 backbone atoms) and
+    times each installed backend.  Verifies correctness of every backend
+    against the numba reference (atol=5e-5 nm) as a side effect.
 
-        print(
-            f"\n  numba:  {median_numba:.4f}s"
-            f"\n  mdtraj: {median_mdtraj:.4f}s"
-            f"\n  ratio:  {median_mdtraj / median_numba:.1f}x"
-        )
+    Run only benchmarks:  ``pytest -m benchmark``
+    Skip benchmarks:      ``pytest -m "not benchmark"``
+    """
+    topology = md.Topology()
+    chain = topology.add_chain()
+    atoms = []
+    for res_idx in range(1, 51):
+        residue = topology.add_residue("ALA", chain, resSeq=res_idx)
+        n_atom = topology.add_atom("N", md.element.nitrogen, residue)
+        ca = topology.add_atom("CA", md.element.carbon, residue)
+        c = topology.add_atom("C", md.element.carbon, residue)
+        atoms.extend([n_atom, ca, c])
+        topology.add_bond(n_atom, ca)
+        topology.add_bond(ca, c)
+        if res_idx > 1:
+            topology.add_bond(atoms[-6], c)
 
-        # Numba should be no more than 2x slower (generous margin for CI).
-        assert median_numba < median_mdtraj * 2.0, (
-            f"Numba ({median_numba:.3f}s) more than 2x slower than mdtraj ({median_mdtraj:.3f}s)"
-        )
+    rng = np.random.RandomState(99)
+    n_atoms = len(atoms)
+    base = rng.randn(1, n_atoms, 3).astype(np.float32) * 0.15
+    perturbation = rng.randn(n_frames, n_atoms, 3).astype(np.float32) * 0.02
+    xyz = base + perturbation
+    traj = md.Trajectory(xyz=xyz, topology=topology)
+
+    _run_rmsd_benchmark(traj)

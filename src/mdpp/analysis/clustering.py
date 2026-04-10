@@ -210,9 +210,170 @@ def _rmsd_matrix_mdtraj(
     return rmsd_matrix
 
 
+# ---------------------------------------------------------------------------
+# Vectorised GPU backends (einsum + batched SVD)
+#
+# All three share the same algorithm:
+#   1. Center each frame, compute per-frame traces.
+#   2. Compute all NxN cross-covariance 3x3 matrices via einsum.
+#   3. Extract upper-triangle pairs and run batched SVD.
+#   4. Handle reflections, compute RMSD from singular values + traces.
+# ---------------------------------------------------------------------------
+
+
+def _rmsd_matrix_torch(
+    traj: md.Trajectory,
+    atom_indices: NDArray[np.int_],
+) -> NDArray[np.float64]:
+    """Compute pairwise RMSD matrix using PyTorch (CUDA if available).
+
+    Uses vectorised ``einsum`` for all pairwise cross-covariance
+    matrices followed by batched ``torch.linalg.svd`` on the 3x3
+    matrices.  Falls back to CPU when no CUDA device is found.
+
+    Raises:
+        ImportError: If PyTorch is not installed.
+    """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "PyTorch is required for backend='torch'. Install with: pip install torch"
+        ) from None
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    with torch.no_grad():
+        xyz = torch.as_tensor(
+            np.ascontiguousarray(traj.xyz[:, atom_indices, :]),
+            dtype=torch.float64,
+            device=device,
+        )
+        n_frames, n_atoms, _ = xyz.shape
+
+        xyz = xyz - xyz.mean(dim=1, keepdim=True)
+        traces = (xyz * xyz).sum(dim=(1, 2))
+
+        H_all = torch.einsum("iak,jal->ijkl", xyz, xyz)
+
+        ii, jj = torch.triu_indices(n_frames, n_frames, offset=1, device=device)
+        H_pairs = H_all[ii, jj]
+
+        U, S, Vh = torch.linalg.svd(H_pairs)
+        d = torch.det(U) * torch.det(Vh)
+        S[:, 2] = torch.where(d < 0, -S[:, 2], S[:, 2])
+
+        rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(dim=1)) / n_atoms
+        rmsd_vals = torch.sqrt(torch.clamp(rmsd_sq, min=0.0))
+
+        result = torch.zeros(n_frames, n_frames, dtype=torch.float64, device=device)
+        result[ii, jj] = rmsd_vals
+        result[jj, ii] = rmsd_vals
+
+    return result.cpu().numpy()
+
+
+def _rmsd_matrix_jax(
+    traj: md.Trajectory,
+    atom_indices: NDArray[np.int_],
+) -> NDArray[np.float64]:
+    """Compute pairwise RMSD matrix using JAX.
+
+    JAX auto-selects the best available device (GPU > TPU > CPU).
+    Uses ``jnp.einsum`` for cross-covariance and ``jnp.linalg.svd``
+    for batched superposition.
+
+    Raises:
+        ImportError: If JAX is not installed.
+    """
+    try:
+        import jax
+        import jax.numpy as jnp
+    except ImportError:
+        raise ImportError(
+            "JAX is required for backend='jax'. Install with: pip install jax[cuda12]"
+        ) from None
+
+    jax.config.update("jax_enable_x64", True)
+
+    xyz = jnp.array(traj.xyz[:, atom_indices, :], dtype=jnp.float64)
+    n_frames, n_atoms, _ = xyz.shape
+
+    xyz = xyz - xyz.mean(axis=1, keepdims=True)
+    traces = (xyz * xyz).sum(axis=(1, 2))
+
+    H_all = jnp.einsum("iak,jal->ijkl", xyz, xyz)
+
+    ii, jj = jnp.triu_indices(n_frames, k=1)
+    H_pairs = H_all[ii, jj]
+
+    U, S, Vh = jnp.linalg.svd(H_pairs)
+    d = jnp.linalg.det(U) * jnp.linalg.det(Vh)
+    S = S.at[:, 2].set(jnp.where(d < 0, -S[:, 2], S[:, 2]))
+
+    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(axis=1)) / n_atoms
+    rmsd_vals = jnp.sqrt(jnp.maximum(0.0, rmsd_sq))
+
+    result = jnp.zeros((n_frames, n_frames), dtype=jnp.float64)
+    result = result.at[ii, jj].set(rmsd_vals)
+    result = result.at[jj, ii].set(rmsd_vals)
+
+    return np.asarray(result)
+
+
+def _rmsd_matrix_cupy(
+    traj: md.Trajectory,
+    atom_indices: NDArray[np.int_],
+) -> NDArray[np.float64]:
+    """Compute pairwise RMSD matrix using CuPy (CUDA).
+
+    Requires a CUDA-capable GPU.  Uses ``cupy.einsum`` for
+    cross-covariance and ``cupy.linalg.svd`` for batched
+    superposition.
+
+    Raises:
+        ImportError: If CuPy is not installed.
+    """
+    try:
+        import cupy as cp
+    except ImportError:
+        raise ImportError(
+            "CuPy is required for backend='cupy'. Install with: pip install cupy-cuda12x"
+        ) from None
+
+    xyz = cp.array(traj.xyz[:, atom_indices, :], dtype=cp.float64)
+    n_frames, n_atoms, _ = xyz.shape
+
+    xyz = xyz - xyz.mean(axis=1, keepdims=True)
+    traces = (xyz * xyz).sum(axis=(1, 2))
+
+    H_all = cp.einsum("iak,jal->ijkl", xyz, xyz)
+
+    ii, jj = (
+        cp.array(np.triu_indices(n_frames, k=1)[0]),
+        cp.array(np.triu_indices(n_frames, k=1)[1]),
+    )
+    H_pairs = H_all[ii, jj]
+
+    U, S, Vh = cp.linalg.svd(H_pairs)
+    d = cp.linalg.det(U) * cp.linalg.det(Vh)
+    S[:, 2] = cp.where(d < 0, -S[:, 2], S[:, 2])
+
+    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(axis=1)) / n_atoms
+    rmsd_vals = cp.sqrt(cp.maximum(0.0, rmsd_sq))
+
+    result = cp.zeros((n_frames, n_frames), dtype=cp.float64)
+    result[ii, jj] = rmsd_vals
+    result[jj, ii] = rmsd_vals
+
+    return cp.asnumpy(result)
+
+
 _BACKENDS: dict[str, _BackendFn] = {
     "numba": _rmsd_matrix_numba,
     "mdtraj": _rmsd_matrix_mdtraj,
+    "torch": _rmsd_matrix_torch,
+    "jax": _rmsd_matrix_jax,
+    "cupy": _rmsd_matrix_cupy,
 }
 
 
@@ -228,9 +389,14 @@ def compute_rmsd_matrix(
     Args:
         traj: Input trajectory.
         atom_selection: Atoms used for RMSD calculation.
-        backend: Computation backend. ``"numba"`` (default) uses a
-            Numba-parallel QCP kernel; ``"mdtraj"`` uses mdtraj's
-            precentered RMSD loop.
+        backend: Computation backend.
+
+            - ``"numba"`` (default) -- Numba-parallel QCP kernel (CPU).
+            - ``"mdtraj"`` -- mdtraj precentered RMSD loop (CPU).
+            - ``"torch"`` -- PyTorch einsum + batched SVD (CUDA/CPU).
+            - ``"jax"`` -- JAX einsum + batched SVD (GPU/TPU/CPU).
+            - ``"cupy"`` -- CuPy einsum + batched SVD (CUDA).
+
         dtype: Output float dtype. If ``None``, uses the package default.
 
     Returns:
@@ -238,6 +404,7 @@ def compute_rmsd_matrix(
 
     Raises:
         ValueError: If an unsupported backend is specified.
+        ImportError: If the requested backend package is not installed.
     """
     if backend not in _BACKENDS:
         raise ValueError(f"Unsupported backend: {backend!r}. Choose from {sorted(_BACKENDS)}.")
