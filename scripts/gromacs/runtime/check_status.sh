@@ -17,6 +17,8 @@ set -euo pipefail
 #   -R      restart failed simulations via sbatch
 #   -h      show help
 
+PRODUCTION=step5_production
+
 JOBS=8
 ROOT="."
 TARGET_NS=""
@@ -95,8 +97,8 @@ build_active_jobs() {
 build_active_jobs >"$ACTIVE_FILE"
 
 find_sim_dirs() {
-    find "$1" -name 'step5_production.tpr' -type f |
-        sed 's#/step5_production\.tpr$##' |
+    find "$1" -name "${PRODUCTION}.tpr" -type f |
+        sed "s#/${PRODUCTION}\\.tpr\$##" |
         sort -u
 }
 
@@ -146,11 +148,11 @@ process_one_dir() {
     local simdir_abs
     simdir_abs="$(cd "$simdir" && pwd -P)"
 
-    local tpr="${simdir_abs}/step5_production.tpr"
-    local cpt="${simdir_abs}/step5_production.cpt"
+    local tpr="${simdir_abs}/${PRODUCTION}.tpr"
+    local cpt="${simdir_abs}/${PRODUCTION}.cpt"
 
     if [[ ! -f "$tpr" ]]; then
-        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}error${c_reset}" "NA/NA" "missing step5_production.tpr"
+        printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}error${c_reset}" "NA/NA" "missing ${PRODUCTION}.tpr"
         return
     fi
 
@@ -221,6 +223,7 @@ process_one_dir() {
     mark_restart "$simdir_abs"
 }
 
+export PRODUCTION
 export -f ps_to_ns ns_to_ps extract_target_ps_from_tpr extract_current_ps_from_cpt mark_restart process_one_dir
 
 printf "directory\tstatus\tprogress\tinfo\n"
