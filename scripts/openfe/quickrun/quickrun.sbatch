@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #SBATCH --job-name=openfe
 #SBATCH --output=logs/openfe_%A_%a.out
 #SBATCH --error=logs/openfe_%A_%a.err

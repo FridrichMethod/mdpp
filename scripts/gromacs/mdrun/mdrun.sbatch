@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #SBATCH --job-name=mdrun
 #SBATCH --output=mdrun_%j.out
 #SBATCH --error=mdrun_%j.err

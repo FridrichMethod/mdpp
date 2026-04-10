@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #SBATCH --job-name=openfe_monitor
 #SBATCH --partition=normal,owners
 #SBATCH --nodes=1

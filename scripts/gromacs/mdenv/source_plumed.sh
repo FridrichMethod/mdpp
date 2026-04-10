@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # This script must be sourced, not executed.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "Error: source this script: . ${0}" >&2
