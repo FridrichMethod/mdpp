@@ -125,7 +125,7 @@ class TestFeaturizeCaDistances:
 
     def test_unknown_backend_raises(self, ca_trajectory: md.Trajectory) -> None:
         with pytest.raises(ValueError, match="Unknown backend"):
-            featurize_ca_distances(ca_trajectory, backend="invalid")
+            featurize_ca_distances(ca_trajectory, backend="invalid")  # type: ignore[arg-type]
 
     def test_residue_ids_preserved(self, ca_trajectory: md.Trajectory) -> None:
         result = featurize_ca_distances(ca_trajectory)

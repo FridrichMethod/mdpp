@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
+from mdpp.analysis._backends import RMSDBackend
 from mdpp.analysis._backends._rmsd_matrix import rmsd_matrix_backends
 from mdpp.core.trajectory import select_atom_indices
 
@@ -49,7 +50,7 @@ def compute_rmsd_matrix(
     traj: md.Trajectory,
     *,
     atom_selection: str = "backbone",
-    backend: str = "numba",
+    backend: RMSDBackend = "numba",
     dtype: DtypeArg = None,
 ) -> RMSDMatrixResult:
     """Compute an all-vs-all RMSD matrix between trajectory frames.

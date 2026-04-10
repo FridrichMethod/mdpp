@@ -97,7 +97,7 @@ class TestComputeRmsdMatrix:
     def test_invalid_backend_raises(self, backbone_trajectory: md.Trajectory) -> None:
         """An unknown backend should raise ValueError."""
         with pytest.raises(ValueError, match="Unknown backend"):
-            compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="bogus")
+            compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="bogus")  # type: ignore[arg-type]
 
     def test_numba_and_mdtraj_agree(self, backbone_trajectory: md.Trajectory) -> None:
         """Numba QCP and mdtraj backends should produce the same matrix."""
@@ -173,7 +173,9 @@ class TestGpuBackendAgreement:
         """All three GPU backends should agree with each other within 5e-5 nm."""
         results = {
             name: compute_rmsd_matrix(
-                backbone_trajectory, atom_selection="all", backend=name
+                backbone_trajectory,
+                atom_selection="all",
+                backend=name,  # type: ignore[arg-type]
             ).rmsd_matrix_nm
             for name in ("torch", "jax", "cupy")
         }
@@ -263,9 +265,9 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
         if not available:
             continue
         # Warmup
-        compute_rmsd_matrix(traj[:3], atom_selection="all", backend=name)
+        compute_rmsd_matrix(traj[:3], atom_selection="all", backend=name)  # type: ignore[arg-type]
         t0 = time.perf_counter()
-        result = compute_rmsd_matrix(traj, atom_selection="all", backend=name)
+        result = compute_rmsd_matrix(traj, atom_selection="all", backend=name)  # type: ignore[arg-type]
         timings[name] = time.perf_counter() - t0
         if name != "numba":
             np.testing.assert_allclose(result.rmsd_matrix_nm, ref_mat, atol=5e-5)

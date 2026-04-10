@@ -45,13 +45,9 @@ from numpy.typing import ArrayLike, NDArray
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
+from mdpp.analysis._backends import DistanceBackend
 from mdpp.analysis._backends._distances import distance_backends
 from mdpp.core.trajectory import select_atom_indices, trajectory_time_ps
-
-type DistanceBackend = str
-
-_VALID_BACKENDS = ("mdtraj", *distance_backends.names)
-
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -171,10 +167,11 @@ def _compute_pairwise_distances(
     resolved = resolve_dtype(dtype)
     if backend == "mdtraj":
         return _pairwise_distances_mdtraj(traj, pairs, periodic=periodic, dtype=resolved)
+    all_backends = ("mdtraj", *distance_backends.names)
     try:
         compute_fn = distance_backends.get(backend)
     except ValueError:
-        raise ValueError(f"Unknown backend {backend!r}. Use one of {_VALID_BACKENDS!r}.") from None
+        raise ValueError(f"Unknown backend {backend!r}. Use one of {all_backends!r}.") from None
     return np.asarray(compute_fn(traj.xyz, pairs), dtype=resolved)
 
 

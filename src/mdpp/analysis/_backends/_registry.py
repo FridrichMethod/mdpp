@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
+type DistanceBackend = Literal["mdtraj", "numba", "cupy", "torch", "jax"]
+"""Valid backend names for pairwise distance computation."""
+
+type RMSDBackend = Literal["mdtraj", "numba", "cupy", "torch", "jax"]
+"""Valid backend names for pairwise RMSD matrix computation."""
+
 
 class BackendRegistry[F]:
     """Map backend name strings to callables of type ``F``.

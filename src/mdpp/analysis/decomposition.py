@@ -12,7 +12,8 @@ from sklearn.decomposition import PCA
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
-from mdpp.analysis.distance import DistanceBackend, _compute_pairwise_distances
+from mdpp.analysis._backends import DistanceBackend
+from mdpp.analysis.distance import _compute_pairwise_distances
 from mdpp.core.trajectory import select_atom_indices
 
 
