@@ -12,6 +12,7 @@
 #SBATCH --error=logs/monitor_%j.err
 
 set -euo pipefail
+mkdir -p logs
 
 # monitor.sbatch
 #
