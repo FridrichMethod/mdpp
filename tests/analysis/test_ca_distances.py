@@ -2,16 +2,53 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis.decomposition import (
-    DistanceFeatures,
+from mdpp.analysis.decomposition import DistanceFeatures, featurize_ca_distances
+from mdpp.analysis.distance import (
+    _pairwise_distances_cupy,
+    _pairwise_distances_jax,
     _pairwise_distances_mdtraj,
     _pairwise_distances_numba,
-    featurize_ca_distances,
+    _pairwise_distances_torch,
 )
+
+# ---------------------------------------------------------------------------
+# Optional GPU library detection
+# ---------------------------------------------------------------------------
+
+try:
+    import cupy  # noqa: F401
+
+    _has_cupy = True
+except ImportError:
+    _has_cupy = False
+
+try:
+    import torch  # noqa: F401
+
+    _has_torch = True
+except ImportError:
+    _has_torch = False
+
+try:
+    import os
+
+    # Force CPU backend in tests to avoid GPU contention under xdist.
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
+    import jax  # noqa: F401
+
+    _has_jax = True
+except ImportError:
+    _has_jax = False
+
+requires_cupy = pytest.mark.skipif(not _has_cupy, reason="CuPy not installed")
+requires_torch = pytest.mark.skipif(not _has_torch, reason="PyTorch not installed")
+requires_jax = pytest.mark.skipif(not _has_jax, reason="JAX not installed")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -45,6 +82,24 @@ def benchmark_traj() -> md.Trajectory:
     rng = np.random.default_rng(42)
     xyz = rng.normal(size=(1000, 100, 3)).astype(np.float32) * 0.1
     return md.Trajectory(xyz=xyz, topology=topology)
+
+
+# ---------------------------------------------------------------------------
+# Shared test data for kernel tests
+# ---------------------------------------------------------------------------
+
+_XYZ_1NM = np.array([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=np.float32)
+_XYZ_3D = np.array([[[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]]], dtype=np.float32)
+_XYZ_SELF = np.array([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]], dtype=np.float32)
+_XYZ_MULTI = np.array(
+    [
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+    ],
+    dtype=np.float32,
+)
+_PAIR_01 = np.array([[0, 1]], dtype=np.int_)
+_PAIR_00 = np.array([[0, 0]], dtype=np.int_)
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +163,7 @@ class TestFeaturizeCaDistances:
 
 
 # ---------------------------------------------------------------------------
-# Backend equivalence
+# Backend equivalence (CPU baselines)
 # ---------------------------------------------------------------------------
 
 
@@ -138,7 +193,7 @@ class TestBackendEquivalence:
 
 
 # ---------------------------------------------------------------------------
-# Low-level kernel tests
+# Low-level kernel tests -- Numba
 # ---------------------------------------------------------------------------
 
 
@@ -147,49 +202,31 @@ class TestNumbaKernel:
 
     def test_known_distance(self) -> None:
         """Two atoms 1 nm apart along x-axis."""
-        xyz = np.array([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=np.float32)
-        pairs = np.array([[0, 1]], dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = _pairwise_distances_numba(_XYZ_1NM, _PAIR_01)
         assert result.shape == (1, 1)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
 
     def test_self_distance_is_zero(self) -> None:
-        """Distance of an atom to itself should be zero."""
-        xyz = np.array([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]], dtype=np.float32)
-        pairs = np.array([[0, 0]], dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = _pairwise_distances_numba(_XYZ_SELF, _PAIR_00)
         assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
 
     def test_3d_distance(self) -> None:
-        """Distance in 3D: sqrt(1 + 4 + 9) = sqrt(14)."""
-        xyz = np.array([[[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]]], dtype=np.float32)
-        pairs = np.array([[0, 1]], dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = _pairwise_distances_numba(_XYZ_3D, _PAIR_01)
         assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
 
     def test_multi_frame(self) -> None:
-        """Distances should vary across frames."""
-        xyz = np.array(
-            [
-                [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-                [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
-            ],
-            dtype=np.float32,
-        )
-        pairs = np.array([[0, 1]], dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = _pairwise_distances_numba(_XYZ_MULTI, _PAIR_01)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
-        pairs = np.array([[0, 1]], dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = _pairwise_distances_numba(xyz, _PAIR_01)
         assert result.dtype == np.float64
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
-        pairs = np.array([[0, 5]], dtype=np.int_)  # 5 >= 3 atoms
+        pairs = np.array([[0, 5]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
             _pairwise_distances_numba(xyz, pairs)
 
@@ -204,6 +241,11 @@ class TestNumbaKernel:
         pairs = np.empty((0, 2), dtype=np.int_)
         result = _pairwise_distances_numba(xyz, pairs)
         assert result.shape == (2, 0)
+
+
+# ---------------------------------------------------------------------------
+# Low-level kernel tests -- mdtraj
+# ---------------------------------------------------------------------------
 
 
 class TestMdtrajKernel:
@@ -231,7 +273,6 @@ class TestMdtrajKernel:
         xyz = np.array([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=np.float32)
         traj = md.Trajectory(xyz=xyz, topology=topology)
         pairs = np.array([[0, 1]], dtype=np.int_)
-        # No unit-cell: periodic=True falls back to non-periodic in mdtraj
         result = _pairwise_distances_mdtraj(traj, pairs, periodic=True)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-5)
 
@@ -259,43 +300,328 @@ class TestMdtrajKernel:
 
 
 # ---------------------------------------------------------------------------
-# Benchmark
+# Low-level kernel tests -- CuPy
 # ---------------------------------------------------------------------------
 
 
-def test_benchmark_numba_vs_mdtraj(benchmark_traj: md.Trajectory) -> None:
-    """Numba kernel should be faster and numerically equivalent to mdtraj."""
+@requires_cupy
+class TestCupyKernel:
+    """Direct tests on _pairwise_distances_cupy."""
+
+    def test_known_distance(self) -> None:
+        result = _pairwise_distances_cupy(_XYZ_1NM, _PAIR_01)
+        assert result.shape == (1, 1)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+
+    def test_self_distance_is_zero(self) -> None:
+        result = _pairwise_distances_cupy(_XYZ_SELF, _PAIR_00)
+        assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
+
+    def test_3d_distance(self) -> None:
+        result = _pairwise_distances_cupy(_XYZ_3D, _PAIR_01)
+        assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
+
+    def test_multi_frame(self) -> None:
+        result = _pairwise_distances_cupy(_XYZ_MULTI, _PAIR_01)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+        assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
+
+    def test_output_dtype_float64(self) -> None:
+        xyz = np.zeros((2, 2, 3), dtype=np.float32)
+        result = _pairwise_distances_cupy(xyz, _PAIR_01)
+        assert result.dtype == np.float64
+
+    def test_out_of_range_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[0, 5]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_cupy(xyz, pairs)
+
+    def test_negative_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[-1, 1]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_cupy(xyz, pairs)
+
+    def test_empty_pairs(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.empty((0, 2), dtype=np.int_)
+        result = _pairwise_distances_cupy(xyz, pairs)
+        assert result.shape == (2, 0)
+
+
+# ---------------------------------------------------------------------------
+# Low-level kernel tests -- PyTorch
+# ---------------------------------------------------------------------------
+
+
+@requires_torch
+class TestTorchKernel:
+    """Direct tests on _pairwise_distances_torch."""
+
+    def test_known_distance(self) -> None:
+        result = _pairwise_distances_torch(_XYZ_1NM, _PAIR_01)
+        assert result.shape == (1, 1)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+
+    def test_self_distance_is_zero(self) -> None:
+        result = _pairwise_distances_torch(_XYZ_SELF, _PAIR_00)
+        assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
+
+    def test_3d_distance(self) -> None:
+        result = _pairwise_distances_torch(_XYZ_3D, _PAIR_01)
+        assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
+
+    def test_multi_frame(self) -> None:
+        result = _pairwise_distances_torch(_XYZ_MULTI, _PAIR_01)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+        assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
+
+    def test_output_dtype_float64(self) -> None:
+        xyz = np.zeros((2, 2, 3), dtype=np.float32)
+        result = _pairwise_distances_torch(xyz, _PAIR_01)
+        assert result.dtype == np.float64
+
+    def test_out_of_range_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[0, 5]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_torch(xyz, pairs)
+
+    def test_negative_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[-1, 1]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_torch(xyz, pairs)
+
+    def test_empty_pairs(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.empty((0, 2), dtype=np.int_)
+        result = _pairwise_distances_torch(xyz, pairs)
+        assert result.shape == (2, 0)
+
+
+# ---------------------------------------------------------------------------
+# Low-level kernel tests -- JAX
+# ---------------------------------------------------------------------------
+
+
+@requires_jax
+class TestJaxKernel:
+    """Direct tests on _pairwise_distances_jax."""
+
+    def test_known_distance(self) -> None:
+        result = _pairwise_distances_jax(_XYZ_1NM, _PAIR_01)
+        assert result.shape == (1, 1)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+
+    def test_self_distance_is_zero(self) -> None:
+        result = _pairwise_distances_jax(_XYZ_SELF, _PAIR_00)
+        assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
+
+    def test_3d_distance(self) -> None:
+        result = _pairwise_distances_jax(_XYZ_3D, _PAIR_01)
+        assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
+
+    def test_multi_frame(self) -> None:
+        result = _pairwise_distances_jax(_XYZ_MULTI, _PAIR_01)
+        assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
+        assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
+
+    def test_output_dtype_float64(self) -> None:
+        xyz = np.zeros((2, 2, 3), dtype=np.float32)
+        result = _pairwise_distances_jax(xyz, _PAIR_01)
+        assert result.dtype == np.float64
+
+    def test_out_of_range_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[0, 5]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_jax(xyz, pairs)
+
+    def test_negative_pair_raises(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.array([[-1, 1]], dtype=np.int_)
+        with pytest.raises(ValueError, match="atom_pairs must contain indices"):
+            _pairwise_distances_jax(xyz, pairs)
+
+    def test_empty_pairs(self) -> None:
+        xyz = np.zeros((2, 3, 3), dtype=np.float32)
+        pairs = np.empty((0, 2), dtype=np.int_)
+        result = _pairwise_distances_jax(xyz, pairs)
+        assert result.shape == (2, 0)
+
+
+# ---------------------------------------------------------------------------
+# Cross-backend numerical equivalence
+# ---------------------------------------------------------------------------
+
+
+class TestAllBackendsEquivalence:
+    """All backends must produce numerically identical results."""
+
+    def _reference(self, traj: md.Trajectory) -> np.ndarray:
+        return featurize_ca_distances(traj, backend="numba").values
+
+    @requires_cupy
+    def test_cupy_matches_numba(self, ca_trajectory: md.Trajectory) -> None:
+        ref = self._reference(ca_trajectory)
+        result = featurize_ca_distances(ca_trajectory, backend="cupy")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_torch
+    def test_torch_matches_numba(self, ca_trajectory: md.Trajectory) -> None:
+        ref = self._reference(ca_trajectory)
+        result = featurize_ca_distances(ca_trajectory, backend="torch")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_jax
+    def test_jax_matches_numba(self, ca_trajectory: md.Trajectory) -> None:
+        ref = self._reference(ca_trajectory)
+        result = featurize_ca_distances(ca_trajectory, backend="jax")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_cupy
+    def test_cupy_matches_numba_large(self, benchmark_traj: md.Trajectory) -> None:
+        ref = self._reference(benchmark_traj)
+        result = featurize_ca_distances(benchmark_traj, backend="cupy")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_torch
+    def test_torch_matches_numba_large(self, benchmark_traj: md.Trajectory) -> None:
+        ref = self._reference(benchmark_traj)
+        result = featurize_ca_distances(benchmark_traj, backend="torch")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_jax
+    def test_jax_matches_numba_large(self, benchmark_traj: md.Trajectory) -> None:
+        ref = self._reference(benchmark_traj)
+        result = featurize_ca_distances(benchmark_traj, backend="jax")
+        np.testing.assert_allclose(result.values, ref, atol=1e-5)
+
+    @requires_cupy
+    def test_cupy_dtype_float32(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="cupy")
+        assert result.values.dtype == np.float32
+
+    @requires_torch
+    def test_torch_dtype_float32(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="torch")
+        assert result.values.dtype == np.float32
+
+    @requires_jax
+    def test_jax_dtype_float32(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="jax")
+        assert result.values.dtype == np.float32
+
+    @requires_cupy
+    def test_cupy_dtype_float64(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="cupy", dtype=np.float64)
+        assert result.values.dtype == np.float64
+
+    @requires_torch
+    def test_torch_dtype_float64(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="torch", dtype=np.float64)
+        assert result.values.dtype == np.float64
+
+    @requires_jax
+    def test_jax_dtype_float64(self, ca_trajectory: md.Trajectory) -> None:
+        result = featurize_ca_distances(ca_trajectory, backend="jax", dtype=np.float64)
+        assert result.values.dtype == np.float64
+
+
+# ---------------------------------------------------------------------------
+# Benchmark -- parametrized multi-scale
+# ---------------------------------------------------------------------------
+
+# Available kernel functions keyed by backend name.
+_KERNELS: dict[str, tuple[bool, Callable[..., np.ndarray]]] = {}
+
+
+def _build_kernel_map() -> dict[str, tuple[bool, Callable[..., np.ndarray]]]:
+    """Build {name: (available, kernel_fn)} mapping, evaluated once."""
+    if _KERNELS:
+        return _KERNELS
+
+    def _run_numba(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
+        return _pairwise_distances_numba(xyz, pairs)
+
+    def _run_cupy(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
+        return _pairwise_distances_cupy(xyz, pairs)
+
+    def _run_torch(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
+        return _pairwise_distances_torch(xyz, pairs)
+
+    def _run_jax(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
+        return _pairwise_distances_jax(xyz, pairs)
+
+    _KERNELS["numba"] = (True, _run_numba)
+    _KERNELS["cupy"] = (_has_cupy, _run_cupy)
+    _KERNELS["torch"] = (_has_torch, _run_torch)
+    _KERNELS["jax"] = (_has_jax, _run_jax)
+    return _KERNELS
+
+
+def _run_benchmark(n_frames: int, n_atoms: int) -> None:
+    """Run all available backends on a synthetic trajectory and print results."""
     import time
 
-    n_atoms = benchmark_traj.n_atoms
+    rng = np.random.default_rng(42)
+    xyz = rng.normal(size=(n_frames, n_atoms, 3)).astype(np.float32) * 0.1
     pairs = np.array(
         [(i, j) for i in range(n_atoms) for j in range(i + 1, n_atoms)],
         dtype=np.int_,
     )
     n_pairs = pairs.shape[0]
-    n_frames = benchmark_traj.n_frames
+    warmup_xyz = xyz[:2]
+    warmup_pairs = pairs[:10]
 
-    # Warm up JIT
-    _pairwise_distances_numba(benchmark_traj.xyz[:2], pairs[:10])
+    # -- mdtraj reference (needs a Trajectory object) --
+    topology = md.Topology()
+    chain = topology.add_chain()
+    for i in range(n_atoms):
+        res = topology.add_residue("ALA", chain, resSeq=i + 1)
+        topology.add_atom("CA", md.element.carbon, res)
+    traj = md.Trajectory(xyz=xyz, topology=topology)
 
-    # Numba
     t0 = time.perf_counter()
-    numba_result = _pairwise_distances_numba(benchmark_traj.xyz, pairs)
-    t_numba = time.perf_counter() - t0
-
-    # mdtraj
-    t0 = time.perf_counter()
-    mdtraj_result = _pairwise_distances_mdtraj(benchmark_traj, pairs, periodic=False)
+    r_mdtraj = _pairwise_distances_mdtraj(traj, pairs, periodic=False)
     t_mdtraj = time.perf_counter() - t0
 
-    # Correctness
-    assert numba_result.shape == (n_frames, n_pairs)
-    np.testing.assert_allclose(numba_result, mdtraj_result, atol=1e-5)
+    timings: dict[str, float] = {"mdtraj": t_mdtraj}
+    kernels = _build_kernel_map()
 
-    # Memory: numba returns float64, mdtraj float32 -> numba is 2x larger per value
-    # but avoids the intermediate allocations mdtraj uses internally
+    for name, (available, fn) in kernels.items():
+        if not available:
+            continue
+        # Warm up (JIT / CUDA context / XLA compile)
+        fn(warmup_xyz, warmup_pairs)
+        t0 = time.perf_counter()
+        r = fn(xyz, pairs)
+        timings[name] = time.perf_counter() - t0
+        np.testing.assert_allclose(r_mdtraj, r, atol=1e-4)
 
-    print(f"\n  {n_frames} frames x {n_atoms} atoms ({n_pairs} pairs)")
-    print(f"  Numba:  {t_numba:.4f}s (float64)")
-    print(f"  mdtraj: {t_mdtraj:.4f}s (float32 -> float64)")
-    print(f"  Speedup: {t_mdtraj / t_numba:.1f}x")
+    print(f"\n  Benchmark: {n_frames} frames x {n_atoms} atoms ({n_pairs} pairs)")
+    print(f"  {'Backend':<10s} {'Time (s)':>10s} {'vs mdtraj':>10s}")
+    print(f"  {'-' * 32}")
+    for name, t in sorted(timings.items(), key=lambda x: x[1]):
+        speedup = t_mdtraj / t
+        print(f"  {name:<10s} {t:>10.4f} {speedup:>9.1f}x")
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("n_frames", "n_atoms"),
+    [
+        pytest.param(1000, 100, id="small-1K-100"),
+        pytest.param(3000, 200, id="medium-3K-200"),
+        pytest.param(3000, 400, id="large-3K-400"),
+    ],
+)
+def test_benchmark_backends(n_frames: int, n_atoms: int) -> None:
+    """Benchmark all available backends at different trajectory scales.
+
+    Run only benchmarks:  ``pytest -m benchmark``
+    Skip benchmarks:      ``pytest -m "not benchmark"``
+    """
+    _run_benchmark(n_frames, n_atoms)

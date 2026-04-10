@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
+from mdpp.analysis.distance import DistanceBackend, _compute_pairwise_distances
 from mdpp.core.trajectory import select_atom_indices
 
 
@@ -136,100 +137,6 @@ def featurize_backbone_torsions(
     return TorsionFeatures(values=values, labels=labels)
 
 
-type DistanceBackend = str
-
-
-def _pairwise_distances_numba(
-    xyz: NDArray[np.float32],
-    pairs: NDArray[np.int_],
-) -> NDArray[np.float64]:
-    """Compute non-periodic pairwise distances using a Numba-parallel kernel.
-
-    Parallelises the frame loop using ``prange``, giving ~5x speedup over
-    mdtraj's single-threaded C/SSE kernel on multi-core machines.
-
-    The kernel outputs float64 because Numba maps Python ``float()``
-    casts to double precision in its type system.  Changing the output
-    dtype would require a separate JIT specialization.  Callers cast
-    the result to the resolved dtype after the kernel returns.
-
-    **Limitations compared to mdtraj:**
-
-    - No periodic boundary condition (minimum image convention) support.
-      Use ``backend="mdtraj"`` if the trajectory has unit-cell information
-      and PBC distances are required.
-    - Returns float64 (mdtraj returns float32).
-
-    Args:
-        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``, typically
-            ``traj.xyz`` in nm.
-        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
-
-    Returns:
-        Distances of shape ``(n_frames, n_pairs)`` in the same unit as
-        *xyz* (nm for mdtraj trajectories).
-
-    Raises:
-        ValueError: If any pair index is out of range.
-    """
-    n_atoms = xyz.shape[1]
-    if pairs.size > 0 and (np.any(pairs < 0) or np.any(pairs >= n_atoms)):
-        raise ValueError(
-            f"atom_pairs must contain indices in [0, {n_atoms}), "
-            f"got range [{int(pairs.min())}, {int(pairs.max())}]."
-        )
-
-    from numba import njit, prange
-
-    @njit(parallel=True, cache=True)
-    def _kernel(
-        xyz: NDArray[np.float32], pairs: NDArray[np.int_]
-    ) -> NDArray[np.float64]:  # pragma: no cover - JIT-compiled
-        n_frames = xyz.shape[0]
-        n_pairs = pairs.shape[0]
-        out = np.empty((n_frames, n_pairs), dtype=np.float64)
-        for f in prange(n_frames):
-            for k in range(n_pairs):
-                i = pairs[k, 0]
-                j = pairs[k, 1]
-                dx = float(xyz[f, i, 0]) - float(xyz[f, j, 0])
-                dy = float(xyz[f, i, 1]) - float(xyz[f, j, 1])
-                dz = float(xyz[f, i, 2]) - float(xyz[f, j, 2])
-                out[f, k] = np.sqrt(dx * dx + dy * dy + dz * dz)
-        return out
-
-    return _kernel(xyz, pairs)
-
-
-def _pairwise_distances_mdtraj(
-    traj: md.Trajectory,
-    pairs: NDArray[np.int_],
-    *,
-    periodic: bool,
-    dtype: DtypeArg = None,
-) -> NDArray[np.floating]:
-    """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
-
-    Supports periodic boundary conditions via minimum image convention
-    when the trajectory contains unit-cell information.
-
-    Args:
-        traj: Atom-sliced trajectory.
-        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
-        periodic: Whether to apply minimum image convention.
-        dtype: Output float dtype. If ``None``, uses the package default
-            (see :func:`mdpp.set_default_dtype`).
-
-    Returns:
-        Distances of shape ``(n_frames, n_pairs)``.
-    """
-    resolved = resolve_dtype(dtype)
-    return np.asarray(
-        md.compute_distances(traj, pairs, periodic=periodic),
-        dtype=resolved,
-    )
-
-
 def featurize_ca_distances(
     traj: md.Trajectory,
     *,
@@ -243,25 +150,20 @@ def featurize_ca_distances(
     Computes the ``N*(N-1)/2`` pairwise distances for the selected atoms
     at each frame, producing a feature matrix suitable for PCA or TICA.
 
-    Two backends are available:
-
-    ``"numba"`` (default)
-        Numba-parallel kernel that distributes frames across all CPU
-        cores.  ~5x faster than mdtraj for non-periodic systems on
-        multi-core machines.  **Does not support periodic boundary
-        conditions** -- the *periodic* parameter is ignored.
-
-    ``"mdtraj"``
-        mdtraj's optimised C/SSE ``compute_distances``.  Supports
-        periodic boundary conditions via minimum image convention when
-        the trajectory contains unit-cell information.  Single-threaded.
+    Five backends are available (see
+    :func:`mdpp.analysis.distance._compute_pairwise_distances`):
+    ``"numba"`` (default, CPU-parallel), ``"cupy"``/``"torch"``/
+    ``"jax"`` (GPU-accelerated), and ``"mdtraj"`` (PBC-capable,
+    single-threaded).  Non-mdtraj backends do not support periodic
+    boundary conditions.
 
     Args:
         traj: Input trajectory.
         atom_selection: MDTraj selection string for the atoms to include.
             Defaults to ``"name CA"`` for alpha-carbon distances.
-        backend: Distance computation backend. One of ``"numba"``
-            (default, fast, non-periodic) or ``"mdtraj"`` (PBC-capable).
+        backend: Distance computation backend. ``"numba"``
+            (default, CPU-parallel), ``"cupy"``/``"torch"``/``"jax"``
+            (GPU-accelerated), or ``"mdtraj"`` (PBC-capable).
         periodic: Whether to apply minimum image convention. Only
             effective with ``backend="mdtraj"``.
         dtype: Output float dtype. If ``None``, uses the package default
@@ -275,9 +177,6 @@ def featurize_ca_distances(
             unknown backend is requested.
     """
     resolved = resolve_dtype(dtype)
-
-    if backend not in ("numba", "mdtraj"):
-        raise ValueError(f"Unknown backend {backend!r}. Use 'numba' or 'mdtraj'.")
 
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     if atom_indices.size < 2:
@@ -293,11 +192,13 @@ def featurize_ca_distances(
     )
     sliced = traj.atom_slice(atom_indices)
 
-    if backend == "numba":
-        # Numba JIT kernel always outputs float64; cast to resolved dtype.
-        values = np.asarray(_pairwise_distances_numba(sliced.xyz, pairs), dtype=resolved)
-    else:
-        values = _pairwise_distances_mdtraj(sliced, pairs, periodic=periodic, dtype=resolved)
+    values = _compute_pairwise_distances(
+        sliced,
+        pairs,
+        backend=backend,
+        periodic=periodic,
+        dtype=resolved,
+    )
 
     return DistanceFeatures(values=values, pairs=pairs, atom_indices=atom_indices)
 
