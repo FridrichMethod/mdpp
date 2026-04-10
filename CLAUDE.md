@@ -185,6 +185,8 @@ The `three_d.py` module provides interactive 3D visualization via py3Dmol and ng
 
 ### Shell Scripts
 
+- **Shebang**: always use `#!/usr/bin/env bash` (never `#!/bin/bash`).
+- **Executable bit**: all `.sh` and `.sbatch` files must have `chmod +x`.
 - `set -euo pipefail`, 4-space indent, pass shellcheck.
 - All shell scripts live in top-level `scripts/<engine>/<category>/` — not packaged, copy to MD working directories.
 - SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in the same directory.
