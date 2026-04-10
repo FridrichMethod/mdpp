@@ -14,29 +14,33 @@ set -euo pipefail
 #   -j N    number of parallel workers (default: 8)
 #   -t NS   target production time in ns; if set, skip parsing TPR target time
 #   -r DIR  root directory to search (default: .)
+#   -R      restart failed simulations via sbatch
 #   -h      show help
 
 JOBS=8
 ROOT="."
 TARGET_NS=""
+RESTART=false
 
 usage() {
     cat <<'EOF'
-Usage: check_status.sh [-j N] [-t TARGET_NS] [-r ROOT]
+Usage: check_status.sh [-j N] [-t TARGET_NS] [-r ROOT] [-R]
 
 Options:
     -j N        Number of parallel workers (default: 8)
     -t TARGET   Target production time in ns; if provided, skip gmx dump on TPR
     -r ROOT     Root directory to search (default: .)
+    -R          Restart failed simulations via sbatch
     -h          Show this help
 EOF
 }
 
-while getopts ":j:t:r:h" opt; do
+while getopts ":j:t:r:Rh" opt; do
     case "$opt" in
         j) JOBS="$OPTARG" ;;
         t) TARGET_NS="$OPTARG" ;;
         r) ROOT="$OPTARG" ;;
+        R) RESTART=true ;;
         h)
             usage
             exit 0
@@ -76,6 +80,7 @@ TMPDIR_MAIN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_MAIN"' EXIT
 
 ACTIVE_FILE="${TMPDIR_MAIN}/active_jobs.tsv"
+RESTART_FILE="${TMPDIR_MAIN}/restart.tsv"
 
 # Build one cache of all active/pending jobs for this user.
 # %A = job id, %T = state, %Z = working directory.
@@ -123,6 +128,11 @@ extract_current_ps_from_cpt() {
     gmx dump -cp "$cpt" 2>/dev/null | awk '
         /^[[:space:]]*t[[:space:]]*=/ { print $NF; exit }
     '
+}
+
+# Mark a simulation directory for restart (picked up after parallel finishes).
+mark_restart() {
+    printf '__RESTART__\t%s\n' "$1"
 }
 
 process_one_dir() {
@@ -208,10 +218,30 @@ process_one_dir() {
     fi
 
     printf "%s\t%s\t%s\t%s\n" "$simdir_abs" "${c_red}failed${c_reset}" "$progress" "incomplete and no matching active job in squeue"
+    mark_restart "$simdir_abs"
 }
 
-export -f ps_to_ns ns_to_ps extract_target_ps_from_tpr extract_current_ps_from_cpt process_one_dir
+export -f ps_to_ns ns_to_ps extract_target_ps_from_tpr extract_current_ps_from_cpt mark_restart process_one_dir
 
 printf "directory\tstatus\tprogress\tinfo\n"
 
-find_sim_dirs "$ROOT" | parallel -j "$JOBS" -k process_one_dir {} "$ACTIVE_FILE" "$TARGET_NS"
+_raw="$(find_sim_dirs "$ROOT" | parallel -j "$JOBS" -k process_one_dir {} "$ACTIVE_FILE" "$TARGET_NS")" || true
+
+if [[ -n "$_raw" ]]; then
+    printf '%s\n' "$_raw" | { grep -v '^__RESTART__' || true; }
+    printf '%s\n' "$_raw" | { grep '^__RESTART__' || true; } | cut -f2- >"$RESTART_FILE"
+fi
+
+# Restart failed simulations if requested.
+if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
+    echo ""
+    while IFS= read -r simdir; do
+        sbatch_file="${simdir}/mdrun.sbatch"
+        if [[ ! -f "$sbatch_file" ]]; then
+            echo "Warning: mdrun.sbatch not found in ${simdir}, skipping" >&2
+            continue
+        fi
+        echo "Resubmitting: ${simdir}"
+        sbatch --chdir "$simdir" "$sbatch_file"
+    done <"$RESTART_FILE"
+fi
