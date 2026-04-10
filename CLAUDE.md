@@ -190,6 +190,13 @@ The `three_d.py` module provides interactive 3D visualization via py3Dmol and ng
 - `set -euo pipefail`, 4-space indent, pass shellcheck.
 - All shell scripts live in top-level `scripts/<engine>/<category>/` — not packaged, copy to MD working directories.
 - SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in the same directory.
+- **Argument parsing** (for scripts accepting flags/options):
+  - Use manual `while [[ $# -gt 0 ]]; do case "$1" in ...` loops (not `getopts`) to support both short and long flags.
+  - Define a `usage()` function that documents all arguments.
+  - Always support `-h` / `--help`.
+  - Provide both short and long forms for every flag (e.g. `-j` / `--jobs`, `-n` / `--dry-run`).
+  - Validate required arguments and print clear error messages on invalid input.
+  - Scripts that only accept simple positional arguments (e.g. `$1`) do not need this treatment.
 
 ## Dependencies
 
