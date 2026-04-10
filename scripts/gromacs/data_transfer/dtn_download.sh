@@ -7,7 +7,7 @@ usage() {
 Usage: ${0##*/} [-j N] [-n] [-h] REMOTE_DIR LOCAL_DIR
 
 Options:
-    -j, --jobs N    Number of parallel rsync jobs (default: 4)
+    -j, --jobs N    Number of parallel rsync jobs (default: number of subdirs)
     -n, --dry-run   Dry run (show what would be transferred)
     -h, --help      Show this help
 
@@ -19,7 +19,7 @@ EOF
 
 LOGIN_HOST="sherlock-plain"
 DTN_HOST="sherlock-dtn"
-JOBS=4
+JOBS=0
 DRY_RUN=""
 
 SSH_OPTS="ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInterval=60"
@@ -70,6 +70,9 @@ mapfile -t SUBDIRS < <(
     echo "No subdirectories found in $REMOTE_DIR" >&2
     exit 1
 }
+
+# Default to one job per subdirectory if -j was not specified.
+[[ "$JOBS" -eq 0 ]] && JOBS=${#SUBDIRS[@]}
 
 echo "=== Found ${#SUBDIRS[@]} subdirectories, transferring with $JOBS parallel jobs ==="
 
