@@ -116,6 +116,14 @@ if [[ ${#DIRS[@]} -eq 0 ]]; then
     exit 2
 fi
 
+# Resolve directories to absolute paths so that resubmission with --chdir
+# does not break relative paths.
+for i in "${!DIRS[@]}"; do
+    if [[ -d "${DIRS[$i]}" ]]; then
+        DIRS[$i]="$(cd "${DIRS[$i]}" && pwd -P)"
+    fi
+done
+
 # ---- Helpers ----
 
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
@@ -206,12 +214,13 @@ echo ""
 # ---- Process each directory ----
 
 GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_FAILED=0 GRAND_ERROR=0
-GRAND_TOTAL=0 GRAND_RESTARTS=0
+GRAND_TOTAL=0 GRAND_RESTARTS=0 GRAND_SKIPPED=0
 REPORT=""
 
 for DIR in "${DIRS[@]}"; do
     if [[ ! -d "$DIR" ]]; then
         echo "  Warning: directory does not exist: $DIR" >&2
+        GRAND_SKIPPED=$((GRAND_SKIPPED + 1))
         continue
     fi
 
@@ -224,6 +233,7 @@ for DIR in "${DIRS[@]}"; do
 
     if ! RAW="$(bash "$CHECK_STATUS" "${CS_FLAGS[@]}")"; then
         echo "  Warning: check_status.sh failed for ${DIR_NAME}" >&2
+        GRAND_SKIPPED=$((GRAND_SKIPPED + 1))
         continue
     fi
 
@@ -256,7 +266,7 @@ done
 # ---- All done? ----
 
 ALL_DONE=false
-if ((GRAND_ACTIVE == 0 && GRAND_FAILED == 0 && GRAND_ERROR == 0 && GRAND_COMPLETED > 0)); then
+if ((GRAND_SKIPPED == 0 && GRAND_TOTAL > 0 && GRAND_COMPLETED == GRAND_TOTAL)); then
     ALL_DONE=true
 fi
 

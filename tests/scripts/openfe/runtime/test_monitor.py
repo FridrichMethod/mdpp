@@ -94,6 +94,14 @@ _STATUS_MIXED_WITH_RESTART = (
     )
 )
 
+_STATUS_WITH_UNEXPECTED = textwrap.dedent(
+    """\
+    directory\tstatus\treplica\tinfo
+    /res/rbfe_A_B/replica_0\tcompleted\treplica_0\tddG = 1.4 +/- 0.1 kcal/mol
+    /res/rbfe_A_B/replica_1\tpending\treplica_1\twaiting for resources
+    """
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -187,6 +195,38 @@ def _run(
     run_env = os.environ.copy()
     run_env["PATH"] = f"{env['_bin_dir']}:{run_env['PATH']}"
     return subprocess.run(cmd, capture_output=True, text=True, env=run_env, check=False)
+
+
+def _write_per_dir_mock(env: dict[str, Path], responses: dict[str, tuple[str, int]]) -> None:
+    """Override check_status.sh to return per-directory responses.
+
+    Args:
+        env: Monitor environment dict from the ``monitor_env`` fixture.
+        responses: Mapping of directory basename to (tsv_output, exit_code).
+    """
+    resp_dir = env["monitor_sbatch"].parent.parent / "responses"
+    resp_dir.mkdir(exist_ok=True)
+
+    for basename, (output, exit_code) in responses.items():
+        (resp_dir / f"{basename}.txt").write_text(output)
+        (resp_dir / f"{basename}.exit").write_text(str(exit_code))
+
+    mock_cs = env["monitor_sbatch"].parent / "check_status.sh"
+    mock_cs.write_text(
+        f"""#!/usr/bin/env bash
+DIR=""
+while getopts ":j:r:Rh" opt; do
+    case "$opt" in r) DIR="$OPTARG" ;; *) ;; esac
+done
+dirname=$(basename "$DIR")
+resp="{resp_dir}/$dirname.txt"
+exit_file="{resp_dir}/$dirname.exit"
+if [[ -f "$resp" ]]; then cat "$resp"; fi
+if [[ -f "$exit_file" ]]; then exit $(cat "$exit_file"); fi
+exit 0
+"""
+    )
+    _make_executable(mock_cs)
 
 
 # ------------------------------------------------------------------
@@ -290,6 +330,22 @@ class TestAllDone:
         _run(monitor_env)
         assert "All" in monitor_env["mail_log"].read_text()
         assert "completed" in monitor_env["mail_log"].read_text()
+
+    def test_multi_dir_all_completed_stops(self, monitor_env: dict[str, Path]) -> None:
+        """When ALL directories are complete, monitor stops."""
+        project2 = monitor_env["project"].parent / "project2"
+        (project2 / "transformations").mkdir(parents=True)
+        (project2 / "results").mkdir(parents=True)
+
+        _write_per_dir_mock(
+            monitor_env,
+            {
+                monitor_env["project"].name: (_STATUS_ALL_COMPLETED, 0),
+                project2.name: (_STATUS_ALL_COMPLETED, 0),
+            },
+        )
+        _run(monitor_env, dirs=[monitor_env["project"], project2])
+        assert "monitor.sbatch" not in monitor_env["sbatch_log"].read_text()
 
 
 class TestSelfResubmit:
@@ -395,3 +451,69 @@ class TestCLI:
         result = _run(monitor_env, "-h")
         assert result.returncode == 0
         assert "Usage:" in result.stdout
+
+
+class TestSkippedDirPreventsAllDone:
+    """Monitor must not stop when a directory is skipped (GRAND_SKIPPED > 0)."""
+
+    def test_check_status_failure_prevents_stop(self, monitor_env: dict[str, Path]) -> None:
+        """check_status.sh fails for one dir -> monitor resubmits even if other dir is done."""
+        project1 = monitor_env["project"]
+        project2 = project1.parent / "project2"
+        (project2 / "transformations").mkdir(parents=True)
+        (project2 / "results").mkdir(parents=True)
+
+        _write_per_dir_mock(
+            monitor_env,
+            {
+                project1.name: (_STATUS_ALL_COMPLETED, 0),
+                project2.name: ("", 1),
+            },
+        )
+        _run(monitor_env, dirs=[project1, project2])
+        assert "monitor.sbatch" in monitor_env["sbatch_log"].read_text()
+
+    def test_missing_dir_prevents_stop(self, monitor_env: dict[str, Path]) -> None:
+        """Non-existent directory -> monitor resubmits even if other dir is done."""
+        monitor_env["cs_response"].write_text(_STATUS_ALL_COMPLETED)
+        fake = monitor_env["project"].parent / "nonexistent"
+        _run(monitor_env, dirs=[monitor_env["project"], fake])
+        assert "monitor.sbatch" in monitor_env["sbatch_log"].read_text()
+
+
+class TestCompletedEqualsTotal:
+    """ALL_DONE requires COMPLETED == TOTAL, not just zero active/failed/error."""
+
+    def test_unexpected_status_prevents_stop(self, monitor_env: dict[str, Path]) -> None:
+        """A job with unrecognized status prevents ALL_DONE."""
+        monitor_env["cs_response"].write_text(_STATUS_WITH_UNEXPECTED)
+        _run(monitor_env)
+        assert "monitor.sbatch" in monitor_env["sbatch_log"].read_text()
+
+
+class TestRelativePathResolution:
+    """Relative -d paths are resolved to absolute before resubmission."""
+
+    def test_relative_paths_resolved_in_resubmit(self, monitor_env: dict[str, Path]) -> None:
+        monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED_AND_RESTART)
+        project = monitor_env["project"]
+        launch_dir = project.parent
+
+        cmd = [
+            "bash",
+            str(monitor_env["monitor_sbatch"]),
+            "-d",
+            str(project.relative_to(launch_dir)),
+        ]
+        run_env = os.environ.copy()
+        run_env["PATH"] = f"{monitor_env['_bin_dir']}:{run_env['PATH']}"
+        subprocess.run(
+            cmd, capture_output=True, text=True, env=run_env, cwd=str(launch_dir), check=False
+        )
+
+        sbatch_args = monitor_env["sbatch_log"].read_text()
+        match = re.search(r"-d\s+(\S+)", sbatch_args)
+        assert match is not None, f"No -d flag in resubmit args: {sbatch_args}"
+        dir_arg = match.group(1)
+        assert dir_arg.startswith("/"), f"Expected absolute path, got: {dir_arg}"
+        assert dir_arg == str(project)
