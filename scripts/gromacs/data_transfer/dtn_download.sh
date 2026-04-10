@@ -4,11 +4,12 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<EOF
-Usage: ${0##*/} [-j <n>] [-n] REMOTE_DIR LOCAL_DIR
+Usage: ${0##*/} [-j N] [-n] [-h] REMOTE_DIR LOCAL_DIR
 
 Options:
-    -j <n>   Number of parallel rsync jobs (default: 4)
-    -n       Dry run (show what would be transferred)
+    -j N    Number of parallel rsync jobs (default: 4)
+    -n      Dry run (show what would be transferred)
+    -h      Show this help
 
 Example:
     ${0##*/} -j 4 /scratch/users/\$USER/md_runs /data/local/md_runs
@@ -23,8 +24,8 @@ DRY_RUN=""
 
 SSH_OPTS="ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInterval=60"
 
-while getopts "j:n" opt; do
-    case $opt in
+while getopts ":j:nh" opt; do
+    case "$opt" in
         j)
             [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
                 echo "Error: -j requires a positive integer" >&2
@@ -33,7 +34,15 @@ while getopts "j:n" opt; do
             JOBS="$OPTARG"
             ;;
         n) DRY_RUN="--dry-run" ;;
-        *) usage ;;
+        h) usage ;;
+        \?)
+            echo "Error: invalid option -$OPTARG" >&2
+            usage
+            ;;
+        :)
+            echo "Error: option -$OPTARG requires an argument" >&2
+            usage
+            ;;
     esac
 done
 shift $((OPTIND - 1))

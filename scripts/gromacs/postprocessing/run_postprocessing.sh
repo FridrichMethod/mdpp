@@ -22,7 +22,7 @@ usage() {
 # Max parallel jobs. 0 = unlimited (all subdirectories launch simultaneously).
 MAX_JOBS=0
 
-while getopts "j:" opt; do
+while getopts ":j:h" opt; do
     case "${opt}" in
         j)
             [[ "$OPTARG" =~ ^[1-9][0-9]*$ ]] || {
@@ -31,7 +31,15 @@ while getopts "j:" opt; do
             }
             MAX_JOBS="${OPTARG}"
             ;;
-        *) usage ;;
+        h) usage ;;
+        \?)
+            printf '%bError: invalid option -%s%b\n' "${RED}" "$OPTARG" "${RESET}" >&2
+            usage
+            ;;
+        :)
+            printf '%bError: option -%s requires an argument%b\n' "${RED}" "$OPTARG" "${RESET}" >&2
+            usage
+            ;;
     esac
 done
 shift $((OPTIND - 1))

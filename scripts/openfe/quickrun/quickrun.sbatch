@@ -22,7 +22,14 @@ set -euo pipefail
 OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif
 
 usage() {
-    echo "Usage: sbatch [--array=0-N] $0 <transformation.json> -o|--output-dir <results_dir>" >&2
+    cat >&2 <<EOF
+Usage: sbatch [--array=0-N] $0 <transformation.json> -o <results_dir> [-h]
+
+Arguments:
+    <transformation.json>   Path to the OpenFE transformation JSON file
+    -o, --output-dir DIR    Directory for output results (required)
+    -h                      Show this help
+EOF
     exit 1
 }
 
@@ -35,6 +42,9 @@ while [[ $# -gt 0 ]]; do
             [[ $# -lt 2 ]] && usage
             RESULTS_DIR=$2
             shift 2
+            ;;
+        -h|--help)
+            usage
             ;;
         *)
             [[ -n "${FILE}" ]] && usage

@@ -6,22 +6,40 @@ SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKING_DIR="."
 REPEATS=1
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -r | --repeats)
-            REPEATS=$2
-            if ! [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]]; then
-                echo "Error: --repeats must be a positive integer, got: ${REPEATS}" >&2
+usage() {
+    cat >&2 <<'EOF'
+Usage: quickrun.sh [-r N] [-h]
+
+Submit OpenFE quickrun jobs for all transformations in ./transformations/.
+
+Options:
+    -r N    Number of repeats per transformation (default: 1)
+    -h      Show this help
+EOF
+    exit 1
+}
+
+while getopts ":r:h" opt; do
+    case "$opt" in
+        r)
+            REPEATS="$OPTARG"
+            [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]] || {
+                echo "Error: -r requires a positive integer, got: ${REPEATS}" >&2
                 exit 1
-            fi
-            shift 2
+            }
             ;;
-        *)
-            echo "Unknown option: $1" >&2
-            exit 1
+        h) usage ;;
+        \?)
+            echo "Error: invalid option -$OPTARG" >&2
+            usage
+            ;;
+        :)
+            echo "Error: option -$OPTARG requires an argument" >&2
+            usage
             ;;
     esac
 done
+shift $((OPTIND - 1))
 
 TRANSFORMATION_DIR="${WORKING_DIR}/transformations"
 RESULTS_DIR="${WORKING_DIR}/results"
