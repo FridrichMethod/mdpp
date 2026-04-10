@@ -82,6 +82,15 @@ pytest
 # Run a specific test file
 pytest tests/analysis/test_metrics.py
 
+# Skip benchmarks for fast CI
+pytest -m "not benchmark"
+
+# Run only benchmarks
+pytest -m benchmark
+
+# Skip slow + benchmark tests
+pytest -m "not (slow or benchmark)"
+
 # Lint and format
 ruff check src/ tests/ --fix
 ruff format src/ tests/
@@ -183,6 +192,23 @@ The `three_d.py` module provides interactive 3D visualization via py3Dmol and ng
 - Use `pytest.approx` for floats.
 - Plotting tests: `matplotlib.use("Agg")`, close figures after assertions.
 
+#### Pytest Markers
+
+Two custom markers control test selection (`--strict-markers` enforced):
+
+| Marker | Purpose | Deselect |
+|--------|---------|----------|
+| `benchmark` | Performance timing tests with printed reports | `-m "not benchmark"` |
+| `slow` | Resource-intensive tests (>10s runtime) | `-m "not slow"` |
+
+Current benchmark tests:
+
+- `tests/analysis/test_ca_distances.py` -- pairwise distance backend comparison (mdtraj/numba/cupy/torch/jax) at 3 scales (1K-100, 3K-200, 3K-400 atoms).
+- `tests/analysis/test_clustering.py` -- RMSD matrix Numba vs mdtraj speed (5-run median).
+- `tests/core/test_trajectory.py` -- atom selection: direct loading vs load-all+slice memory and timing.
+
+When adding a new benchmark, decorate with `@pytest.mark.benchmark` (and `@pytest.mark.slow` if >10s). Register any new markers in `pyproject.toml` `[tool.pytest.ini_options].markers`.
+
 ### Shell Scripts
 
 - **Shebang**: always use `#!/usr/bin/env bash` (never `#!/bin/bash`).
@@ -208,7 +234,7 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **scikit-learn** — PCA, clustering
 - **deeptime** — TICA
 - **rdkit** — cheminformatics: ligand topology, descriptors, fingerprints, similarity
-- **numba** — parallel similarity kernels in `chem/similarity.py`
+- **numba** — parallel CPU kernels: pairwise distances (`analysis/distance.py`), RMSD matrix (`analysis/clustering.py`), similarity (`chem/similarity.py`)
 - **biopython** — PDB chain extraction (`Bio.PDB.Select`)
 - **biotite** — structural bioinformatics utilities
 - **propka** — pKa prediction (`prep/protein.py`)
@@ -225,6 +251,7 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **Pillow** — image handling for molecule drawings
 - **numpy / scipy / pandas / polars** — numerical and data handling
 - **tqdm** — progress bars
+- **cupy / torch / jax** — optional GPU backends for pairwise distances (`pip install mdpp[gpu]`)
 
 ## Adding New Features
 

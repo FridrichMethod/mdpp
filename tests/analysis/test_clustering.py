@@ -206,7 +206,8 @@ class TestRmsdMatrixBenchmark:
     Run explicitly with ``pytest -m slow`` or ``pytest -k Benchmark``.
     """
 
-    @pytest.mark.slow()
+    @pytest.mark.slow
+    @pytest.mark.benchmark
     def test_numba_not_slower_than_mdtraj(self, large_trajectory: md.Trajectory) -> None:
         """Numba QCP backend should not be slower than the mdtraj loop.
 

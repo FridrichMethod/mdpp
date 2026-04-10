@@ -439,6 +439,7 @@ def large_traj_on_disk(tmp_path: Path) -> tuple[Path, Path, int, int]:
     return xtc_path, pdb_path, n_frames, n_atoms
 
 
+@pytest.mark.benchmark
 def test_benchmark_atom_selection_direct_vs_slice(
     large_traj_on_disk: tuple[Path, Path, int, int],
 ) -> None:
@@ -485,6 +486,7 @@ def test_benchmark_atom_selection_direct_vs_slice(
     del full, sliced, direct
 
 
+@pytest.mark.benchmark
 def test_benchmark_atom_selection_with_start_stop(
     large_traj_on_disk: tuple[Path, Path, int, int],
 ) -> None:

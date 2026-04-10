@@ -181,5 +181,6 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 env = ["TQDM_DISABLE=1"]
 markers = [
-    "benchmark: performance benchmarks (deselect with '-m \"not benchmark\"')",
+    "benchmark: performance benchmarks with timing output (deselect with '-m \"not benchmark\"')",
+    "slow: resource-intensive tests that take >10s (deselect with '-m \"not slow\"')",
 ]
