@@ -26,11 +26,11 @@ mkdir -p logs
 # Self-resubmission handles --chdir automatically.
 #
 # Options:
-#   -d DIR [DIR ...]  Project directories to monitor (required)
-#   -e EMAIL          Notification email (default: ${USER}@stanford.edu)
-#   -i HOURS          Hours between checks (default: 1)
-#   -n                Dry run: report only, no restarts or resubmissions
-#   -h                Show help
+#   -d, --dirs DIR [DIR ...]  Project directories to monitor (required)
+#   -e, --email EMAIL         Notification email (default: ${USER}@stanford.edu)
+#   -i, --interval HOURS      Hours between checks (default: 1)
+#   -n, --dry-run             Dry run: report only, no restarts or resubmissions
+#   -h, --help                Show help
 
 # Under SLURM, BASH_SOURCE points to the spool copy — use the working
 # directory set by --chdir instead.  When run directly with bash,
@@ -54,20 +54,20 @@ usage() {
 Usage: monitor.sbatch -d DIR [DIR ...] [OPTIONS]
 
 Options:
-    -d DIR [DIR ...]  Project directories to monitor (required)
-    -e EMAIL          Notification email (default: ${USER}@stanford.edu)
-    -i HOURS          Interval between checks in hours (default: 1)
-    -n                Dry run: report only, no restarts or resubmissions
-    -h                Show this help
+    -d, --dirs DIR [DIR ...]  Project directories to monitor (required)
+    -e, --email EMAIL         Notification email (default: ${USER}@stanford.edu)
+    -i, --interval HOURS      Interval between checks in hours (default: 1)
+    -n, --dry-run             Dry run: report only, no restarts or resubmissions
+    -h, --help                Show this help
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -d)
+        -d | --dirs)
             shift
             [[ $# -eq 0 || "$1" == -* ]] && {
-                echo "Error: -d requires at least one directory" >&2
+                echo "Error: -d/--dirs requires at least one directory" >&2
                 exit 2
             }
             while [[ $# -gt 0 && "$1" != -* ]]; do
@@ -75,36 +75,36 @@ while [[ $# -gt 0 ]]; do
                 shift
             done
             ;;
-        -e)
+        -e | --email)
             [[ $# -lt 2 ]] && {
-                echo "Error: -e requires an argument" >&2
+                echo "Error: $1 requires an argument" >&2
                 exit 2
             }
             EMAIL="$2"
             shift 2
             ;;
-        -i)
+        -i | --interval)
             [[ $# -lt 2 ]] && {
-                echo "Error: -i requires an argument" >&2
+                echo "Error: $1 requires an argument" >&2
                 exit 2
             }
             INTERVAL="$2"
             if ! [[ "$INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
-                echo "Error: -i INTERVAL must be a positive integer, got: ${INTERVAL}" >&2
+                echo "Error: -i/--interval must be a positive integer, got: ${INTERVAL}" >&2
                 exit 2
             fi
             shift 2
             ;;
-        -n)
+        -n | --dry-run)
             DRY_RUN=true
             shift
             ;;
-        -h)
+        -h | --help)
             usage
             exit 0
             ;;
         *)
-            echo "Error: unknown option $1" >&2
+            echo "Error: unknown option: $1" >&2
             usage
             exit 2
             ;;
