@@ -13,33 +13,35 @@ Usage: quickrun.sh [-r N] [-h]
 Submit OpenFE quickrun jobs for all transformations in ./transformations/.
 
 Options:
-    -r N    Number of repeats per transformation (default: 1)
-    -h      Show this help
+    -r, --repeats N    Number of repeats per transformation (default: 1)
+    -h, --help         Show this help
 EOF
     exit 1
 }
 
-while getopts ":r:h" opt; do
-    case "$opt" in
-        r)
-            REPEATS="$OPTARG"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -r | --repeats)
+            [[ $# -lt 2 ]] && {
+                echo "Error: $1 requires an argument" >&2
+                usage
+            }
+            REPEATS=$2
             [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]] || {
-                echo "Error: -r requires a positive integer, got: ${REPEATS}" >&2
+                echo "Error: --repeats must be a positive integer, got: ${REPEATS}" >&2
                 exit 1
             }
+            shift 2
             ;;
-        h) usage ;;
-        \?)
-            echo "Error: invalid option -$OPTARG" >&2
+        -h | --help)
             usage
             ;;
-        :)
-            echo "Error: option -$OPTARG requires an argument" >&2
+        *)
+            echo "Error: unknown option: $1" >&2
             usage
             ;;
     esac
 done
-shift $((OPTIND - 1))
 
 TRANSFORMATION_DIR="${WORKING_DIR}/transformations"
 RESULTS_DIR="${WORKING_DIR}/results"
