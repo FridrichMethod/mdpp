@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import time
 
 import mdtraj as md
 import numpy as np
 import pytest
 
+from mdpp.analysis._backends import has_cupy, has_jax, has_torch
 from mdpp.analysis.clustering import (
     ClusteringResult,
     RMSDMatrixResult,
@@ -16,35 +16,9 @@ from mdpp.analysis.clustering import (
     compute_rmsd_matrix,
 )
 
-# ---------------------------------------------------------------------------
-# Optional backend availability
-# ---------------------------------------------------------------------------
-
-try:
-    import cupy  # noqa: F401
-
-    _has_cupy = True
-except ImportError:
-    _has_cupy = False
-
-try:
-    import torch  # noqa: F401
-
-    _has_torch = True
-except ImportError:
-    _has_torch = False
-
-try:
-    os.environ.setdefault("JAX_PLATFORMS", "cpu")
-    import jax  # noqa: F401
-
-    _has_jax = True
-except ImportError:
-    _has_jax = False
-
-requires_cupy = pytest.mark.skipif(not _has_cupy, reason="CuPy not installed")
-requires_torch = pytest.mark.skipif(not _has_torch, reason="PyTorch not installed")
-requires_jax = pytest.mark.skipif(not _has_jax, reason="JAX not installed")
+requires_cupy = pytest.mark.skipif(not has_cupy, reason="CuPy not installed")
+requires_torch = pytest.mark.skipif(not has_torch, reason="PyTorch not installed")
+requires_jax = pytest.mark.skipif(not has_jax, reason="JAX not installed")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -75,37 +49,6 @@ def backbone_trajectory() -> md.Trajectory:
 
     rng = np.random.RandomState(42)
     n_frames = 30
-    n_atoms = len(atoms)
-    base = rng.randn(1, n_atoms, 3).astype(np.float32) * 0.15
-    perturbation = rng.randn(n_frames, n_atoms, 3).astype(np.float32) * 0.02
-    xyz = base + perturbation
-    time_ps = np.arange(n_frames, dtype=np.float64) * 10.0
-    return md.Trajectory(xyz=xyz, topology=topology, time=time_ps)
-
-
-@pytest.fixture()
-def large_trajectory() -> md.Trajectory:
-    """Return a larger trajectory for benchmark tests.
-
-    50 ALA residues x 3 backbone atoms = 150 atoms, 200 frames.
-    Gives 19 900 unique pairs for the pairwise RMSD matrix.
-    """
-    topology = md.Topology()
-    chain = topology.add_chain()
-    atoms = []
-    for res_idx in range(1, 51):
-        residue = topology.add_residue("ALA", chain, resSeq=res_idx)
-        n = topology.add_atom("N", md.element.nitrogen, residue)
-        ca = topology.add_atom("CA", md.element.carbon, residue)
-        c = topology.add_atom("C", md.element.carbon, residue)
-        atoms.extend([n, ca, c])
-        topology.add_bond(n, ca)
-        topology.add_bond(ca, c)
-        if res_idx > 1:
-            topology.add_bond(atoms[-6], c)
-
-    rng = np.random.RandomState(99)
-    n_frames = 200
     n_atoms = len(atoms)
     base = rng.randn(1, n_atoms, 3).astype(np.float32) * 0.15
     perturbation = rng.randn(n_frames, n_atoms, 3).astype(np.float32) * 0.02
@@ -153,7 +96,7 @@ class TestComputeRmsdMatrix:
 
     def test_invalid_backend_raises(self, backbone_trajectory: md.Trajectory) -> None:
         """An unknown backend should raise ValueError."""
-        with pytest.raises(ValueError, match="Unsupported backend"):
+        with pytest.raises(ValueError, match="Unknown backend"):
             compute_rmsd_matrix(backbone_trajectory, atom_selection="all", backend="bogus")
 
     def test_numba_and_mdtraj_agree(self, backbone_trajectory: md.Trajectory) -> None:
@@ -310,9 +253,9 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     backends: list[tuple[str, bool]] = [
         ("mdtraj", True),
         ("numba", True),
-        ("cupy", _has_cupy),
-        ("torch", _has_torch),
-        ("jax", _has_jax),
+        ("cupy", has_cupy),
+        ("torch", has_torch),
+        ("jax", has_jax),
     ]
 
     timings: dict[str, float] = {}

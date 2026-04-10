@@ -8,47 +8,19 @@ import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis.decomposition import DistanceFeatures, featurize_ca_distances
-from mdpp.analysis.distance import (
-    _pairwise_distances_cupy,
-    _pairwise_distances_jax,
-    _pairwise_distances_mdtraj,
-    _pairwise_distances_numba,
-    _pairwise_distances_torch,
+from mdpp.analysis._backends import has_cupy, has_jax, has_torch
+from mdpp.analysis._backends._distances import (
+    distances_cupy,
+    distances_jax,
+    distances_numba,
+    distances_torch,
 )
+from mdpp.analysis.decomposition import DistanceFeatures, featurize_ca_distances
+from mdpp.analysis.distance import _pairwise_distances_mdtraj
 
-# ---------------------------------------------------------------------------
-# Optional GPU library detection
-# ---------------------------------------------------------------------------
-
-try:
-    import cupy  # noqa: F401
-
-    _has_cupy = True
-except ImportError:
-    _has_cupy = False
-
-try:
-    import torch  # noqa: F401
-
-    _has_torch = True
-except ImportError:
-    _has_torch = False
-
-try:
-    import os
-
-    # Force CPU backend in tests to avoid GPU contention under xdist.
-    os.environ.setdefault("JAX_PLATFORMS", "cpu")
-    import jax  # noqa: F401
-
-    _has_jax = True
-except ImportError:
-    _has_jax = False
-
-requires_cupy = pytest.mark.skipif(not _has_cupy, reason="CuPy not installed")
-requires_torch = pytest.mark.skipif(not _has_torch, reason="PyTorch not installed")
-requires_jax = pytest.mark.skipif(not _has_jax, reason="JAX not installed")
+requires_cupy = pytest.mark.skipif(not has_cupy, reason="CuPy not installed")
+requires_torch = pytest.mark.skipif(not has_torch, reason="PyTorch not installed")
+requires_jax = pytest.mark.skipif(not has_jax, reason="JAX not installed")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -198,48 +170,48 @@ class TestBackendEquivalence:
 
 
 class TestNumbaKernel:
-    """Direct tests on _pairwise_distances_numba."""
+    """Direct tests on distances_numba."""
 
     def test_known_distance(self) -> None:
         """Two atoms 1 nm apart along x-axis."""
-        result = _pairwise_distances_numba(_XYZ_1NM, _PAIR_01)
+        result = distances_numba(_XYZ_1NM, _PAIR_01)
         assert result.shape == (1, 1)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
 
     def test_self_distance_is_zero(self) -> None:
-        result = _pairwise_distances_numba(_XYZ_SELF, _PAIR_00)
+        result = distances_numba(_XYZ_SELF, _PAIR_00)
         assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
 
     def test_3d_distance(self) -> None:
-        result = _pairwise_distances_numba(_XYZ_3D, _PAIR_01)
+        result = distances_numba(_XYZ_3D, _PAIR_01)
         assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
 
     def test_multi_frame(self) -> None:
-        result = _pairwise_distances_numba(_XYZ_MULTI, _PAIR_01)
+        result = distances_numba(_XYZ_MULTI, _PAIR_01)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
-        result = _pairwise_distances_numba(xyz, _PAIR_01)
+        result = distances_numba(xyz, _PAIR_01)
         assert result.dtype == np.float64
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[0, 5]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_numba(xyz, pairs)
+            distances_numba(xyz, pairs)
 
     def test_negative_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[-1, 1]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_numba(xyz, pairs)
+            distances_numba(xyz, pairs)
 
     def test_empty_pairs(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.empty((0, 2), dtype=np.int_)
-        result = _pairwise_distances_numba(xyz, pairs)
+        result = distances_numba(xyz, pairs)
         assert result.shape == (2, 0)
 
 
@@ -306,47 +278,47 @@ class TestMdtrajKernel:
 
 @requires_cupy
 class TestCupyKernel:
-    """Direct tests on _pairwise_distances_cupy."""
+    """Direct tests on distances_cupy."""
 
     def test_known_distance(self) -> None:
-        result = _pairwise_distances_cupy(_XYZ_1NM, _PAIR_01)
+        result = distances_cupy(_XYZ_1NM, _PAIR_01)
         assert result.shape == (1, 1)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
 
     def test_self_distance_is_zero(self) -> None:
-        result = _pairwise_distances_cupy(_XYZ_SELF, _PAIR_00)
+        result = distances_cupy(_XYZ_SELF, _PAIR_00)
         assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
 
     def test_3d_distance(self) -> None:
-        result = _pairwise_distances_cupy(_XYZ_3D, _PAIR_01)
+        result = distances_cupy(_XYZ_3D, _PAIR_01)
         assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
 
     def test_multi_frame(self) -> None:
-        result = _pairwise_distances_cupy(_XYZ_MULTI, _PAIR_01)
+        result = distances_cupy(_XYZ_MULTI, _PAIR_01)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
-        result = _pairwise_distances_cupy(xyz, _PAIR_01)
+        result = distances_cupy(xyz, _PAIR_01)
         assert result.dtype == np.float64
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[0, 5]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_cupy(xyz, pairs)
+            distances_cupy(xyz, pairs)
 
     def test_negative_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[-1, 1]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_cupy(xyz, pairs)
+            distances_cupy(xyz, pairs)
 
     def test_empty_pairs(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.empty((0, 2), dtype=np.int_)
-        result = _pairwise_distances_cupy(xyz, pairs)
+        result = distances_cupy(xyz, pairs)
         assert result.shape == (2, 0)
 
 
@@ -357,47 +329,47 @@ class TestCupyKernel:
 
 @requires_torch
 class TestTorchKernel:
-    """Direct tests on _pairwise_distances_torch."""
+    """Direct tests on distances_torch."""
 
     def test_known_distance(self) -> None:
-        result = _pairwise_distances_torch(_XYZ_1NM, _PAIR_01)
+        result = distances_torch(_XYZ_1NM, _PAIR_01)
         assert result.shape == (1, 1)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
 
     def test_self_distance_is_zero(self) -> None:
-        result = _pairwise_distances_torch(_XYZ_SELF, _PAIR_00)
+        result = distances_torch(_XYZ_SELF, _PAIR_00)
         assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
 
     def test_3d_distance(self) -> None:
-        result = _pairwise_distances_torch(_XYZ_3D, _PAIR_01)
+        result = distances_torch(_XYZ_3D, _PAIR_01)
         assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
 
     def test_multi_frame(self) -> None:
-        result = _pairwise_distances_torch(_XYZ_MULTI, _PAIR_01)
+        result = distances_torch(_XYZ_MULTI, _PAIR_01)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
-        result = _pairwise_distances_torch(xyz, _PAIR_01)
+        result = distances_torch(xyz, _PAIR_01)
         assert result.dtype == np.float64
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[0, 5]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_torch(xyz, pairs)
+            distances_torch(xyz, pairs)
 
     def test_negative_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[-1, 1]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_torch(xyz, pairs)
+            distances_torch(xyz, pairs)
 
     def test_empty_pairs(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.empty((0, 2), dtype=np.int_)
-        result = _pairwise_distances_torch(xyz, pairs)
+        result = distances_torch(xyz, pairs)
         assert result.shape == (2, 0)
 
 
@@ -408,47 +380,47 @@ class TestTorchKernel:
 
 @requires_jax
 class TestJaxKernel:
-    """Direct tests on _pairwise_distances_jax."""
+    """Direct tests on distances_jax."""
 
     def test_known_distance(self) -> None:
-        result = _pairwise_distances_jax(_XYZ_1NM, _PAIR_01)
+        result = distances_jax(_XYZ_1NM, _PAIR_01)
         assert result.shape == (1, 1)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
 
     def test_self_distance_is_zero(self) -> None:
-        result = _pairwise_distances_jax(_XYZ_SELF, _PAIR_00)
+        result = distances_jax(_XYZ_SELF, _PAIR_00)
         assert result[0, 0] == pytest.approx(0.0, abs=1e-10)
 
     def test_3d_distance(self) -> None:
-        result = _pairwise_distances_jax(_XYZ_3D, _PAIR_01)
+        result = distances_jax(_XYZ_3D, _PAIR_01)
         assert result[0, 0] == pytest.approx(np.sqrt(14.0), abs=1e-5)
 
     def test_multi_frame(self) -> None:
-        result = _pairwise_distances_jax(_XYZ_MULTI, _PAIR_01)
+        result = distances_jax(_XYZ_MULTI, _PAIR_01)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
-        result = _pairwise_distances_jax(xyz, _PAIR_01)
+        result = distances_jax(xyz, _PAIR_01)
         assert result.dtype == np.float64
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[0, 5]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_jax(xyz, pairs)
+            distances_jax(xyz, pairs)
 
     def test_negative_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.array([[-1, 1]], dtype=np.int_)
         with pytest.raises(ValueError, match="atom_pairs must contain indices"):
-            _pairwise_distances_jax(xyz, pairs)
+            distances_jax(xyz, pairs)
 
     def test_empty_pairs(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
         pairs = np.empty((0, 2), dtype=np.int_)
-        result = _pairwise_distances_jax(xyz, pairs)
+        result = distances_jax(xyz, pairs)
         assert result.shape == (2, 0)
 
 
@@ -544,21 +516,21 @@ def _build_kernel_map() -> dict[str, tuple[bool, Callable[..., np.ndarray]]]:
         return _KERNELS
 
     def _run_numba(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
-        return _pairwise_distances_numba(xyz, pairs)
+        return distances_numba(xyz, pairs)
 
     def _run_cupy(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
-        return _pairwise_distances_cupy(xyz, pairs)
+        return distances_cupy(xyz, pairs)
 
     def _run_torch(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
-        return _pairwise_distances_torch(xyz, pairs)
+        return distances_torch(xyz, pairs)
 
     def _run_jax(xyz: np.ndarray, pairs: np.ndarray) -> np.ndarray:
-        return _pairwise_distances_jax(xyz, pairs)
+        return distances_jax(xyz, pairs)
 
     _KERNELS["numba"] = (True, _run_numba)
-    _KERNELS["cupy"] = (_has_cupy, _run_cupy)
-    _KERNELS["torch"] = (_has_torch, _run_torch)
-    _KERNELS["jax"] = (_has_jax, _run_jax)
+    _KERNELS["cupy"] = (has_cupy, _run_cupy)
+    _KERNELS["torch"] = (has_torch, _run_torch)
+    _KERNELS["jax"] = (has_jax, _run_jax)
     return _KERNELS
 
 
