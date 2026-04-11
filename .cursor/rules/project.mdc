@@ -50,6 +50,27 @@ Why:
 
 **Never change a public function's default backend away from `"mdtraj"`.** Add performance notes in the docstring pointing users to `backend="numba"` or a GPU backend when they need speed.
 
+## Backend Registry Typing Rule
+
+Every `BackendRegistry[F]` instance MUST be parameterised with an explicit `Protocol` type `F` defined in the same `_backends/_<kind>.py` file. Example:
+
+```python
+from typing import Protocol
+
+class RMSDMatrixBackendFn(Protocol):
+    def __call__(
+        self,
+        traj: md.Trajectory,
+        atom_indices: NDArray[np.int_],
+    ) -> NDArray[np.float64]: ...
+
+rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
+```
+
+**Never** declare a bare `BackendRegistry` without a type parameter -- `registry.get(backend)` would return an unbound `F`, and callers like `compute_fn = rmsd_matrix_backends.get(backend)` would lose type information. The Protocol lives next to the backends it describes (not in the shared `_registry.py`) so the registry module stays decoupled.
+
+**Uniform signature rule**: every backend registered in the same registry MUST accept the exact Protocol call signature. If one backend needs an extra keyword argument (e.g. `periodic` on mdtraj), every other backend MUST also accept that keyword, silently ignoring it if unused (`# noqa: ARG001` + docstring note). This preserves type inference at call sites and keeps dispatchers branch-free.
+
 ## Plotting Module Patterns
 
 Every `plot_*` function follows this contract:

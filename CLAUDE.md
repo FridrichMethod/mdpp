@@ -298,17 +298,59 @@ Rationale:
 Users who want performance explicitly pass `backend="numba"` (or a GPU
 backend) and accept the PBC limitation.
 
+**Uniform signature rule**: every backend registered in a given
+`BackendRegistry` MUST accept the exact same call signature as the
+Protocol type parameter on that registry. If one backend needs an
+extra keyword argument (e.g. `periodic` on mdtraj), every other
+backend in the same registry MUST also accept that keyword, silently
+ignoring it if unused (mark `# noqa: ARG001` and document in the
+docstring that the arg is accepted for Protocol uniformity and
+ignored). This keeps the dispatcher free of per-backend branching
+and preserves type inference for callers.
+
+**Registry typing rule**: every `BackendRegistry[F]` instance MUST be
+parameterised with an explicit `Protocol` type `F`:
+
+```python
+from typing import Protocol
+
+class RMSDMatrixBackendFn(Protocol):
+    def __call__(
+        self,
+        traj: md.Trajectory,
+        atom_indices: NDArray[np.int_],
+    ) -> NDArray[np.float64]: ...
+
+rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
+```
+
+Never declare a bare `BackendRegistry` without a type parameter --
+`registry.get(backend)` would return an unbound `F` and the dispatcher
+would lose the signature of `compute_fn` at the call site. The
+Protocol lives in the same `_backends/_<kind>.py` file as the backends
+it describes (not in the shared `_registry.py`) so the registry module
+stays decoupled from any particular backend signature.
+
 ### New compute backend
 
 To add a new backend (e.g. `cupy`) for an existing compute function like the RMSD matrix or pairwise distances:
 
 1. Add an implementation function in the matching `src/mdpp/analysis/_backends/_<kind>.py` file.
 1. Use lazy imports via `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` -- never import optional GPU libraries at module top-level.
-1. Keep the signature aligned with existing backends in the same file (e.g. `(traj, pairs)` for distances, `(traj, atom_indices)` for RMSD matrix).
+1. Match the `Protocol` type defined at the top of the same file exactly (e.g. `RMSDMatrixBackendFn`, `DistanceBackendFn`). If you introduce a new keyword argument, also retrofit every existing backend in the same registry to accept it (silently ignoring if unused, `# noqa: ARG001`).
 1. Register the function in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias in `_backends/_registry.py` (`DistanceBackend` or `RMSDBackend`).
-1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` marker.
+1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` marker and `@pytest.mark.gpu` (if GPU-only).
 1. **Do not change the public function's default backend** -- keep it at `"mdtraj"`.
+
+### New backend registry
+
+To introduce a registry for a new multi-backend compute function:
+
+1. Create `src/mdpp/analysis/_backends/_<kind>.py` with a `Protocol` class defining the shared call signature.
+1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` -- always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
+1. Add a `Literal` alias to `_backends/_registry.py` (`type <Kind>Backend = Literal["mdtraj", "numba", ...]`) and re-export it from `_backends/__init__.py`.
+1. The public wrapper in `src/mdpp/analysis/<kind>.py` should import the registry and delegate via `compute_fn = <kind>_backends.get(backend)`, letting mypy infer the Protocol type.
 
 ### New cheminformatics function
 

@@ -140,16 +140,45 @@ Reasons:
 
 When reviewing or writing code, never change a public function's default backend away from `"mdtraj"`.
 
+**Uniform signature rule**: every backend registered in a given `BackendRegistry` MUST accept the exact same call signature as the Protocol type parameter on that registry. If one backend needs an extra keyword argument (e.g. `periodic` on mdtraj), every other backend in the same registry MUST also accept that keyword, silently ignoring it if unused (mark `# noqa: ARG001` and document as "accepted for Protocol uniformity, ignored"). This keeps the dispatcher free of per-backend branching and preserves type inference for callers.
+
+**Registry typing rule**: every `BackendRegistry[F]` instance MUST be parameterised with an explicit `Protocol` type `F`:
+
+```python
+from typing import Protocol
+
+class RMSDMatrixBackendFn(Protocol):
+    def __call__(
+        self,
+        traj: md.Trajectory,
+        atom_indices: NDArray[np.int_],
+    ) -> NDArray[np.float64]: ...
+
+rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
+```
+
+Never declare a bare `BackendRegistry` without a type parameter -- `registry.get(backend)` would return an unbound `F` and the dispatcher would lose the signature of `compute_fn` at the call site. The Protocol lives in the same `_backends/_<kind>.py` file as the backends it describes (not in the shared `_registry.py`) so the registry module stays decoupled from any particular backend signature.
+
 ## Adding a New Compute Backend
 
 For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise distances):
 
-1. Add the implementation in the matching `src/mdpp/analysis/_backends/_<kind>.py` file, matching the existing signature.
+1. Add the implementation in the matching `src/mdpp/analysis/_backends/_<kind>.py` file, matching the `Protocol` type defined at the top of that file exactly.
 1. Use `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` for optional GPU libraries -- never import them at module top-level.
+1. If you introduce a new keyword argument, also retrofit every existing backend in the same registry to accept it (silently ignoring when unused, marked `# noqa: ARG001`).
 1. Register in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend`) in `_backends/_registry.py`.
-1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` skip marker.
+1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` skip marker and `@pytest.mark.gpu` (if GPU-only).
 1. **Do not change the public function's default backend** -- keep it at `"mdtraj"`.
+
+## Adding a New Backend Registry
+
+To introduce a registry for a new multi-backend compute function:
+
+1. Create `src/mdpp/analysis/_backends/_<kind>.py` with a `Protocol` class defining the shared call signature.
+1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` -- always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
+1. Add a `Literal` alias to `_backends/_registry.py` (`type <Kind>Backend = Literal["mdtraj", "numba", ...]`) and re-export it from `_backends/__init__.py`.
+1. The public wrapper in `src/mdpp/analysis/<kind>.py` imports the registry and delegates via `compute_fn = <kind>_backends.get(backend)`, letting mypy infer the Protocol type at the call site.
 
 ## Adding a New Chem Function
 
