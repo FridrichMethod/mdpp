@@ -331,12 +331,44 @@ Protocol lives in the same `_backends/_<kind>.py` file as the backends
 it describes (not in the shared `_registry.py`) so the registry module
 stays decoupled from any particular backend signature.
 
+**GPU cache cleanup rule**: every GPU-backed compute kernel MUST be
+decorated with the matching framework-specific cache-cleanup
+decorator from `_backends/_imports.py`:
+
+| Backend | Decorator |
+|---|---|
+| `torch` | `@clean_torch_cache` |
+| `cupy` | `@clean_cupy_cache` |
+| `jax` | `@clean_jax_cache` |
+
+Example:
+
+```python
+from mdpp.analysis._backends._imports import clean_torch_cache
+
+@clean_torch_cache
+def rmsd_torch(traj, atom_indices):
+    ...
+    return result.cpu().numpy()
+```
+
+The decorators call the framework's cache-clear API
+(`torch.cuda.empty_cache()`, `cp.get_default_memory_pool().free_all_blocks()`,
+`jax.clear_caches()`) in a `finally` block so pooled memory is
+returned to the driver on normal return *and* on exceptions. Apply
+decorators to the inner kernel functions, **not** the outer
+`compute_*` wrappers (the wrappers are CPU-only and delegate to the
+kernel via the registry). The decorators use PEP 695 generic
+syntax (`[**P, T]`) so mypy preserves the Protocol signature at
+registry call sites.
+
 ### New compute backend
 
 To add a new backend (e.g. `cupy`) for an existing compute function like the RMSD matrix or pairwise distances:
 
 1. Add an implementation function in the matching `src/mdpp/analysis/_backends/_<kind>.py` file.
 1. Use lazy imports via `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` -- never import optional GPU libraries at module top-level.
+1. Decorate GPU kernels with the matching `@clean_torch_cache` / `@clean_cupy_cache` / `@clean_jax_cache` from `_backends/_imports.py` so pooled GPU memory is released in a `finally` block after the kernel runs.
 1. Match the `Protocol` type defined at the top of the same file exactly (e.g. `RMSDMatrixBackendFn`, `DistanceBackendFn`). If you introduce a new keyword argument, also retrofit every existing backend in the same registry to accept it (silently ignoring if unused, `# noqa: ARG001`).
 1. Register the function in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias in `_backends/_registry.py` (`DistanceBackend` or `RMSDBackend`).

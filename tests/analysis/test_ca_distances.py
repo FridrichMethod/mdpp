@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis._backends import has_cupy, has_jax, has_torch
+from mdpp.analysis._backends import free_gpu_cache, has_cupy, has_jax, has_torch
 from mdpp.analysis._backends._distances import (
     distances_cupy,
     distances_jax,
@@ -539,25 +539,6 @@ def _build_kernel_map() -> dict[str, tuple[bool, Callable[..., np.ndarray]]]:
     return _KERNELS
 
 
-def _free_gpu_memory_pools() -> None:
-    """Release pooled GPU memory before a benchmark run.
-
-    cupy and torch each maintain a caching allocator that can become
-    fragmented when the host GPU is shared with other processes.
-    Calling this helper between parameterised benchmarks keeps each
-    run starting from a clean pool so large allocations succeed.
-    """
-    if has_cupy:
-        import cupy as cp
-
-        cp.get_default_memory_pool().free_all_blocks()
-    if has_torch:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-
 def _is_gpu_oom(exc: BaseException) -> bool:
     """Return True if *exc* looks like a GPU out-of-memory error.
 
@@ -575,7 +556,7 @@ def _run_benchmark(n_frames: int, n_atoms: int) -> None:
     """Run all available backends on a synthetic trajectory and print results."""
     import time
 
-    _free_gpu_memory_pools()
+    free_gpu_cache()
 
     rng = np.random.default_rng(42)
     xyz = rng.normal(size=(n_frames, n_atoms, 3)).astype(np.float32) * 0.1
@@ -616,7 +597,7 @@ def _run_benchmark(n_frames: int, n_atoms: int) -> None:
         except Exception as exc:
             if _is_gpu_oom(exc):
                 skipped[name] = "GPU OOM"
-                _free_gpu_memory_pools()
+                free_gpu_cache()
                 continue
             raise
 

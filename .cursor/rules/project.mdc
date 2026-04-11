@@ -71,6 +71,8 @@ rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(def
 
 **Uniform signature rule**: every backend registered in the same registry MUST accept the exact Protocol call signature. If one backend needs an extra keyword argument (e.g. `periodic` on mdtraj), every other backend MUST also accept that keyword, silently ignoring it if unused (`# noqa: ARG001` + docstring note). This preserves type inference at call sites and keeps dispatchers branch-free.
 
+**GPU cache cleanup rule**: every GPU-backed compute kernel MUST be decorated with the matching framework-specific cleanup decorator from `_backends/_imports.py`: `@clean_torch_cache` on torch kernels, `@clean_cupy_cache` on cupy kernels, `@clean_jax_cache` on jax kernels. These release pooled device memory via `torch.cuda.empty_cache()` / `cp.get_default_memory_pool().free_all_blocks()` / `jax.clear_caches()` in a `finally` block so memory is returned to the driver on both normal return and exceptions. Apply decorators to **inner** kernel functions (`rmsd_torch`, `distances_cupy`, ...) -- never the outer CPU-side `compute_*` wrappers.
+
 ## Plotting Module Patterns
 
 Every `plot_*` function follows this contract:

@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis._backends import has_cupy, has_jax, has_torch
+from mdpp.analysis._backends import free_gpu_cache, has_cupy, has_jax, has_torch
 from mdpp.analysis.clustering import (
     ClusteringResult,
     RMSDMatrixResult,
@@ -244,25 +244,6 @@ class TestClusterConformations:
 # ---------------------------------------------------------------------------
 
 
-def _free_gpu_memory_pools() -> None:
-    """Release pooled GPU memory before a benchmark run.
-
-    cupy and torch each maintain a caching allocator that can become
-    fragmented when the host GPU is shared with other processes.
-    Calling this helper between parameterised benchmarks keeps each
-    run starting from a clean pool so large allocations succeed.
-    """
-    if has_cupy:
-        import cupy as cp
-
-        cp.get_default_memory_pool().free_all_blocks()
-    if has_torch:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-
 def _is_gpu_oom(exc: BaseException) -> bool:
     """Return True if *exc* looks like a GPU out-of-memory error."""
     name = type(exc).__name__.lower()
@@ -281,7 +262,7 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     GPU backends that run out of memory on shared/contended GPUs are
     skipped with a printed note instead of failing the test.
     """
-    _free_gpu_memory_pools()
+    free_gpu_cache()
     ref = compute_rmsd_matrix(traj, atom_selection="all", backend="mdtraj")
     # Symmetrise mdtraj result (md.rmsd loop is not numerically symmetric).
     ref_mat = (ref.rmsd_matrix_nm + ref.rmsd_matrix_nm.T) / 2.0
@@ -310,7 +291,7 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
         except Exception as exc:
             if _is_gpu_oom(exc):
                 skipped[name] = "GPU OOM"
-                _free_gpu_memory_pools()
+                free_gpu_cache()
                 continue
             raise
 

@@ -25,7 +25,14 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from mdpp.analysis._backends._imports import require_cupy, require_jax, require_torch
+from mdpp.analysis._backends._imports import (
+    clean_cupy_cache,
+    clean_jax_cache,
+    clean_torch_cache,
+    require_cupy,
+    require_jax,
+    require_torch,
+)
 from mdpp.analysis._backends._registry import BackendRegistry
 
 
@@ -127,6 +134,7 @@ def distances_numba(
     return _kernel(traj.xyz, pairs)
 
 
+@clean_cupy_cache
 def distances_cupy(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
@@ -159,6 +167,7 @@ def distances_cupy(
     return cp.asnumpy(distances).astype(np.float64)
 
 
+@clean_torch_cache
 def distances_torch(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
@@ -195,6 +204,7 @@ def distances_torch(
     return distances.cpu().numpy().astype(np.float64)
 
 
+@clean_jax_cache
 def distances_jax(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],

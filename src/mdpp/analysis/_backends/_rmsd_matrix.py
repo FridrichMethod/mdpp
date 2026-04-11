@@ -21,7 +21,14 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from mdpp.analysis._backends._imports import require_cupy, require_jax, require_torch
+from mdpp.analysis._backends._imports import (
+    clean_cupy_cache,
+    clean_jax_cache,
+    clean_torch_cache,
+    require_cupy,
+    require_jax,
+    require_torch,
+)
 from mdpp.analysis._backends._registry import BackendRegistry
 
 
@@ -205,6 +212,7 @@ def rmsd_mdtraj(
     return rmsd_matrix
 
 
+@clean_torch_cache
 def rmsd_torch(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
@@ -251,6 +259,7 @@ def rmsd_torch(
     return result.cpu().numpy()
 
 
+@clean_jax_cache
 def rmsd_jax(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
@@ -291,6 +300,7 @@ def rmsd_jax(
     return np.asarray(result)
 
 
+@clean_cupy_cache
 def rmsd_cupy(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
