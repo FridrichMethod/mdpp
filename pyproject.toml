@@ -183,4 +183,5 @@ env = ["TQDM_DISABLE=1"]
 markers = [
     "benchmark: performance benchmarks with timing output (deselect with '-m \"not benchmark\"')",
     "slow: resource-intensive tests that take >10s (deselect with '-m \"not slow\"')",
+    "gpu: tests that exercise GPU backends cupy/torch/jax (deselect with '-m \"not gpu\"')",
 ]

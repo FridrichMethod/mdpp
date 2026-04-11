@@ -13,3 +13,21 @@ alwaysApply: false
 - Plotting tests use `matplotlib.use("Agg")` and call `plt.close(figure)` after assertions.
 - Import from public API paths (`from mdpp.analysis.metrics import compute_rmsd`).
 - No `__init__.py` files in test directories (pytest discovers without them).
+
+## Pytest Markers
+
+Three custom markers (registered in `pyproject.toml`, `--strict-markers` enforced):
+
+| Marker | Use when |
+|---|---|
+| `@pytest.mark.benchmark` | The test reports timing/throughput (typically with printed output) |
+| `@pytest.mark.slow` | The test takes >10 s wall time |
+| `@pytest.mark.gpu` | The test exercises cupy/torch/jax backends |
+
+Combine freely: `@pytest.mark.benchmark` + `@pytest.mark.slow` + `@pytest.mark.gpu` on a large-scale GPU benchmark.
+
+Users run:
+
+- `pytest -m "not gpu"` -- CPU-only environments
+- `pytest -m "not benchmark"` -- fast CI (correctness only)
+- `pytest -m "benchmark and not slow"` -- fast perf checks

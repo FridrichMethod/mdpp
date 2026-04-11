@@ -273,6 +273,7 @@ class TestMdtrajKernel:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 @requires_cupy
 class TestCupyKernel:
     """Direct tests on distances_cupy."""
@@ -324,6 +325,7 @@ class TestCupyKernel:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 @requires_torch
 class TestTorchKernel:
     """Direct tests on distances_torch."""
@@ -375,6 +377,7 @@ class TestTorchKernel:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 @requires_jax
 class TestJaxKernel:
     """Direct tests on distances_jax."""
@@ -426,8 +429,13 @@ class TestJaxKernel:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 class TestAllBackendsEquivalence:
-    """All backends must produce numerically identical results."""
+    """All backends must produce numerically identical results.
+
+    Marked ``gpu`` because every test method uses one of the optional
+    GPU backends (cupy / torch / jax) -- deselect with ``-m "not gpu"``.
+    """
 
     def _reference(self, traj: md.Trajectory) -> np.ndarray:
         return featurize_ca_distances(traj, backend="numba").values
@@ -622,6 +630,7 @@ def _run_benchmark(n_frames: int, n_atoms: int) -> None:
         print(f"  {name:<10s} {'--':>10s} (skipped: {reason})")
 
 
+@pytest.mark.gpu
 @pytest.mark.benchmark
 @pytest.mark.parametrize(
     ("n_frames", "n_atoms"),
@@ -647,6 +656,7 @@ def test_benchmark_distance_backends_fast(n_frames: int, n_atoms: int) -> None:
     _run_benchmark(n_frames, n_atoms)
 
 
+@pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.benchmark
 @pytest.mark.parametrize(

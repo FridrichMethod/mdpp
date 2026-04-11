@@ -199,20 +199,27 @@ The `three_d.py` module provides interactive 3D visualization via py3Dmol and ng
 
 #### Pytest Markers
 
-Two custom markers control test selection (`--strict-markers` enforced):
+Three custom markers control test selection (`--strict-markers` enforced):
 
 | Marker | Purpose | Deselect |
 |--------|---------|----------|
 | `benchmark` | Performance timing tests with printed reports | `-m "not benchmark"` |
 | `slow` | Resource-intensive tests (>10s runtime) | `-m "not slow"` |
+| `gpu` | Tests that exercise GPU backends cupy/torch/jax | `-m "not gpu"` |
+
+Combine markers with boolean expressions, e.g.:
+
+- `pytest -m "benchmark and not slow"` -- fast benchmarks only
+- `pytest -m "not gpu"` -- CPU-only test run (skips all GPU backend coverage)
+- `pytest -m "benchmark and gpu and not slow"` -- fast GPU benchmarks
 
 Current benchmark tests:
 
-- `tests/analysis/test_ca_distances.py` -- pairwise distance backend comparison (mdtraj/numba/cupy/torch/jax) at 3 scales (1K-100, 3K-200, 3K-400 atoms).
-- `tests/analysis/test_clustering.py` -- RMSD matrix Numba vs mdtraj speed (5-run median).
+- `tests/analysis/test_ca_distances.py` -- fast (1K-100/1K-200/2K-200) and slow (3K-200/5K-200) pairwise distance backend tiers, both marked `gpu`.
+- `tests/analysis/test_clustering.py` -- fast (100f/200f) and slow (500f/1000f) RMSD matrix backend tiers, both marked `gpu`.
 - `tests/core/test_trajectory.py` -- atom selection: direct loading vs load-all+slice memory and timing.
 
-When adding a new benchmark, decorate with `@pytest.mark.benchmark` (and `@pytest.mark.slow` if >10s). Register any new markers in `pyproject.toml` `[tool.pytest.ini_options].markers`.
+When adding a new benchmark, decorate with `@pytest.mark.benchmark` (and `@pytest.mark.slow` if >10s; add `@pytest.mark.gpu` if it exercises cupy/torch/jax backends). Register any new markers in `pyproject.toml` `[tool.pytest.ini_options].markers`.
 
 ### Shell Scripts
 

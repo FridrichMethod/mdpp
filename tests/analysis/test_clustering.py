@@ -131,6 +131,7 @@ class TestComputeRmsdMatrix:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 class TestGpuBackendAgreement:
     """Verify that torch, jax, and cupy backends agree with numba.
 
@@ -139,7 +140,8 @@ class TestGpuBackendAgreement:
     ``atol=5e-5 nm`` (~0.0005 Angstrom).  The numba result is itself
     validated against mdtraj in ``TestComputeRmsdMatrix``.
 
-    Tests are skipped when the corresponding package is not installed.
+    Tests are skipped when the corresponding package is not installed
+    or when the ``gpu`` marker is deselected (``-m "not gpu"``).
     """
 
     @requires_torch
@@ -349,6 +351,7 @@ def _make_alanine_traj(n_frames: int, n_residues: int) -> md.Trajectory:
     return md.Trajectory(xyz=xyz, topology=topology)
 
 
+@pytest.mark.gpu
 @pytest.mark.benchmark
 @pytest.mark.parametrize(
     ("n_frames", "n_residues"),
@@ -371,6 +374,7 @@ def test_benchmark_rmsd_backends_fast(n_frames: int, n_residues: int) -> None:
     _run_rmsd_benchmark(traj)
 
 
+@pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.benchmark
 @pytest.mark.parametrize(

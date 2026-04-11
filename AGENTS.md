@@ -22,11 +22,33 @@ bash setup.sh
 ## Verification
 
 ```bash
-pytest                             # run all tests
+pytest                             # run all tests (auto-parallel)
 ruff check src/ tests/ --fix       # lint
 ruff format src/ tests/            # format
 pre-commit run --all-files         # full check suite
 ```
+
+### Pytest markers
+
+Three custom markers gate optional test subsets (`--strict-markers` enforced):
+
+| Marker | Purpose |
+|---|---|
+| `benchmark` | Performance timing tests with printed reports |
+| `slow` | Resource-intensive tests (>10s runtime) |
+| `gpu` | Tests that exercise GPU backends cupy/torch/jax |
+
+Combine markers with boolean expressions:
+
+```bash
+pytest -m "not benchmark"               # skip all benchmarks
+pytest -m "benchmark and not slow"      # fast benchmarks only
+pytest -m "not gpu"                     # CPU-only run
+pytest -m "benchmark and gpu"           # all GPU-exercising benchmarks
+pytest -m "not (slow or benchmark)"     # minimum fast CI subset
+```
+
+Register any new markers in `pyproject.toml` `[tool.pytest.ini_options].markers`.
 
 After modifying any production code under `src/mdpp/`, you MUST complete the following loop before considering the task done. Repeat until no CRITICAL issues remain:
 

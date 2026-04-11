@@ -220,11 +220,16 @@ ruff format src/ tests/
 mypy src/mdpp/
 
 # Run tests
-pytest
+pytest                               # full suite
+pytest -m "not benchmark"            # skip perf benchmarks
+pytest -m "not gpu"                  # skip GPU backend tests (CPU-only)
+pytest -m "benchmark and not slow"   # fast performance checks
 
 # Full pre-commit suite
 pre-commit run --all-files
 ```
+
+Custom pytest markers: `benchmark` (timing), `slow` (>10s), `gpu` (cupy/torch/jax).
 
 ## License
 
