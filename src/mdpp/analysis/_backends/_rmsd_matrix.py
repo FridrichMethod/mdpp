@@ -237,6 +237,105 @@ def rmsd_mdtraj(
     return rmsd_matrix
 
 
+def _rmsd_torch_row_chunk(torch_mod, free_bytes: int, n_frames: int) -> int:
+    """Choose row-block size for the torch QCP kernel.
+
+    Each block materialises ``(chunk, N, 3, 3)`` cross-covariance plus
+    ~12 intermediate ``(chunk, N)`` float32 tensors for the QCP
+    polynomial coefficients and Newton-Raphson state.  Peak usage is
+    roughly ``180 * chunk * N`` bytes.  Target 25% of the free pool
+    so there is headroom for ``xyz`` / ``traces`` / transient
+    allocations, capping at ``n_frames`` so small trajectories still
+    run in a single pass.
+    """
+    del torch_mod  # linked via type sig; kept for future expansion
+    # ~180 bytes per pair is an empirical upper bound on peak memory.
+    per_pair_bytes = 180
+    budget = max(free_bytes // 4, 1)
+    chunk = budget // (per_pair_bytes * max(n_frames, 1))
+    return int(max(1, min(chunk, n_frames)))
+
+
+def _rmsd_qcp_torch(
+    torch_mod, H_block, trace_rows, traces_all, n_atoms: int
+):  # pragma: no cover - thin helper
+    """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances.
+
+    ``H_block`` has shape ``(C, N, 3, 3)``.  ``trace_rows`` has shape
+    ``(C,)`` (traces for the current row-block); ``traces_all`` has
+    shape ``(N,)``.  Returns an ``(C, N)`` tensor of RMSD values.
+    """
+    Sxx = H_block[..., 0, 0]
+    Sxy = H_block[..., 0, 1]
+    Sxz = H_block[..., 0, 2]
+    Syx = H_block[..., 1, 0]
+    Syy = H_block[..., 1, 1]
+    Syz = H_block[..., 1, 2]
+    Szx = H_block[..., 2, 0]
+    Szy = H_block[..., 2, 1]
+    Szz = H_block[..., 2, 2]
+
+    c2 = -2.0 * (
+        Sxx * Sxx
+        + Sxy * Sxy
+        + Sxz * Sxz
+        + Syx * Syx
+        + Syy * Syy
+        + Syz * Syz
+        + Szx * Szx
+        + Szy * Szy
+        + Szz * Szz
+    )
+    c1 = -8.0 * (
+        Sxx * (Syy * Szz - Syz * Szy)
+        - Sxy * (Syx * Szz - Syz * Szx)
+        + Sxz * (Syx * Szy - Syy * Szx)
+    )
+
+    ka = Sxx + Syy + Szz
+    kb = Syz - Szy
+    kc = Szx - Sxz
+    kd = Sxy - Syx
+    ke = Sxx - Syy - Szz
+    kf = Sxy + Syx
+    kg = Szx + Sxz
+    kh = -Sxx + Syy - Szz
+    km = Syz + Szy
+    kn = -Sxx - Syy + Szz
+    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+
+    hn_mm = kh * kn - km * km
+    fn_mg = kf * kn - km * kg
+    fm_hg = kf * km - kh * kg
+    cn_md = kc * kn - km * kd
+    cm_hd = kc * km - kh * kd
+    cg_fd = kc * kg - kf * kd
+
+    c0 = (
+        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+    )
+
+    trace_i = trace_rows.unsqueeze(1)  # (C, 1)
+    trace_j = traces_all.unsqueeze(0)  # (1, N)
+    lam = (trace_i + trace_j) * 0.5  # (C, N)
+    for _ in range(30):
+        l2 = lam * lam
+        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+        delta = torch_mod.where(
+            fp_val.abs() > 0,
+            f_val / fp_val,
+            torch_mod.zeros_like(fp_val),
+        )
+        lam = lam - delta
+
+    rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
+    return torch_mod.sqrt(torch_mod.clamp(rmsd_sq, min=0.0))
+
+
 @clean_torch_cache
 def rmsd_torch(
     traj: md.Trajectory,
@@ -244,25 +343,39 @@ def rmsd_torch(
 ) -> NDArray[np.float64]:
     """Compute pairwise RMSD matrix using PyTorch (CUDA if available).
 
-    Uses vectorised ``einsum`` for all pairwise cross-covariance
-    matrices followed by the Quaternion Characteristic Polynomial
-    (Theobald 2005) Newton-Raphson solve on the quartic -- same
-    algorithm as the Numba kernel, but broadcast across all pairs
-    in ``(n_pairs,)``-shaped tensors.  Falls back to CPU when no
-    CUDA device is found.
+    Implements the Quaternion Characteristic Polynomial (Theobald 2005)
+    Newton-Raphson solve on the quartic, the same algorithm as the
+    Numba kernel, broadcast across all pairs within a row block.
 
-    **Why QCP and not batched SVD**: batched ``torch.linalg.svd``
-    on 3x3 matrices has high LAPACK per-matrix overhead; for
-    500k pairs it takes ~70 ms even in float32 and dominates wall
-    time.  QCP is pure element-wise arithmetic on flat tensors
-    (~50 flops per pair, fixed 30 Newton-Raphson iterations) and
-    runs ~20x faster on the same workload.
+    **Row-chunked streaming.**  A naive "compute all pairs at once"
+    einsum would materialise a ``(N, N, 3, 3)`` cross-covariance
+    tensor -- ~450 GB for a 120k-frame concatenated trajectory.
+    Instead we iterate over row blocks of the RMSD matrix:
 
-    Internally operates in **float32** because consumer and
-    workstation NVIDIA GPUs run float64 at 1/36 -- 1/64 the
-    throughput of float32.  mdtraj stores coordinates in float32
-    anyway, and float32 QCP agrees with the float64 numba reference
-    to ~1e-6 nm -- well below the 5e-5 nm agreement tolerance.
+    * Choose ``chunk`` rows so the ``(chunk, N, 3, 3)`` block plus
+      the Newton-Raphson state fits inside a fraction of free GPU
+      memory (see :func:`_rmsd_torch_row_chunk`).
+    * Compute ``H_block[k, j] = xyz[i_start+k].T @ xyz[j]`` for all
+      ``j`` in one einsum call.
+    * Run vectorised QCP on the block, mask the lower triangle, and
+      transfer the chunk back to the CPU result matrix.
+
+    The result matrix itself lives on the CPU throughout -- for a
+    120k-frame trajectory it is ~54 GB in float32 alone, which would
+    eat a huge chunk of device memory if kept on GPU.
+
+    **Why QCP and not batched SVD**: batched ``torch.linalg.svd`` on
+    3x3 matrices has very high LAPACK per-matrix overhead; even in
+    float32 it takes ~70 ms per 500k pairs and dominates wall time.
+    QCP is pure element-wise arithmetic over ``(chunk, N)``-shaped
+    tensors (~50 flops per pair, 30 Newton iterations) and runs
+    ~20x faster on the same workload.
+
+    Internally operates in **float32**: consumer and workstation
+    NVIDIA GPUs run float64 at 1/36 -- 1/64 the throughput of
+    float32, mdtraj stores coordinates in float32 anyway, and
+    float32 QCP agrees with the float64 numba reference to ~1e-6
+    nm -- well below the 5e-5 nm agreement tolerance.
 
     Raises:
         ImportError: If PyTorch is not installed.
@@ -270,7 +383,7 @@ def rmsd_torch(
     torch = require_torch()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    with torch.no_grad():
+    with torch.inference_mode():
         xyz = torch.as_tensor(
             np.ascontiguousarray(traj.xyz[:, atom_indices, :]),
             dtype=torch.float32,
@@ -281,89 +394,122 @@ def rmsd_torch(
         xyz = xyz - xyz.mean(dim=1, keepdim=True)
         traces = (xyz * xyz).sum(dim=(1, 2))
 
-        # Cross-covariance ``H[i, j, m, n] = sum_a xyz[i, a, m] * xyz[j, a, n]``
-        H_all = torch.einsum("iam,jan->ijmn", xyz, xyz)
-        ii, jj = torch.triu_indices(n_frames, n_frames, offset=1, device=device)
+        # Pick chunk size based on free GPU memory (CUDA) or use the
+        # full trajectory in one shot on CPU.
+        if device.type == "cuda":
+            free_bytes, _total = torch.cuda.mem_get_info(device)
+        else:
+            free_bytes = 1 << 33  # 8 GiB host budget default
+        row_chunk = _rmsd_torch_row_chunk(torch, int(free_bytes), n_frames)
 
-        Sxx = H_all[ii, jj, 0, 0]
-        Sxy = H_all[ii, jj, 0, 1]
-        Sxz = H_all[ii, jj, 0, 2]
-        Syx = H_all[ii, jj, 1, 0]
-        Syy = H_all[ii, jj, 1, 1]
-        Syz = H_all[ii, jj, 1, 2]
-        Szx = H_all[ii, jj, 2, 0]
-        Szy = H_all[ii, jj, 2, 1]
-        Szz = H_all[ii, jj, 2, 2]
-        del H_all
+        # Result matrix lives on CPU to avoid pinning ~N^2 floats on GPU.
+        result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-        # Quartic characteristic polynomial coefficients.
-        c2 = -2.0 * (
-            Sxx * Sxx
-            + Sxy * Sxy
-            + Sxz * Sxz
-            + Syx * Syx
-            + Syy * Syy
-            + Syz * Syz
-            + Szx * Szx
-            + Szy * Szy
-            + Szz * Szz
+        for i_start in range(0, n_frames - 1, row_chunk):
+            i_end = min(i_start + row_chunk, n_frames - 1)
+            xyz_rows = xyz[i_start:i_end]  # (C, M, 3) view
+            # H_block[k, j, m, n] = sum_a xyz_rows[k, a, m] * xyz[j, a, n]
+            H_block = torch.einsum("kam,jan->kjmn", xyz_rows, xyz)
+            rmsd_block = _rmsd_qcp_torch(torch, H_block, traces[i_start:i_end], traces, n_atoms)
+            del H_block
+
+            rmsd_block_cpu = rmsd_block.cpu().numpy()
+            del rmsd_block
+            for k in range(i_end - i_start):
+                i = i_start + k
+                row = rmsd_block_cpu[k, i + 1 :]
+                result[i, i + 1 :] = row
+                result[i + 1 :, i] = row
+
+    return result.astype(np.float64)
+
+
+def _rmsd_qcp_jax(
+    jnp, H_block, trace_rows, traces_all, n_atoms: int
+):  # pragma: no cover - thin helper
+    """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances (JAX)."""
+    Sxx = H_block[..., 0, 0]
+    Sxy = H_block[..., 0, 1]
+    Sxz = H_block[..., 0, 2]
+    Syx = H_block[..., 1, 0]
+    Syy = H_block[..., 1, 1]
+    Syz = H_block[..., 1, 2]
+    Szx = H_block[..., 2, 0]
+    Szy = H_block[..., 2, 1]
+    Szz = H_block[..., 2, 2]
+
+    c2 = -2.0 * (
+        Sxx * Sxx
+        + Sxy * Sxy
+        + Sxz * Sxz
+        + Syx * Syx
+        + Syy * Syy
+        + Syz * Syz
+        + Szx * Szx
+        + Szy * Szy
+        + Szz * Szz
+    )
+    c1 = -8.0 * (
+        Sxx * (Syy * Szz - Syz * Szy)
+        - Sxy * (Syx * Szz - Syz * Szx)
+        + Sxz * (Syx * Szy - Syy * Szx)
+    )
+
+    ka = Sxx + Syy + Szz
+    kb = Syz - Szy
+    kc = Szx - Sxz
+    kd = Sxy - Syx
+    ke = Sxx - Syy - Szz
+    kf = Sxy + Syx
+    kg = Szx + Sxz
+    kh = -Sxx + Syy - Szz
+    km = Syz + Szy
+    kn = -Sxx - Syy + Szz
+    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+
+    hn_mm = kh * kn - km * km
+    fn_mg = kf * kn - km * kg
+    fm_hg = kf * km - kh * kg
+    cn_md = kc * kn - km * kd
+    cm_hd = kc * km - kh * kd
+    cg_fd = kc * kg - kf * kd
+
+    c0 = (
+        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+    )
+
+    trace_i = trace_rows.reshape(-1, 1)
+    trace_j = traces_all.reshape(1, -1)
+    lam = (trace_i + trace_j) * 0.5
+    for _ in range(30):
+        l2 = lam * lam
+        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+        delta = jnp.where(
+            jnp.abs(fp_val) > 0,
+            f_val / fp_val,
+            jnp.zeros_like(fp_val),
         )
-        c1 = -8.0 * (
-            Sxx * (Syy * Szz - Syz * Szy)
-            - Sxy * (Syx * Szz - Syz * Szx)
-            + Sxz * (Syx * Szy - Syy * Szx)
-        )
+        lam = lam - delta
 
-        # 4x4 key matrix elements.
-        ka = Sxx + Syy + Szz
-        kb = Syz - Szy
-        kc = Szx - Sxz
-        kd = Sxy - Syx
-        ke = Sxx - Syy - Szz
-        kf = Sxy + Syx
-        kg = Szx + Sxz
-        kh = -Sxx + Syy - Szz
-        km = Syz + Szy
-        kn = -Sxx - Syy + Szz
-        del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+    rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
+    return jnp.sqrt(jnp.maximum(0.0, rmsd_sq))
 
-        hn_mm = kh * kn - km * km
-        fn_mg = kf * kn - km * kg
-        fm_hg = kf * km - kh * kg
-        cn_md = kc * kn - km * kd
-        cm_hd = kc * km - kh * kd
-        cg_fd = kc * kg - kf * kd
 
-        c0 = (
-            ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-            - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-            + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-            - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-        )
+def _rmsd_jax_row_chunk(n_frames: int) -> int:
+    """Row-block size for the jax QCP kernel.
 
-        # Newton-Raphson for the largest eigenvalue.  Initial guess
-        # ``(G_a + G_b) / 2`` is an upper bound on lambda_max.
-        lam = (traces[ii] + traces[jj]) * 0.5
-        for _ in range(30):
-            l2 = lam * lam
-            f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-            fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-            # Avoid div-by-zero if Newton-Raphson stalls on a flat derivative.
-            delta = torch.where(
-                fp_val.abs() > 0,
-                f_val / fp_val,
-                torch.zeros_like(fp_val),
-            )
-            lam = lam - delta
-
-        rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
-        rmsd_vals = torch.sqrt(torch.clamp(rmsd_sq, min=0.0))
-
-        result = torch.zeros(n_frames, n_frames, dtype=torch.float32, device=device)
-        result[ii, jj] = rmsd_vals
-        result[jj, ii] = rmsd_vals
-
-    return result.cpu().numpy().astype(np.float64)
+    JAX allocates opaquely and does not expose a reliable free-memory
+    query, so we pick a conservative fixed upper bound: each block
+    peak-allocates ~180 bytes per pair, so target ~4 GB per block.
+    """
+    per_pair_bytes = 180
+    budget = 4 * (1 << 30)  # 4 GiB
+    chunk = budget // (per_pair_bytes * max(n_frames, 1))
+    return int(max(1, min(chunk, n_frames)))
 
 
 def rmsd_jax(
@@ -373,18 +519,20 @@ def rmsd_jax(
     """Compute pairwise RMSD matrix using JAX.
 
     JAX auto-selects the best available device (GPU > TPU > CPU).
-    Uses ``jnp.einsum`` for cross-covariance and a vectorised
-    QCP Newton-Raphson solve for the rotational superposition --
-    same algorithm as :func:`rmsd_torch` and :func:`rmsd_cupy`.
+    Row-chunked streaming QCP solve matching :func:`rmsd_torch` --
+    see that docstring for the algorithm, the rationale for
+    float32, and the row-block strategy that keeps peak device
+    memory bounded for large trajectories.
 
-    Internally operates in **float32** for GPU throughput, with
-    ``precision=HIGHEST`` on the einsum to disable TF32 accumulation
-    on NVIDIA GPUs.  This kernel deliberately does **not** use the
-    ``clean_jax_cache`` decorator -- JAX's ``clear_caches()`` clears
-    JIT compilation caches (not device memory), and trashing the
-    compilation cache after every call forces a 1+ second recompile
-    on the next call.  JAX does not expose a public API for returning
-    pooled device memory to the driver anyway.
+    The einsum explicitly passes ``precision=HIGHEST`` to disable
+    JAX's default TF32 / tensor-core accumulation on GPU, which
+    would otherwise drop the einsum to ~19 bits of mantissa and
+    cost ~1e-4 nm accuracy on small test fixtures.
+
+    This kernel is **not** wrapped with a cache-cleanup decorator:
+    ``jax.clear_caches()`` clears JIT compilation caches (not device
+    memory), and trashing them after every call forces a slow
+    recompile on the next invocation.
 
     Raises:
         ImportError: If JAX is not installed.
@@ -397,28 +545,46 @@ def rmsd_jax(
     xyz = xyz - xyz.mean(axis=1, keepdims=True)
     traces = (xyz * xyz).sum(axis=(1, 2))
 
-    # ``precision=HIGHEST`` disables JAX's default TF32 / tensor-core
-    # accumulation on GPU, which would otherwise drop the einsum
-    # down to ~19 bits of mantissa and cost ~1e-4 nm accuracy on
-    # small test fixtures.
-    H_all = jnp.einsum(
-        "iam,jan->ijmn",
-        xyz,
-        xyz,
-        precision=_jax.lax.Precision.HIGHEST,
-    )
-    ii, jj = jnp.triu_indices(n_frames, k=1)
+    row_chunk = _rmsd_jax_row_chunk(n_frames)
+    result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-    Sxx = H_all[ii, jj, 0, 0]
-    Sxy = H_all[ii, jj, 0, 1]
-    Sxz = H_all[ii, jj, 0, 2]
-    Syx = H_all[ii, jj, 1, 0]
-    Syy = H_all[ii, jj, 1, 1]
-    Syz = H_all[ii, jj, 1, 2]
-    Szx = H_all[ii, jj, 2, 0]
-    Szy = H_all[ii, jj, 2, 1]
-    Szz = H_all[ii, jj, 2, 2]
-    del H_all
+    precision = _jax.lax.Precision.HIGHEST
+    for i_start in range(0, n_frames - 1, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames - 1)
+        xyz_rows = xyz[i_start:i_end]
+        H_block = jnp.einsum("kam,jan->kjmn", xyz_rows, xyz, precision=precision)
+        rmsd_block = _rmsd_qcp_jax(jnp, H_block, traces[i_start:i_end], traces, n_atoms)
+        del H_block
+
+        rmsd_block_cpu = np.asarray(rmsd_block)
+        del rmsd_block
+        for k in range(i_end - i_start):
+            i = i_start + k
+            row = rmsd_block_cpu[k, i + 1 :]
+            result[i, i + 1 :] = row
+            result[i + 1 :, i] = row
+
+    return result.astype(np.float64)
+
+
+def _rmsd_qcp_cupy(
+    cp, H_block, trace_rows, traces_all, n_atoms: int
+):  # pragma: no cover - thin helper
+    """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances.
+
+    Same algorithm as :func:`_rmsd_qcp_torch` but expressed with CuPy
+    ops.  ``H_block`` has shape ``(C, N, 3, 3)``; ``trace_rows`` has
+    shape ``(C,)``; ``traces_all`` has shape ``(N,)``.
+    """
+    Sxx = H_block[..., 0, 0]
+    Sxy = H_block[..., 0, 1]
+    Sxz = H_block[..., 0, 2]
+    Syx = H_block[..., 1, 0]
+    Syy = H_block[..., 1, 1]
+    Syz = H_block[..., 1, 2]
+    Szx = H_block[..., 2, 0]
+    Szy = H_block[..., 2, 1]
+    Szz = H_block[..., 2, 2]
 
     c2 = -2.0 * (
         Sxx * Sxx
@@ -463,26 +629,30 @@ def rmsd_jax(
         - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
     )
 
-    lam = (traces[ii] + traces[jj]) * 0.5
+    trace_i = trace_rows.reshape(-1, 1)  # (C, 1)
+    trace_j = traces_all.reshape(1, -1)  # (1, N)
+    lam = (trace_i + trace_j) * 0.5
     for _ in range(30):
         l2 = lam * lam
         f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
         fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-        delta = jnp.where(
-            jnp.abs(fp_val) > 0,
+        delta = cp.where(
+            cp.abs(fp_val) > 0,
             f_val / fp_val,
-            jnp.zeros_like(fp_val),
+            cp.zeros_like(fp_val),
         )
         lam = lam - delta
 
-    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
-    rmsd_vals = jnp.sqrt(jnp.maximum(0.0, rmsd_sq))
+    rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
+    return cp.sqrt(cp.maximum(0.0, rmsd_sq))
 
-    result = jnp.zeros((n_frames, n_frames), dtype=jnp.float32)
-    result = result.at[ii, jj].set(rmsd_vals)
-    result = result.at[jj, ii].set(rmsd_vals)
 
-    return np.asarray(result).astype(np.float64)
+def _rmsd_cupy_row_chunk(free_bytes: int, n_frames: int) -> int:
+    """Row-block size for the cupy QCP kernel (see _rmsd_torch_row_chunk)."""
+    per_pair_bytes = 180
+    budget = max(free_bytes // 4, 1)
+    chunk = budget // (per_pair_bytes * max(n_frames, 1))
+    return int(max(1, min(chunk, n_frames)))
 
 
 @clean_cupy_cache
@@ -492,14 +662,9 @@ def rmsd_cupy(
 ) -> NDArray[np.float64]:
     """Compute pairwise RMSD matrix using CuPy (CUDA).
 
-    Requires a CUDA-capable GPU.  Uses ``cupy.einsum`` for
-    cross-covariance and a vectorised QCP Newton-Raphson solve
-    for the rotational superposition -- same algorithm as
-    :func:`rmsd_torch`.
-
-    Internally operates in **float32** for GPU performance (see
-    :func:`rmsd_torch` for rationale).  The result is cast to
-    float64 on the way out to preserve the public API contract.
+    Requires a CUDA-capable GPU.  Row-chunked streaming QCP solve
+    matching :func:`rmsd_torch` -- see that docstring for the
+    algorithm and the rationale for float32 / QCP / row chunking.
 
     Raises:
         ImportError: If CuPy is not installed.
@@ -512,85 +677,27 @@ def rmsd_cupy(
     xyz = xyz - xyz.mean(axis=1, keepdims=True)
     traces = (xyz * xyz).sum(axis=(1, 2))
 
-    H_all = cp.einsum("iam,jan->ijmn", xyz, xyz)
-    ii_host, jj_host = np.triu_indices(n_frames, k=1)
-    ii = cp.asarray(ii_host)
-    jj = cp.asarray(jj_host)
+    free_bytes, _total = cp.cuda.Device().mem_info
+    row_chunk = _rmsd_cupy_row_chunk(int(free_bytes), n_frames)
 
-    Sxx = H_all[ii, jj, 0, 0]
-    Sxy = H_all[ii, jj, 0, 1]
-    Sxz = H_all[ii, jj, 0, 2]
-    Syx = H_all[ii, jj, 1, 0]
-    Syy = H_all[ii, jj, 1, 1]
-    Syz = H_all[ii, jj, 1, 2]
-    Szx = H_all[ii, jj, 2, 0]
-    Szy = H_all[ii, jj, 2, 1]
-    Szz = H_all[ii, jj, 2, 2]
-    del H_all
+    result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-    c2 = -2.0 * (
-        Sxx * Sxx
-        + Sxy * Sxy
-        + Sxz * Sxz
-        + Syx * Syx
-        + Syy * Syy
-        + Syz * Syz
-        + Szx * Szx
-        + Szy * Szy
-        + Szz * Szz
-    )
-    c1 = -8.0 * (
-        Sxx * (Syy * Szz - Syz * Szy)
-        - Sxy * (Syx * Szz - Syz * Szx)
-        + Sxz * (Syx * Szy - Syy * Szx)
-    )
+    for i_start in range(0, n_frames - 1, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames - 1)
+        xyz_rows = xyz[i_start:i_end]
+        H_block = cp.einsum("kam,jan->kjmn", xyz_rows, xyz)
+        rmsd_block = _rmsd_qcp_cupy(cp, H_block, traces[i_start:i_end], traces, n_atoms)
+        del H_block
 
-    ka = Sxx + Syy + Szz
-    kb = Syz - Szy
-    kc = Szx - Sxz
-    kd = Sxy - Syx
-    ke = Sxx - Syy - Szz
-    kf = Sxy + Syx
-    kg = Szx + Sxz
-    kh = -Sxx + Syy - Szz
-    km = Syz + Szy
-    kn = -Sxx - Syy + Szz
-    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+        rmsd_block_cpu = cp.asnumpy(rmsd_block)
+        del rmsd_block
+        for k in range(i_end - i_start):
+            i = i_start + k
+            row = rmsd_block_cpu[k, i + 1 :]
+            result[i, i + 1 :] = row
+            result[i + 1 :, i] = row
 
-    hn_mm = kh * kn - km * km
-    fn_mg = kf * kn - km * kg
-    fm_hg = kf * km - kh * kg
-    cn_md = kc * kn - km * kd
-    cm_hd = kc * km - kh * kd
-    cg_fd = kc * kg - kf * kd
-
-    c0 = (
-        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-    )
-
-    lam = (traces[ii] + traces[jj]) * 0.5
-    for _ in range(30):
-        l2 = lam * lam
-        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-        delta = cp.where(
-            cp.abs(fp_val) > 0,
-            f_val / fp_val,
-            cp.zeros_like(fp_val),
-        )
-        lam = lam - delta
-
-    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
-    rmsd_vals = cp.sqrt(cp.maximum(0.0, rmsd_sq))
-
-    result = cp.zeros((n_frames, n_frames), dtype=cp.float32)
-    result[ii, jj] = rmsd_vals
-    result[jj, ii] = rmsd_vals
-
-    return cp.asnumpy(result).astype(np.float64)
+    return result.astype(np.float64)
 
 
 # ---------------------------------------------------------------------------
