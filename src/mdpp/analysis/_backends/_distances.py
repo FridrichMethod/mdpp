@@ -1,22 +1,24 @@
 """Pairwise distance computation backends.
 
-Provides four raw-array backends for non-periodic pairwise distances:
+Provides five backends for pairwise distances between atom pairs:
 
-- ``numba`` -- Numba-parallel kernel on CPU.
+- ``mdtraj`` -- mdtraj's optimised C/SSE kernel (supports PBC).
+- ``numba`` -- Numba-parallel CPU kernel.
 - ``cupy`` -- CuPy vectorised operations on GPU.
 - ``torch`` -- PyTorch vectorised operations on GPU/CPU.
 - ``jax`` -- JAX/XLA vectorised operations on GPU/CPU.
 
-The mdtraj backend is not included here because it has a different
-call signature (takes a Trajectory object and supports periodic boundary
-conditions).  It is handled directly by ``distance.py``.
+All backends share the same positional signature ``(traj, pairs)`` and
+return a float64 numpy array of shape ``(n_frames, n_pairs)``.
 
-All backends accept ``(xyz, pairs)`` and return a float64 numpy array
-of shape ``(n_frames, n_pairs)``.
+The mdtraj backend additionally accepts a keyword-only ``periodic``
+argument for minimum image convention; non-mdtraj backends do not
+support periodic boundary conditions.
 """
 
 from __future__ import annotations
 
+import mdtraj as md
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
@@ -34,8 +36,33 @@ def _validate_pairs(n_atoms: int, pairs: NDArray[np.int_]) -> None:
         )
 
 
+def distances_mdtraj(
+    traj: md.Trajectory,
+    pairs: NDArray[np.int_],
+    *,
+    periodic: bool = False,
+) -> NDArray[np.float64]:
+    """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
+
+    Supports periodic boundary conditions via minimum image convention
+    when the trajectory contains unit-cell information.
+
+    Args:
+        traj: Input trajectory.
+        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Whether to apply minimum image convention.
+
+    Returns:
+        Distances of shape ``(n_frames, n_pairs)`` (float64).
+    """
+    return np.asarray(
+        md.compute_distances(traj, pairs, periodic=periodic),
+        dtype=np.float64,
+    )
+
+
 def distances_numba(
-    xyz: NDArray[np.float32],
+    traj: md.Trajectory,
     pairs: NDArray[np.int_],
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using a Numba-parallel kernel.
@@ -44,7 +71,7 @@ def distances_numba(
     mdtraj's single-threaded C/SSE kernel on multi-core machines.
 
     Args:
-        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``.
+        traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
 
     Returns:
@@ -53,7 +80,7 @@ def distances_numba(
     Raises:
         ValueError: If any pair index is out of range.
     """
-    _validate_pairs(xyz.shape[1], pairs)
+    _validate_pairs(traj.n_atoms, pairs)
 
     @njit(parallel=True, cache=True)
     def _kernel(
@@ -72,17 +99,17 @@ def distances_numba(
                 out[f, k] = np.sqrt(dx * dx + dy * dy + dz * dz)
         return out
 
-    return _kernel(xyz, pairs)
+    return _kernel(traj.xyz, pairs)
 
 
 def distances_cupy(
-    xyz: NDArray[np.float32],
+    traj: md.Trajectory,
     pairs: NDArray[np.int_],
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances on GPU using CuPy.
 
     Args:
-        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``.
+        traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
 
     Returns:
@@ -92,10 +119,10 @@ def distances_cupy(
         ImportError: If CuPy is not installed.
         ValueError: If any pair index is out of range.
     """
-    _validate_pairs(xyz.shape[1], pairs)
+    _validate_pairs(traj.n_atoms, pairs)
     cp = require_cupy()
 
-    xyz_gpu = cp.asarray(xyz)
+    xyz_gpu = cp.asarray(traj.xyz)
     pairs_gpu = cp.asarray(pairs)
     diffs = xyz_gpu[:, pairs_gpu[:, 0], :] - xyz_gpu[:, pairs_gpu[:, 1], :]
     distances = cp.sqrt(cp.sum(diffs * diffs, axis=2))
@@ -103,7 +130,7 @@ def distances_cupy(
 
 
 def distances_torch(
-    xyz: NDArray[np.float32],
+    traj: md.Trajectory,
     pairs: NDArray[np.int_],
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using PyTorch.
@@ -111,7 +138,7 @@ def distances_torch(
     Uses CUDA if available, otherwise falls back to CPU.
 
     Args:
-        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``.
+        traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
 
     Returns:
@@ -121,12 +148,12 @@ def distances_torch(
         ImportError: If PyTorch is not installed.
         ValueError: If any pair index is out of range.
     """
-    _validate_pairs(xyz.shape[1], pairs)
+    _validate_pairs(traj.n_atoms, pairs)
     torch = require_torch()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
-        xyz_t = torch.as_tensor(np.ascontiguousarray(xyz), device=device)
+        xyz_t = torch.as_tensor(np.ascontiguousarray(traj.xyz), device=device)
         pairs_t = torch.as_tensor(pairs.astype(np.int64), device=device)
         diffs = xyz_t[:, pairs_t[:, 0], :] - xyz_t[:, pairs_t[:, 1], :]
         distances = torch.sqrt(torch.sum(diffs * diffs, dim=2))
@@ -134,7 +161,7 @@ def distances_torch(
 
 
 def distances_jax(
-    xyz: NDArray[np.float32],
+    traj: md.Trajectory,
     pairs: NDArray[np.int_],
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using JAX.
@@ -142,7 +169,7 @@ def distances_jax(
     JAX auto-selects the best available backend (GPU > TPU > CPU).
 
     Args:
-        xyz: Coordinates of shape ``(n_frames, n_atoms, 3)``.
+        traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
 
     Returns:
@@ -152,10 +179,10 @@ def distances_jax(
         ImportError: If JAX is not installed.
         ValueError: If any pair index is out of range.
     """
-    _validate_pairs(xyz.shape[1], pairs)
+    _validate_pairs(traj.n_atoms, pairs)
     _jax, jnp = require_jax()
 
-    xyz_j = jnp.asarray(xyz)
+    xyz_j = jnp.asarray(traj.xyz)
     pairs_j = jnp.asarray(pairs)
     diffs = xyz_j[:, pairs_j[:, 0], :] - xyz_j[:, pairs_j[:, 1], :]
     distances = jnp.sqrt(jnp.sum(diffs * diffs, axis=2))
@@ -163,10 +190,11 @@ def distances_jax(
 
 
 # ---------------------------------------------------------------------------
-# Registry (raw-array backends only; mdtraj handled by distance.py)
+# Registry
 # ---------------------------------------------------------------------------
 
-distance_backends: BackendRegistry = BackendRegistry(default="numba")
+distance_backends: BackendRegistry = BackendRegistry(default="mdtraj")
+distance_backends.register("mdtraj", distances_mdtraj)
 distance_backends.register("numba", distances_numba)
 distance_backends.register("cupy", distances_cupy)
 distance_backends.register("torch", distances_torch)

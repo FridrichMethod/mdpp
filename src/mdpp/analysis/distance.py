@@ -74,40 +74,6 @@ class DistanceResult:
 
 
 # ---------------------------------------------------------------------------
-# mdtraj backend (unique signature: supports PBC)
-# ---------------------------------------------------------------------------
-
-
-def _pairwise_distances_mdtraj(
-    traj: md.Trajectory,
-    pairs: NDArray[np.int_],
-    *,
-    periodic: bool,
-    dtype: DtypeArg = None,
-) -> NDArray[np.floating]:
-    """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
-
-    Supports periodic boundary conditions via minimum image convention
-    when the trajectory contains unit-cell information.
-
-    Args:
-        traj: Atom-sliced trajectory.
-        pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
-        periodic: Whether to apply minimum image convention.
-        dtype: Output float dtype. If ``None``, uses the package default
-            (see :func:`mdpp.set_default_dtype`).
-
-    Returns:
-        Distances of shape ``(n_frames, n_pairs)``.
-    """
-    resolved = resolve_dtype(dtype)
-    return np.asarray(
-        md.compute_distances(traj, pairs, periodic=periodic),
-        dtype=resolved,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -165,14 +131,17 @@ def _compute_pairwise_distances(
         ValueError: If an unknown backend is requested.
     """
     resolved = resolve_dtype(dtype)
-    if backend == "mdtraj":
-        return _pairwise_distances_mdtraj(traj, pairs, periodic=periodic, dtype=resolved)
-    all_backends = ("mdtraj", *distance_backends.names)
     try:
         compute_fn = distance_backends.get(backend)
     except ValueError:
-        raise ValueError(f"Unknown backend {backend!r}. Use one of {all_backends!r}.") from None
-    return np.asarray(compute_fn(traj.xyz, pairs), dtype=resolved)
+        raise ValueError(
+            f"Unknown backend {backend!r}. Use one of {distance_backends.names!r}."
+        ) from None
+    if backend == "mdtraj":
+        result = compute_fn(traj, pairs, periodic=periodic)
+    else:
+        result = compute_fn(traj, pairs)
+    return np.asarray(result, dtype=resolved)
 
 
 # ---------------------------------------------------------------------------
