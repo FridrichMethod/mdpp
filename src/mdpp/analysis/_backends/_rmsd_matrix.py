@@ -14,6 +14,8 @@ array of RMSD values in nm.
 
 from __future__ import annotations
 
+from typing import Protocol
+
 import mdtraj as md
 import numpy as np
 from numba import njit, prange
@@ -21,6 +23,22 @@ from numpy.typing import NDArray
 
 from mdpp.analysis._backends._imports import require_cupy, require_jax, require_torch
 from mdpp.analysis._backends._registry import BackendRegistry
+
+
+class RMSDMatrixBackendFn(Protocol):
+    """Callable signature for a pairwise RMSD matrix backend.
+
+    All registered backends return a symmetric ``(n_frames, n_frames)``
+    float64 numpy array of RMSD values (in nm) computed over the
+    selected ``atom_indices``.
+    """
+
+    def __call__(
+        self,
+        traj: md.Trajectory,
+        atom_indices: NDArray[np.int_],
+    ) -> NDArray[np.float64]: ...
+
 
 # ---------------------------------------------------------------------------
 # Numba-parallel pairwise RMSD (QCP / Theobald 2005)
@@ -320,7 +338,7 @@ def rmsd_cupy(
 # Registry
 # ---------------------------------------------------------------------------
 
-rmsd_matrix_backends: BackendRegistry = BackendRegistry(default="mdtraj")
+rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
 rmsd_matrix_backends.register("numba", rmsd_numba)
 rmsd_matrix_backends.register("mdtraj", rmsd_mdtraj)
 rmsd_matrix_backends.register("torch", rmsd_torch)

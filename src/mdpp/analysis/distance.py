@@ -137,10 +137,10 @@ def _compute_pairwise_distances(
         raise ValueError(
             f"Unknown backend {backend!r}. Use one of {distance_backends.names!r}."
         ) from None
-    if backend == "mdtraj":
-        result = compute_fn(traj, pairs, periodic=periodic)
-    else:
-        result = compute_fn(traj, pairs)
+    # Every backend accepts ``periodic`` as a keyword (non-mdtraj backends
+    # silently ignore it).  Pass it uniformly so the dispatcher does not
+    # need a special case for mdtraj.
+    result = compute_fn(traj, pairs, periodic=periodic)
     return np.asarray(result, dtype=resolved)
 
 

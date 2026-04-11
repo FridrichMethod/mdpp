@@ -18,6 +18,8 @@ support periodic boundary conditions.
 
 from __future__ import annotations
 
+from typing import Protocol
+
 import mdtraj as md
 import numpy as np
 from numba import njit, prange
@@ -25,6 +27,24 @@ from numpy.typing import NDArray
 
 from mdpp.analysis._backends._imports import require_cupy, require_jax, require_torch
 from mdpp.analysis._backends._registry import BackendRegistry
+
+
+class DistanceBackendFn(Protocol):
+    """Callable signature for a pairwise distance backend.
+
+    All registered backends accept a trajectory and an ``(n_pairs, 2)``
+    array of 0-based atom-index pairs.  The mdtraj backend additionally
+    accepts ``periodic`` as a keyword-only argument; all other backends
+    silently ignore PBC.
+    """
+
+    def __call__(
+        self,
+        traj: md.Trajectory,
+        pairs: NDArray[np.int_],
+        *,
+        periodic: bool = ...,
+    ) -> NDArray[np.float64]: ...
 
 
 def _validate_pairs(n_atoms: int, pairs: NDArray[np.int_]) -> None:
@@ -64,6 +84,8 @@ def distances_mdtraj(
 def distances_numba(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
+    *,
+    periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using a Numba-parallel kernel.
 
@@ -73,6 +95,9 @@ def distances_numba(
     Args:
         traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Ignored. Accepted for uniformity with
+            :func:`distances_mdtraj`; this kernel does not support
+            periodic boundary conditions.
 
     Returns:
         Distances of shape ``(n_frames, n_pairs)`` (float64).
@@ -105,12 +130,17 @@ def distances_numba(
 def distances_cupy(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
+    *,
+    periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances on GPU using CuPy.
 
     Args:
         traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Ignored. Accepted for uniformity with
+            :func:`distances_mdtraj`; this kernel does not support
+            periodic boundary conditions.
 
     Returns:
         Distances of shape ``(n_frames, n_pairs)`` (float64).
@@ -132,6 +162,8 @@ def distances_cupy(
 def distances_torch(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
+    *,
+    periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using PyTorch.
 
@@ -140,6 +172,9 @@ def distances_torch(
     Args:
         traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Ignored. Accepted for uniformity with
+            :func:`distances_mdtraj`; this kernel does not support
+            periodic boundary conditions.
 
     Returns:
         Distances of shape ``(n_frames, n_pairs)`` (float64).
@@ -163,6 +198,8 @@ def distances_torch(
 def distances_jax(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
+    *,
+    periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
 ) -> NDArray[np.float64]:
     """Compute non-periodic pairwise distances using JAX.
 
@@ -171,6 +208,9 @@ def distances_jax(
     Args:
         traj: Input trajectory.
         pairs: 0-based atom-index pairs of shape ``(n_pairs, 2)``.
+        periodic: Ignored. Accepted for uniformity with
+            :func:`distances_mdtraj`; this kernel does not support
+            periodic boundary conditions.
 
     Returns:
         Distances of shape ``(n_frames, n_pairs)`` (float64).
@@ -193,7 +233,7 @@ def distances_jax(
 # Registry
 # ---------------------------------------------------------------------------
 
-distance_backends: BackendRegistry = BackendRegistry(default="mdtraj")
+distance_backends: BackendRegistry[DistanceBackendFn] = BackendRegistry(default="mdtraj")
 distance_backends.register("mdtraj", distances_mdtraj)
 distance_backends.register("numba", distances_numba)
 distance_backends.register("cupy", distances_cupy)
