@@ -2,9 +2,9 @@
 
 These tests verify that:
 
-1. The ``clean_torch_cache`` / ``clean_cupy_cache`` / ``clean_jax_cache``
-   decorators run their framework's cache-release API in a ``finally``
-   block on both normal return and exceptions.
+1. The ``clean_torch_cache`` and ``clean_cupy_cache`` decorators run
+   their framework's cache-release API in a ``finally`` block on
+   both normal return and exceptions.
 2. The decorators preserve the wrapped function's signature so mypy
    can still see the exact shape at the call site.
 3. The GPU kernels that use the decorators
@@ -13,9 +13,11 @@ These tests verify that:
    pooled memory back to the driver after ``compute_rmsd_matrix`` /
    ``compute_distances`` returns.
 
-JAX does not expose a first-class API for querying its device memory
-pool, so the JAX tests only verify that the decorator runs without
-error and preserves the call signature.
+JAX is deliberately not decorated: ``jax.clear_caches()`` clears the
+JIT compilation cache and forces a slow recompile on the next call.
+XLA manages JAX device memory directly and there is no public API
+for returning it to the driver, so there is nothing useful for a
+per-call JAX decorator to do.
 """
 
 from __future__ import annotations
@@ -26,10 +28,8 @@ import pytest
 
 from mdpp.analysis._backends import (
     clean_cupy_cache,
-    clean_jax_cache,
     clean_torch_cache,
     has_cupy,
-    has_jax,
     has_torch,
 )
 from mdpp.analysis.clustering import compute_rmsd_matrix
@@ -37,7 +37,6 @@ from mdpp.analysis.distance import compute_distances
 
 requires_cupy = pytest.mark.skipif(not has_cupy, reason="CuPy not installed")
 requires_torch = pytest.mark.skipif(not has_torch, reason="PyTorch not installed")
-requires_jax = pytest.mark.skipif(not has_jax, reason="JAX not installed")
 
 
 # ---------------------------------------------------------------------------
@@ -198,50 +197,6 @@ class TestCleanCupyCacheDecorator:
             return a + b
 
         assert add(2, 3) == 5
-
-
-@pytest.mark.gpu
-class TestCleanJaxCacheDecorator:
-    """Tests for ``clean_jax_cache``.
-
-    JAX does not expose a device-memory-usage query that matches the
-    ``torch.cuda.memory_allocated`` / ``cp.MemoryPool.used_bytes``
-    pattern, so these tests only verify that the decorator runs
-    without error and preserves the wrapped function.
-    """
-
-    @requires_jax
-    def test_runs_on_normal_return(self) -> None:
-        """Wrapped function must return its value and not raise."""
-
-        @clean_jax_cache
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        assert add(2, 3) == 5
-
-    @requires_jax
-    def test_runs_on_exception(self) -> None:
-        """Wrapped function that raises must still run ``finally``."""
-
-        @clean_jax_cache
-        def raise_err() -> None:
-            raise RuntimeError("boom")
-
-        with pytest.raises(RuntimeError, match="boom"):
-            raise_err()
-
-    @requires_jax
-    def test_preserves_signature(self) -> None:
-        """functools.wraps should preserve name and docstring."""
-
-        @clean_jax_cache
-        def sample(x: int) -> int:
-            """Sample docstring."""
-            return x + 1
-
-        assert sample.__name__ == "sample"
-        assert sample.__doc__ == "Sample docstring."
 
 
 # ---------------------------------------------------------------------------

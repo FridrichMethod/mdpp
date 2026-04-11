@@ -159,15 +159,17 @@ rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(def
 
 Never declare a bare `BackendRegistry` without a type parameter -- `registry.get(backend)` would return an unbound `F` and the dispatcher would lose the signature of `compute_fn` at the call site. The Protocol lives in the same `_backends/_<kind>.py` file as the backends it describes (not in the shared `_registry.py`) so the registry module stays decoupled from any particular backend signature.
 
-**GPU cache cleanup rule**: every GPU-backed compute kernel MUST be decorated with the matching framework-specific cleanup decorator from `_backends/_imports.py`:
+**GPU cache cleanup rule**: torch and cupy GPU-backed compute kernels MUST be decorated with the matching framework-specific cleanup decorator from `_backends/_imports.py`:
 
 | Backend | Decorator |
 |---|---|
 | `torch` | `@clean_torch_cache` |
 | `cupy` | `@clean_cupy_cache` |
-| `jax` | `@clean_jax_cache` |
+| `jax` | (none) |
 
-The decorators call the framework's cache-clear API (`torch.cuda.empty_cache()`, `cp.get_default_memory_pool().free_all_blocks()`, `jax.clear_caches()`) in a `finally` block so pooled device memory is returned to the driver on both normal return and exceptions. Apply decorators to inner kernel functions (e.g. `rmsd_torch`, `distances_cupy`), **never** the outer CPU-side `compute_*` wrappers. The decorators use PEP 695 generic syntax (`[**P, T]`) so mypy preserves the Protocol signature at registry call sites.
+The decorators call the framework's cache-clear API (`torch.cuda.empty_cache()`, `cp.get_default_memory_pool().free_all_blocks()`) in a `finally` block so pooled device memory is returned to the driver on both normal return and exceptions. Apply decorators to inner kernel functions (e.g. `rmsd_torch`, `distances_cupy`), **never** the outer CPU-side `compute_*` wrappers. The decorators use PEP 695 generic syntax (`[**P, T]`) so mypy preserves the Protocol signature at registry call sites.
+
+JAX kernels are deliberately **not** decorated. `jax.clear_caches()` clears JIT compilation caches, not device memory -- trashing the compilation cache after every call forces a multi-second recompile on the next invocation. JAX has no public API for returning pooled device memory to the driver anyway (XLA manages it directly).
 
 ## Adding a New Compute Backend
 
@@ -175,7 +177,7 @@ For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise dista
 
 1. Add the implementation in the matching `src/mdpp/analysis/_backends/_<kind>.py` file, matching the `Protocol` type defined at the top of that file exactly.
 1. Use `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` for optional GPU libraries -- never import them at module top-level.
-1. Decorate GPU kernels with `@clean_torch_cache` / `@clean_cupy_cache` / `@clean_jax_cache` from `_backends/_imports.py` so pooled memory is released in a `finally` block after the kernel runs.
+1. Decorate torch/cupy GPU kernels with `@clean_torch_cache` / `@clean_cupy_cache` from `_backends/_imports.py` so pooled memory is released in a `finally` block after the kernel runs. Do **not** apply any cleanup decorator to JAX kernels -- `jax.clear_caches()` trashes JIT compilation caches and forces slow recompiles.
 1. If you introduce a new keyword argument, also retrofit every existing backend in the same registry to accept it (silently ignoring when unused, marked `# noqa: ARG001`).
 1. Register in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend`) in `_backends/_registry.py`.

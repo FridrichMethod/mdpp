@@ -27,7 +27,6 @@ from numpy.typing import NDArray
 
 from mdpp.analysis._backends._imports import (
     clean_cupy_cache,
-    clean_jax_cache,
     clean_torch_cache,
     require_cupy,
     require_jax,
@@ -204,7 +203,6 @@ def distances_torch(
     return distances.cpu().numpy().astype(np.float64)
 
 
-@clean_jax_cache
 def distances_jax(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
@@ -214,6 +212,11 @@ def distances_jax(
     """Compute non-periodic pairwise distances using JAX.
 
     JAX auto-selects the best available backend (GPU > TPU > CPU).
+    Deliberately does not use ``@clean_jax_cache`` -- see
+    :func:`mdpp.analysis._backends._rmsd_matrix.rmsd_jax` for the
+    rationale (clearing JAX's JIT compilation cache forces a slow
+    recompile on every call and does not actually release device
+    memory).
 
     Args:
         traj: Input trajectory.

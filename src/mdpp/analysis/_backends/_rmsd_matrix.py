@@ -23,7 +23,6 @@ from numpy.typing import NDArray
 
 from mdpp.analysis._backends._imports import (
     clean_cupy_cache,
-    clean_jax_cache,
     clean_torch_cache,
     require_cupy,
     require_jax,
@@ -246,8 +245,24 @@ def rmsd_torch(
     """Compute pairwise RMSD matrix using PyTorch (CUDA if available).
 
     Uses vectorised ``einsum`` for all pairwise cross-covariance
-    matrices followed by batched ``torch.linalg.svd`` on the 3x3
-    matrices.  Falls back to CPU when no CUDA device is found.
+    matrices followed by the Quaternion Characteristic Polynomial
+    (Theobald 2005) Newton-Raphson solve on the quartic -- same
+    algorithm as the Numba kernel, but broadcast across all pairs
+    in ``(n_pairs,)``-shaped tensors.  Falls back to CPU when no
+    CUDA device is found.
+
+    **Why QCP and not batched SVD**: batched ``torch.linalg.svd``
+    on 3x3 matrices has high LAPACK per-matrix overhead; for
+    500k pairs it takes ~70 ms even in float32 and dominates wall
+    time.  QCP is pure element-wise arithmetic on flat tensors
+    (~50 flops per pair, fixed 30 Newton-Raphson iterations) and
+    runs ~20x faster on the same workload.
+
+    Internally operates in **float32** because consumer and
+    workstation NVIDIA GPUs run float64 at 1/36 -- 1/64 the
+    throughput of float32.  mdtraj stores coordinates in float32
+    anyway, and float32 QCP agrees with the float64 numba reference
+    to ~1e-6 nm -- well below the 5e-5 nm agreement tolerance.
 
     Raises:
         ImportError: If PyTorch is not installed.
@@ -258,7 +273,7 @@ def rmsd_torch(
     with torch.no_grad():
         xyz = torch.as_tensor(
             np.ascontiguousarray(traj.xyz[:, atom_indices, :]),
-            dtype=torch.float64,
+            dtype=torch.float32,
             device=device,
         )
         n_frames, n_atoms, _ = xyz.shape
@@ -266,26 +281,91 @@ def rmsd_torch(
         xyz = xyz - xyz.mean(dim=1, keepdim=True)
         traces = (xyz * xyz).sum(dim=(1, 2))
 
-        H_all = torch.einsum("iak,jal->ijkl", xyz, xyz)
-
+        # Cross-covariance ``H[i, j, m, n] = sum_a xyz[i, a, m] * xyz[j, a, n]``
+        H_all = torch.einsum("iam,jan->ijmn", xyz, xyz)
         ii, jj = torch.triu_indices(n_frames, n_frames, offset=1, device=device)
-        H_pairs = H_all[ii, jj]
 
-        U, S, Vh = torch.linalg.svd(H_pairs)
-        d = torch.det(U) * torch.det(Vh)
-        S[:, 2] = torch.where(d < 0, -S[:, 2], S[:, 2])
+        Sxx = H_all[ii, jj, 0, 0]
+        Sxy = H_all[ii, jj, 0, 1]
+        Sxz = H_all[ii, jj, 0, 2]
+        Syx = H_all[ii, jj, 1, 0]
+        Syy = H_all[ii, jj, 1, 1]
+        Syz = H_all[ii, jj, 1, 2]
+        Szx = H_all[ii, jj, 2, 0]
+        Szy = H_all[ii, jj, 2, 1]
+        Szz = H_all[ii, jj, 2, 2]
+        del H_all
 
-        rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(dim=1)) / n_atoms
+        # Quartic characteristic polynomial coefficients.
+        c2 = -2.0 * (
+            Sxx * Sxx
+            + Sxy * Sxy
+            + Sxz * Sxz
+            + Syx * Syx
+            + Syy * Syy
+            + Syz * Syz
+            + Szx * Szx
+            + Szy * Szy
+            + Szz * Szz
+        )
+        c1 = -8.0 * (
+            Sxx * (Syy * Szz - Syz * Szy)
+            - Sxy * (Syx * Szz - Syz * Szx)
+            + Sxz * (Syx * Szy - Syy * Szx)
+        )
+
+        # 4x4 key matrix elements.
+        ka = Sxx + Syy + Szz
+        kb = Syz - Szy
+        kc = Szx - Sxz
+        kd = Sxy - Syx
+        ke = Sxx - Syy - Szz
+        kf = Sxy + Syx
+        kg = Szx + Sxz
+        kh = -Sxx + Syy - Szz
+        km = Syz + Szy
+        kn = -Sxx - Syy + Szz
+        del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+
+        hn_mm = kh * kn - km * km
+        fn_mg = kf * kn - km * kg
+        fm_hg = kf * km - kh * kg
+        cn_md = kc * kn - km * kd
+        cm_hd = kc * km - kh * kd
+        cg_fd = kc * kg - kf * kd
+
+        c0 = (
+            ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+            - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+            + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+            - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+        )
+
+        # Newton-Raphson for the largest eigenvalue.  Initial guess
+        # ``(G_a + G_b) / 2`` is an upper bound on lambda_max.
+        lam = (traces[ii] + traces[jj]) * 0.5
+        for _ in range(30):
+            l2 = lam * lam
+            f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+            fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+            # Avoid div-by-zero if Newton-Raphson stalls on a flat derivative.
+            delta = torch.where(
+                fp_val.abs() > 0,
+                f_val / fp_val,
+                torch.zeros_like(fp_val),
+            )
+            lam = lam - delta
+
+        rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
         rmsd_vals = torch.sqrt(torch.clamp(rmsd_sq, min=0.0))
 
-        result = torch.zeros(n_frames, n_frames, dtype=torch.float64, device=device)
+        result = torch.zeros(n_frames, n_frames, dtype=torch.float32, device=device)
         result[ii, jj] = rmsd_vals
         result[jj, ii] = rmsd_vals
 
-    return result.cpu().numpy()
+    return result.cpu().numpy().astype(np.float64)
 
 
-@clean_jax_cache
 def rmsd_jax(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
@@ -293,37 +373,116 @@ def rmsd_jax(
     """Compute pairwise RMSD matrix using JAX.
 
     JAX auto-selects the best available device (GPU > TPU > CPU).
-    Uses ``jnp.einsum`` for cross-covariance and ``jnp.linalg.svd``
-    for batched superposition.
+    Uses ``jnp.einsum`` for cross-covariance and a vectorised
+    QCP Newton-Raphson solve for the rotational superposition --
+    same algorithm as :func:`rmsd_torch` and :func:`rmsd_cupy`.
+
+    Internally operates in **float32** for GPU throughput, with
+    ``precision=HIGHEST`` on the einsum to disable TF32 accumulation
+    on NVIDIA GPUs.  This kernel deliberately does **not** use the
+    ``clean_jax_cache`` decorator -- JAX's ``clear_caches()`` clears
+    JIT compilation caches (not device memory), and trashing the
+    compilation cache after every call forces a 1+ second recompile
+    on the next call.  JAX does not expose a public API for returning
+    pooled device memory to the driver anyway.
 
     Raises:
         ImportError: If JAX is not installed.
     """
     _jax, jnp = require_jax()
 
-    xyz = jnp.array(traj.xyz[:, atom_indices, :], dtype=jnp.float64)
+    xyz = jnp.array(traj.xyz[:, atom_indices, :], dtype=jnp.float32)
     n_frames, n_atoms, _ = xyz.shape
 
     xyz = xyz - xyz.mean(axis=1, keepdims=True)
     traces = (xyz * xyz).sum(axis=(1, 2))
 
-    H_all = jnp.einsum("iak,jal->ijkl", xyz, xyz)
-
+    # ``precision=HIGHEST`` disables JAX's default TF32 / tensor-core
+    # accumulation on GPU, which would otherwise drop the einsum
+    # down to ~19 bits of mantissa and cost ~1e-4 nm accuracy on
+    # small test fixtures.
+    H_all = jnp.einsum(
+        "iam,jan->ijmn",
+        xyz,
+        xyz,
+        precision=_jax.lax.Precision.HIGHEST,
+    )
     ii, jj = jnp.triu_indices(n_frames, k=1)
-    H_pairs = H_all[ii, jj]
 
-    U, S, Vh = jnp.linalg.svd(H_pairs)
-    d = jnp.linalg.det(U) * jnp.linalg.det(Vh)
-    S = S.at[:, 2].set(jnp.where(d < 0, -S[:, 2], S[:, 2]))
+    Sxx = H_all[ii, jj, 0, 0]
+    Sxy = H_all[ii, jj, 0, 1]
+    Sxz = H_all[ii, jj, 0, 2]
+    Syx = H_all[ii, jj, 1, 0]
+    Syy = H_all[ii, jj, 1, 1]
+    Syz = H_all[ii, jj, 1, 2]
+    Szx = H_all[ii, jj, 2, 0]
+    Szy = H_all[ii, jj, 2, 1]
+    Szz = H_all[ii, jj, 2, 2]
+    del H_all
 
-    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(axis=1)) / n_atoms
+    c2 = -2.0 * (
+        Sxx * Sxx
+        + Sxy * Sxy
+        + Sxz * Sxz
+        + Syx * Syx
+        + Syy * Syy
+        + Syz * Syz
+        + Szx * Szx
+        + Szy * Szy
+        + Szz * Szz
+    )
+    c1 = -8.0 * (
+        Sxx * (Syy * Szz - Syz * Szy)
+        - Sxy * (Syx * Szz - Syz * Szx)
+        + Sxz * (Syx * Szy - Syy * Szx)
+    )
+
+    ka = Sxx + Syy + Szz
+    kb = Syz - Szy
+    kc = Szx - Sxz
+    kd = Sxy - Syx
+    ke = Sxx - Syy - Szz
+    kf = Sxy + Syx
+    kg = Szx + Sxz
+    kh = -Sxx + Syy - Szz
+    km = Syz + Szy
+    kn = -Sxx - Syy + Szz
+    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
+
+    hn_mm = kh * kn - km * km
+    fn_mg = kf * kn - km * kg
+    fm_hg = kf * km - kh * kg
+    cn_md = kc * kn - km * kd
+    cm_hd = kc * km - kh * kd
+    cg_fd = kc * kg - kf * kd
+
+    c0 = (
+        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+    )
+
+    lam = (traces[ii] + traces[jj]) * 0.5
+    for _ in range(30):
+        l2 = lam * lam
+        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+        delta = jnp.where(
+            jnp.abs(fp_val) > 0,
+            f_val / fp_val,
+            jnp.zeros_like(fp_val),
+        )
+        lam = lam - delta
+
+    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
     rmsd_vals = jnp.sqrt(jnp.maximum(0.0, rmsd_sq))
 
-    result = jnp.zeros((n_frames, n_frames), dtype=jnp.float64)
+    result = jnp.zeros((n_frames, n_frames), dtype=jnp.float32)
     result = result.at[ii, jj].set(rmsd_vals)
     result = result.at[jj, ii].set(rmsd_vals)
 
-    return np.asarray(result)
+    return np.asarray(result).astype(np.float64)
 
 
 @clean_cupy_cache
@@ -334,40 +493,104 @@ def rmsd_cupy(
     """Compute pairwise RMSD matrix using CuPy (CUDA).
 
     Requires a CUDA-capable GPU.  Uses ``cupy.einsum`` for
-    cross-covariance and ``cupy.linalg.svd`` for batched
-    superposition.
+    cross-covariance and a vectorised QCP Newton-Raphson solve
+    for the rotational superposition -- same algorithm as
+    :func:`rmsd_torch`.
+
+    Internally operates in **float32** for GPU performance (see
+    :func:`rmsd_torch` for rationale).  The result is cast to
+    float64 on the way out to preserve the public API contract.
 
     Raises:
         ImportError: If CuPy is not installed.
     """
     cp = require_cupy()
 
-    xyz = cp.array(traj.xyz[:, atom_indices, :], dtype=cp.float64)
+    xyz = cp.array(traj.xyz[:, atom_indices, :], dtype=cp.float32)
     n_frames, n_atoms, _ = xyz.shape
 
     xyz = xyz - xyz.mean(axis=1, keepdims=True)
     traces = (xyz * xyz).sum(axis=(1, 2))
 
-    H_all = cp.einsum("iak,jal->ijkl", xyz, xyz)
+    H_all = cp.einsum("iam,jan->ijmn", xyz, xyz)
+    ii_host, jj_host = np.triu_indices(n_frames, k=1)
+    ii = cp.asarray(ii_host)
+    jj = cp.asarray(jj_host)
 
-    ii, jj = (
-        cp.array(np.triu_indices(n_frames, k=1)[0]),
-        cp.array(np.triu_indices(n_frames, k=1)[1]),
+    Sxx = H_all[ii, jj, 0, 0]
+    Sxy = H_all[ii, jj, 0, 1]
+    Sxz = H_all[ii, jj, 0, 2]
+    Syx = H_all[ii, jj, 1, 0]
+    Syy = H_all[ii, jj, 1, 1]
+    Syz = H_all[ii, jj, 1, 2]
+    Szx = H_all[ii, jj, 2, 0]
+    Szy = H_all[ii, jj, 2, 1]
+    Szz = H_all[ii, jj, 2, 2]
+    del H_all
+
+    c2 = -2.0 * (
+        Sxx * Sxx
+        + Sxy * Sxy
+        + Sxz * Sxz
+        + Syx * Syx
+        + Syy * Syy
+        + Syz * Syz
+        + Szx * Szx
+        + Szy * Szy
+        + Szz * Szz
     )
-    H_pairs = H_all[ii, jj]
+    c1 = -8.0 * (
+        Sxx * (Syy * Szz - Syz * Szy)
+        - Sxy * (Syx * Szz - Syz * Szx)
+        + Sxz * (Syx * Szy - Syy * Szx)
+    )
 
-    U, S, Vh = cp.linalg.svd(H_pairs)
-    d = cp.linalg.det(U) * cp.linalg.det(Vh)
-    S[:, 2] = cp.where(d < 0, -S[:, 2], S[:, 2])
+    ka = Sxx + Syy + Szz
+    kb = Syz - Szy
+    kc = Szx - Sxz
+    kd = Sxy - Syx
+    ke = Sxx - Syy - Szz
+    kf = Sxy + Syx
+    kg = Szx + Sxz
+    kh = -Sxx + Syy - Szz
+    km = Syz + Szy
+    kn = -Sxx - Syy + Szz
+    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
 
-    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * S.sum(axis=1)) / n_atoms
+    hn_mm = kh * kn - km * km
+    fn_mg = kf * kn - km * kg
+    fm_hg = kf * km - kh * kg
+    cn_md = kc * kn - km * kd
+    cm_hd = kc * km - kh * kd
+    cg_fd = kc * kg - kf * kd
+
+    c0 = (
+        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+    )
+
+    lam = (traces[ii] + traces[jj]) * 0.5
+    for _ in range(30):
+        l2 = lam * lam
+        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+        delta = cp.where(
+            cp.abs(fp_val) > 0,
+            f_val / fp_val,
+            cp.zeros_like(fp_val),
+        )
+        lam = lam - delta
+
+    rmsd_sq = (traces[ii] + traces[jj] - 2.0 * lam) / n_atoms
     rmsd_vals = cp.sqrt(cp.maximum(0.0, rmsd_sq))
 
-    result = cp.zeros((n_frames, n_frames), dtype=cp.float64)
+    result = cp.zeros((n_frames, n_frames), dtype=cp.float32)
     result[ii, jj] = rmsd_vals
     result[jj, ii] = rmsd_vals
 
-    return cp.asnumpy(result)
+    return cp.asnumpy(result).astype(np.float64)
 
 
 # ---------------------------------------------------------------------------

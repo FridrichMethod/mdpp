@@ -135,30 +135,11 @@ def clean_cupy_cache[**P, T](func: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-def clean_jax_cache[**P, T](func: Callable[P, T]) -> Callable[P, T]:
-    """Decorator: release JAX compilation caches after *func*.
-
-    JAX has no public API for returning pooled device memory to the
-    driver, but ``jax.clear_caches()`` (if available) releases
-    compiled-function caches which can indirectly free device-side
-    state.  Wrap a JAX-backed kernel with this decorator so the call
-    runs in a ``finally`` block.
-
-    The decorator is a no-op when jax is not installed or the
-    ``clear_caches`` symbol is missing, so it is safe to apply
-    unconditionally to jax-backed kernels.
-    """
-
-    @wraps(func)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        try:
-            return func(*args, **kwargs)
-        finally:
-            if has_jax:
-                import jax
-
-                clear_caches = getattr(jax, "clear_caches", None)
-                if clear_caches is not None:
-                    clear_caches()
-
-    return wrapper
+# Note: there is deliberately no ``clean_jax_cache`` decorator.
+# ``jax.clear_caches()`` clears JIT *compilation* caches (not device
+# memory) and trashing the compilation cache after every call forces
+# a multi-second recompile on the next call, which is catastrophic
+# for repeated kernel invocations.  JAX also has no public API for
+# returning pooled device memory to the driver -- XLA manages it
+# directly.  JAX-backed kernels therefore rely on XLA's internal
+# memory management and do not need a per-call cleanup decorator.
