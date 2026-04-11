@@ -406,21 +406,58 @@ def rmsd_torch(
         # Result matrix lives on CPU to avoid pinning ~N^2 floats on GPU.
         result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-        for i_start in range(0, n_frames - 1, row_chunk):
-            i_end = min(i_start + row_chunk, n_frames - 1)
+        # Pipeline CPU writes with GPU compute: launch chunk N's
+        # einsum/QCP (async), then write chunk N-1 into ``result``
+        # on the CPU while the GPU is still working on chunk N.
+        # Torch CUDA ops are asynchronous so the Python interpreter
+        # can keep working until it hits ``.cpu()``, which blocks
+        # on the current chunk only.  This hides ~tens of ms of
+        # numpy memcpy behind ~seconds of GPU compute and keeps
+        # the device close to 100% busy.
+        #
+        # We also write **whole rows** (not just the upper triangle):
+        # since the RMSD matrix is symmetric, each chunk fills its
+        # own rows end-to-end with a single ``result[a:b] = block``
+        # numpy slice-assign (a pure contiguous memcpy).  The
+        # mirrored ``result[j, i]`` slot is written later by whichever
+        # chunk owns row j; both writes equal RMSD(i, j) up to
+        # float32 noise (~1e-7 nm).
+        prev_cpu_tensor = None
+        prev_range: tuple[int, int] | None = None
+
+        for i_start in range(0, n_frames, row_chunk):
+            i_end = min(i_start + row_chunk, n_frames)
             xyz_rows = xyz[i_start:i_end]  # (C, M, 3) view
             # H_block[k, j, m, n] = sum_a xyz_rows[k, a, m] * xyz[j, a, n]
             H_block = torch.einsum("kam,jan->kjmn", xyz_rows, xyz)
             rmsd_block = _rmsd_qcp_torch(torch, H_block, traces[i_start:i_end], traces, n_atoms)
             del H_block
 
-            rmsd_block_cpu = rmsd_block.cpu().numpy()
+            # Overlap CPU write of the previous chunk with the GPU
+            # compute of the current chunk (the einsum/QCP ops above
+            # were issued asynchronously and are still running).
+            if prev_cpu_tensor is not None:
+                prev_start, prev_end = prev_range  # type: ignore[misc]
+                result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+
+            # Block here until the current chunk finishes and copy
+            # it to host.  The next iteration's compute will start
+            # after this returns and run while we write ``cpu_tensor``.
+            cpu_tensor = rmsd_block.cpu()
             del rmsd_block
-            for k in range(i_end - i_start):
-                i = i_start + k
-                row = rmsd_block_cpu[k, i + 1 :]
-                result[i, i + 1 :] = row
-                result[i + 1 :, i] = row
+
+            prev_cpu_tensor = cpu_tensor
+            prev_range = (i_start, i_end)
+
+        # Flush the final chunk.
+        if prev_cpu_tensor is not None:
+            prev_start, prev_end = prev_range  # type: ignore[misc]
+            result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+
+    # Zero the diagonal: float32 QCP Newton-Raphson on ``H(i, i)`` does
+    # not land exactly on ``lambda_max = G_i``, so self-RMSD picks up
+    # ~1e-4 nm of noise that would violate ``test_diagonal_is_zero``.
+    np.fill_diagonal(result, 0.0)
 
     return result.astype(np.float64)
 
@@ -552,21 +589,34 @@ def rmsd_jax(
     row_chunk = _rmsd_jax_row_chunk(n_frames)
     result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
+    # Pipeline CPU writes with GPU compute; write whole rows in a
+    # single contiguous slice-assign.  See ``rmsd_torch`` for the
+    # detailed rationale.
     precision = _jax.lax.Precision.HIGHEST
-    for i_start in range(0, n_frames - 1, row_chunk):
-        i_end = min(i_start + row_chunk, n_frames - 1)
+    prev_cpu: np.ndarray | None = None
+    prev_range: tuple[int, int] | None = None
+
+    for i_start in range(0, n_frames, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames)
         xyz_rows = xyz[i_start:i_end]
         H_block = jnp.einsum("kam,jan->kjmn", xyz_rows, xyz, precision=precision)
         rmsd_block = _rmsd_qcp_jax(jnp, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
-        rmsd_block_cpu = np.asarray(rmsd_block)
+        if prev_cpu is not None:
+            prev_start, prev_end = prev_range  # type: ignore[misc]
+            result[prev_start:prev_end] = prev_cpu
+
+        cpu_array = np.asarray(rmsd_block)
         del rmsd_block
-        for k in range(i_end - i_start):
-            i = i_start + k
-            row = rmsd_block_cpu[k, i + 1 :]
-            result[i, i + 1 :] = row
-            result[i + 1 :, i] = row
+        prev_cpu = cpu_array
+        prev_range = (i_start, i_end)
+
+    if prev_cpu is not None:
+        prev_start, prev_end = prev_range  # type: ignore[misc]
+        result[prev_start:prev_end] = prev_cpu
+
+    np.fill_diagonal(result, 0.0)
 
     return result.astype(np.float64)
 
@@ -686,20 +736,33 @@ def rmsd_cupy(
 
     result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-    for i_start in range(0, n_frames - 1, row_chunk):
-        i_end = min(i_start + row_chunk, n_frames - 1)
+    # Pipeline CPU writes with GPU compute; write whole rows in a
+    # single contiguous slice-assign.  See ``rmsd_torch`` for the
+    # detailed rationale.
+    prev_cpu: np.ndarray | None = None
+    prev_range: tuple[int, int] | None = None
+
+    for i_start in range(0, n_frames, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames)
         xyz_rows = xyz[i_start:i_end]
         H_block = cp.einsum("kam,jan->kjmn", xyz_rows, xyz)
         rmsd_block = _rmsd_qcp_cupy(cp, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
-        rmsd_block_cpu = cp.asnumpy(rmsd_block)
+        if prev_cpu is not None:
+            prev_start, prev_end = prev_range  # type: ignore[misc]
+            result[prev_start:prev_end] = prev_cpu
+
+        cpu_array = cp.asnumpy(rmsd_block)
         del rmsd_block
-        for k in range(i_end - i_start):
-            i = i_start + k
-            row = rmsd_block_cpu[k, i + 1 :]
-            result[i, i + 1 :] = row
-            result[i + 1 :, i] = row
+        prev_cpu = cpu_array
+        prev_range = (i_start, i_end)
+
+    if prev_cpu is not None:
+        prev_start, prev_end = prev_range  # type: ignore[misc]
+        result[prev_start:prev_end] = prev_cpu
+
+    np.fill_diagonal(result, 0.0)
 
     return result.astype(np.float64)
 
