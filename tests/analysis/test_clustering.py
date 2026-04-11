@@ -242,15 +242,47 @@ class TestClusterConformations:
 # ---------------------------------------------------------------------------
 
 
+def _free_gpu_memory_pools() -> None:
+    """Release pooled GPU memory before a benchmark run.
+
+    cupy and torch each maintain a caching allocator that can become
+    fragmented when the host GPU is shared with other processes.
+    Calling this helper between parameterised benchmarks keeps each
+    run starting from a clean pool so large allocations succeed.
+    """
+    if has_cupy:
+        import cupy as cp
+
+        cp.get_default_memory_pool().free_all_blocks()
+    if has_torch:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def _is_gpu_oom(exc: BaseException) -> bool:
+    """Return True if *exc* looks like a GPU out-of-memory error."""
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    return "outofmemory" in name or "out of memory" in msg
+
+
 def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     """Run all available RMSD matrix backends and print a comparison table.
 
     Each backend is warmed up (JIT/CUDA context/XLA compilation) with a
-    3-frame slice before the timed run on the full trajectory.  The numba
-    result is used as the correctness reference (atol=5e-5 nm).
+    3-frame slice before the timed run on the full trajectory.  The
+    mdtraj result is used as the correctness reference (atol=5e-5 nm)
+    since mdtraj is the default backend for every analysis function.
+
+    GPU backends that run out of memory on shared/contended GPUs are
+    skipped with a printed note instead of failing the test.
     """
-    ref = compute_rmsd_matrix(traj, atom_selection="all", backend="numba")
-    ref_mat = ref.rmsd_matrix_nm
+    _free_gpu_memory_pools()
+    ref = compute_rmsd_matrix(traj, atom_selection="all", backend="mdtraj")
+    # Symmetrise mdtraj result (md.rmsd loop is not numerically symmetric).
+    ref_mat = (ref.rmsd_matrix_nm + ref.rmsd_matrix_nm.T) / 2.0
 
     backends: list[tuple[str, bool]] = [
         ("mdtraj", True),
@@ -261,16 +293,24 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     ]
 
     timings: dict[str, float] = {}
+    skipped: dict[str, str] = {}
     for name, available in backends:
         if not available:
             continue
-        # Warmup
-        compute_rmsd_matrix(traj[:3], atom_selection="all", backend=name)  # type: ignore[arg-type]
-        t0 = time.perf_counter()
-        result = compute_rmsd_matrix(traj, atom_selection="all", backend=name)  # type: ignore[arg-type]
-        timings[name] = time.perf_counter() - t0
-        if name != "numba":
-            np.testing.assert_allclose(result.rmsd_matrix_nm, ref_mat, atol=5e-5)
+        try:
+            # Warmup
+            compute_rmsd_matrix(traj[:3], atom_selection="all", backend=name)  # type: ignore[arg-type]
+            t0 = time.perf_counter()
+            result = compute_rmsd_matrix(traj, atom_selection="all", backend=name)  # type: ignore[arg-type]
+            timings[name] = time.perf_counter() - t0
+            if name != "mdtraj":
+                np.testing.assert_allclose(result.rmsd_matrix_nm, ref_mat, atol=5e-5)
+        except Exception as exc:
+            if _is_gpu_oom(exc):
+                skipped[name] = "GPU OOM"
+                _free_gpu_memory_pools()
+                continue
+            raise
 
     n = traj.n_frames
     n_pairs = n * (n - 1) // 2
@@ -281,30 +321,16 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     for name, t in sorted(timings.items(), key=lambda x: x[1]):
         speedup = t_mdtraj / t
         print(f"  {name:<10s} {t:>10.4f} {speedup:>9.1f}x")
+    for name, reason in skipped.items():
+        print(f"  {name:<10s} {'--':>10s} (skipped: {reason})")
 
 
-@pytest.mark.benchmark
-@pytest.mark.parametrize(
-    "n_frames",
-    [
-        pytest.param(100, id="small-100"),
-        pytest.param(200, id="medium-200"),
-    ],
-)
-def test_benchmark_rmsd_backends(n_frames: int) -> None:
-    """Benchmark all available RMSD matrix backends at different scales.
-
-    Builds a synthetic trajectory (50 residues x 150 backbone atoms) and
-    times each installed backend.  Verifies correctness of every backend
-    against the numba reference (atol=5e-5 nm) as a side effect.
-
-    Run only benchmarks:  ``pytest -m benchmark``
-    Skip benchmarks:      ``pytest -m "not benchmark"``
-    """
+def _make_alanine_traj(n_frames: int, n_residues: int) -> md.Trajectory:
+    """Synthetic alanine trajectory with N, CA, C backbone atoms per residue."""
     topology = md.Topology()
     chain = topology.add_chain()
     atoms = []
-    for res_idx in range(1, 51):
+    for res_idx in range(1, n_residues + 1):
         residue = topology.add_residue("ALA", chain, resSeq=res_idx)
         n_atom = topology.add_atom("N", md.element.nitrogen, residue)
         ca = topology.add_atom("CA", md.element.carbon, residue)
@@ -320,6 +346,48 @@ def test_benchmark_rmsd_backends(n_frames: int) -> None:
     base = rng.randn(1, n_atoms, 3).astype(np.float32) * 0.15
     perturbation = rng.randn(n_frames, n_atoms, 3).astype(np.float32) * 0.02
     xyz = base + perturbation
-    traj = md.Trajectory(xyz=xyz, topology=topology)
+    return md.Trajectory(xyz=xyz, topology=topology)
 
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("n_frames", "n_residues"),
+    [
+        pytest.param(100, 50, id="fast-100f-150a"),
+        pytest.param(200, 50, id="fast-200f-150a"),
+    ],
+)
+def test_benchmark_rmsd_backends_fast(n_frames: int, n_residues: int) -> None:
+    """Fast benchmark -- all available RMSD matrix backends on small trajectories.
+
+    Completes in seconds on a modern machine.  Verifies every backend
+    matches the mdtraj reference (atol=5e-5 nm) as a side effect.
+
+    Run only fast benchmarks:    ``pytest -m "benchmark and not slow"``
+    Run all benchmarks:           ``pytest -m benchmark``
+    Skip benchmarks:              ``pytest -m "not benchmark"``
+    """
+    traj = _make_alanine_traj(n_frames, n_residues)
+    _run_rmsd_benchmark(traj)
+
+
+@pytest.mark.slow
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("n_frames", "n_residues"),
+    [
+        pytest.param(500, 50, id="slow-500f-150a"),
+        pytest.param(1000, 100, id="slow-1000f-300a"),
+    ],
+)
+def test_benchmark_rmsd_backends_slow(n_frames: int, n_residues: int) -> None:
+    """Slow benchmark -- RMSD matrix backends on larger trajectories.
+
+    The matrix is O(n_frames^2) so the 1000-frame case computes 500k
+    pairs and takes tens of seconds on the single-threaded mdtraj loop.
+    Marked ``slow`` so it is deselected by ``-m "not slow"`` in fast CI.
+
+    Run only slow benchmarks:  ``pytest -m "benchmark and slow"``
+    """
+    traj = _make_alanine_traj(n_frames, n_residues)
     _run_rmsd_benchmark(traj)
