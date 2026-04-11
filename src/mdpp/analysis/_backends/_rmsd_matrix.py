@@ -4,12 +4,73 @@ Provides five backends for computing all-vs-all pairwise RMSD matrices:
 
 - ``numba`` -- Numba-parallel QCP (Theobald 2005) on CPU.
 - ``mdtraj`` -- mdtraj precentered RMSD loop on CPU.
-- ``torch`` -- Vectorised einsum + batched SVD via PyTorch.
-- ``jax`` -- Vectorised einsum + batched SVD via JAX.
-- ``cupy`` -- Vectorised einsum + batched SVD via CuPy.
+- ``torch`` -- Vectorised einsum + QCP Newton-Raphson via PyTorch.
+- ``jax`` -- Vectorised einsum + QCP Newton-Raphson via JAX.
+- ``cupy`` -- Vectorised einsum + QCP Newton-Raphson via CuPy.
 
 All backends return a symmetric ``(n_frames, n_frames)`` float64 numpy
 array of RMSD values in nm.
+
+Streaming pipeline design (GPU backends)
+----------------------------------------
+
+The full cross-covariance tensor ``H[i, j, m, n]`` for all
+``(i, j)`` pairs has shape ``(N, N, 3, 3)`` -- ~450 GB for a 120k-frame
+concatenated trajectory at float32, which does not fit on any GPU.
+The GPU backends therefore iterate over **row blocks** of the RMSD
+matrix:
+
+1. Choose ``row_chunk`` so that each block's working set
+   (``(chunk, N, 3, 3)`` cross-covariance plus ~12 ``(chunk, N)``
+   intermediate tensors for the QCP coefficients and Newton-Raphson
+   state) fits in roughly 25% of free GPU memory -- see
+   :func:`_rmsd_torch_row_chunk` / :func:`_rmsd_cupy_row_chunk` /
+   :func:`_rmsd_jax_row_chunk`.
+2. For each block, compute ``H_block[k, j] = xyz[i_start+k].T @ xyz[j]``
+   in one einsum call, then run the vectorised QCP solver.
+3. Stream the block's rows back to the host ``result`` matrix.
+
+The ``result`` matrix itself lives on CPU throughout: ``float32``
+pairwise RMSD for 120k frames is ~54 GB and would otherwise crowd out
+the working set.
+
+The torch backend goes one step further and uses **pinned host memory
++ a dedicated copy stream** so that the D2H transfer truly runs in
+parallel with the next block's compute (not merely asynchronously on
+the same stream).  The algorithm is:
+
+- Allocate two pinned host buffers ``buf_a`` and ``buf_b`` of shape
+  ``(row_chunk, N)`` -- pinned so the CUDA driver can DMA directly,
+  double-buffered so two chunks can be in flight at once.
+- Create a dedicated ``copy_stream``.  The compute stream remains the
+  default torch stream so existing dispatch works unchanged.
+- Inside the chunk loop:
+
+  * Queue ``einsum`` + QCP on the compute stream.
+  * ``copy_stream.wait_stream(compute_stream)`` orders the copy
+    after the compute work, then issue
+    ``buf[:chunk_len].copy_(rmsd_block, non_blocking=True)`` inside
+    ``torch.cuda.stream(copy_stream)``.  Pinned destination +
+    ``non_blocking=True`` is the only combination that lets the
+    runtime schedule a real async D2H; plain ``.cpu()`` goes through
+    a pageable buffer and implicitly synchronises the compute stream.
+  * ``rmsd_block.record_stream(copy_stream)`` defers the caching
+    allocator's release of the GPU block until the copy is done.
+  * Record a ``torch.cuda.Event`` on ``copy_stream``.
+  * Drain the **previous** chunk's pinned buffer into ``result`` --
+    ``prev_event.synchronize()`` then a numpy slice-assign.  This
+    happens while the *current* chunk's copy is still running and
+    the *next* chunk's compute is already queued.
+- Ping-pong ``buf_idx = 1 - buf_idx`` between the two buffers.
+
+Three pipeline stages (compute stream / copy stream / CPU memcpy) run
+concurrently in steady state, so the GPU compute stream stays saturated
+for the entire run.  If pinned allocation fails (e.g. ``ulimit -l``
+too low), we fall back to a simple synchronous pipeline that still
+overlaps the CPU memcpy with the next chunk's compute via python-side
+async dispatch.  The JAX and CuPy backends use that simpler pipeline
+only -- neither framework exposes pinned double-buffering the way
+torch does.
 """
 
 from __future__ import annotations
@@ -337,6 +398,147 @@ def _rmsd_qcp_torch(
     return torch_mod.sqrt(torch_mod.clamp(rmsd_sq, min=0.0))
 
 
+def _rmsd_torch_run_cpu(
+    torch_mod,
+    xyz,
+    traces,
+    n_atoms: int,
+    row_chunk: int,
+    result: np.ndarray,
+) -> None:  # pragma: no cover - thin helper
+    """Torch RMSD streaming loop on CPU or pinned-alloc-failed GPU.
+
+    Simple synchronous pipeline: launch chunk N's einsum/QCP, then
+    write chunk N-1 to ``result`` while chunk N is still being
+    scheduled.  On CPU everything is blocking anyway; on GPU we
+    fall back to this path when pinned-memory allocation fails
+    (e.g. ``ulimit -l`` too low).
+    """
+    n_frames = xyz.shape[0]
+    prev_cpu_tensor = None
+    prev_range: tuple[int, int] | None = None
+
+    for i_start in range(0, n_frames, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames)
+        xyz_rows = xyz[i_start:i_end]
+        H_block = torch_mod.einsum("kam,jan->kjmn", xyz_rows, xyz)
+        rmsd_block = _rmsd_qcp_torch(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
+        del H_block
+
+        if prev_cpu_tensor is not None:
+            prev_start, prev_end = prev_range  # type: ignore[misc]
+            result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+
+        cpu_tensor = rmsd_block.cpu()
+        del rmsd_block
+
+        prev_cpu_tensor = cpu_tensor
+        prev_range = (i_start, i_end)
+
+    if prev_cpu_tensor is not None:
+        prev_start, prev_end = prev_range  # type: ignore[misc]
+        result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+
+
+def _rmsd_torch_run_gpu(
+    torch_mod,
+    xyz,
+    traces,
+    n_atoms: int,
+    row_chunk: int,
+    result: np.ndarray,
+) -> None:  # pragma: no cover - thin helper
+    """Torch RMSD streaming loop with pinned memory + copy stream.
+
+    Uses a dedicated ``copy_stream`` so the D2H transfer of chunk
+    N runs concurrently with the einsum/QCP compute of chunk N+1
+    on the default compute stream.  Two pinned host buffers are
+    double-buffered so a new copy can start before the previous
+    one has been drained to ``result``.
+
+    The copy is queued with ``non_blocking=True`` into a pinned
+    buffer, which is the only combination that lets CUDA schedule
+    a real async D2H transfer; a plain ``tensor.cpu()`` goes
+    through a pageable buffer and implicitly synchronises the
+    compute stream.  ``rmsd_block.record_stream(copy_stream)``
+    defers the caching allocator's release of the GPU block until
+    the copy stream is done with it.
+
+    If the pinned-buffer allocation fails (RuntimeError, typically
+    due to a low ``ulimit -l`` on the host), we fall back to the
+    simple synchronous pipeline in :func:`_rmsd_torch_run_cpu`.
+    """
+    n_frames = xyz.shape[0]
+    device = xyz.device
+
+    # Double-buffered pinned host staging for async D2H.  Each buffer
+    # is full-width ``(row_chunk, n_frames)``; the last chunk may be
+    # shorter and uses ``buf[:C]``.
+    buf_shape = (row_chunk, n_frames)
+    try:
+        pinned_bufs = [
+            torch_mod.empty(buf_shape, dtype=torch_mod.float32, pin_memory=True) for _ in range(2)
+        ]
+    except RuntimeError:
+        _rmsd_torch_run_cpu(torch_mod, xyz, traces, n_atoms, row_chunk, result)
+        return
+
+    copy_stream = torch_mod.cuda.Stream(device=device)
+
+    prev_buf = None
+    prev_range: tuple[int, int] | None = None
+    prev_event = None
+    buf_idx = 0
+
+    for i_start in range(0, n_frames, row_chunk):
+        i_end = min(i_start + row_chunk, n_frames)
+        chunk_len = i_end - i_start
+        xyz_rows = xyz[i_start:i_end]
+
+        # Compute on the current (default) stream.
+        H_block = torch_mod.einsum("kam,jan->kjmn", xyz_rows, xyz)
+        rmsd_block = _rmsd_qcp_torch(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
+        del H_block
+
+        # Queue the async D2H on copy_stream, ordered after the
+        # compute stream's pending work.
+        cur_buf = pinned_bufs[buf_idx]
+        compute_stream = torch_mod.cuda.current_stream(device)
+        copy_stream.wait_stream(compute_stream)
+        with torch_mod.cuda.stream(copy_stream):
+            cur_buf[:chunk_len].copy_(rmsd_block, non_blocking=True)
+        # Hold rmsd_block alive on copy_stream so the caching
+        # allocator does not reuse its memory before the copy runs.
+        rmsd_block.record_stream(copy_stream)
+        del rmsd_block
+
+        cur_event = torch_mod.cuda.Event()
+        cur_event.record(copy_stream)
+
+        # While the copy runs (and the next einsum will be queued
+        # just after this Python continues), drain the previous
+        # chunk from its pinned buffer into ``result``.
+        if prev_buf is not None:
+            assert prev_event is not None and prev_range is not None
+            prev_event.synchronize()
+            prev_start, prev_end = prev_range
+            prev_len = prev_end - prev_start
+            result[prev_start:prev_end] = prev_buf[:prev_len].numpy()
+
+        prev_buf = cur_buf
+        prev_range = (i_start, i_end)
+        prev_event = cur_event
+        buf_idx = 1 - buf_idx
+
+    # Flush the final chunk.
+    if prev_buf is not None:
+        assert prev_event is not None and prev_range is not None
+        prev_event.synchronize()
+        prev_start, prev_end = prev_range
+        prev_len = prev_end - prev_start
+        result[prev_start:prev_end] = prev_buf[:prev_len].numpy()
+
+
 @clean_torch_cache
 def rmsd_torch(
     traj: md.Trajectory,
@@ -358,12 +560,28 @@ def rmsd_torch(
       memory (see :func:`_rmsd_torch_row_chunk`).
     * Compute ``H_block[k, j] = xyz[i_start+k].T @ xyz[j]`` for all
       ``j`` in one einsum call.
-    * Run vectorised QCP on the block, mask the lower triangle, and
-      transfer the chunk back to the CPU result matrix.
+    * Run vectorised QCP on the block, and stream the chunk back
+      to the CPU ``result`` matrix.
 
     The result matrix itself lives on the CPU throughout -- for a
     120k-frame trajectory it is ~54 GB in float32 alone, which would
     eat a huge chunk of device memory if kept on GPU.
+
+    **Pinned D2H pipeline (CUDA path).**  Naively each chunk would
+    end with ``rmsd_block.cpu()``, which goes through a pageable
+    buffer and implicitly synchronises the compute stream -- the
+    GPU then sits idle for the duration of the ~200 ms CPU memcpy
+    into ``result`` before the next einsum can begin.  Instead we
+    allocate two pinned host buffers and a dedicated copy stream;
+    each chunk's D2H copy is issued with ``non_blocking=True`` and
+    scheduled on the copy stream so it runs in true parallel with
+    the next chunk's compute on the default stream.  The Python
+    loop drains the *previous* buffer into ``result`` while the
+    *current* chunk is still mid-copy, so neither the CPU memcpy
+    nor the D2H transfer is on the critical path for GPU utilisation.
+    See :func:`_rmsd_torch_run_gpu` for the implementation details,
+    and :func:`_rmsd_torch_run_cpu` for the simple sync fallback
+    used on CPU or when pinned-buffer allocation fails.
 
     **Why QCP and not batched SVD**: batched ``torch.linalg.svd`` on
     3x3 matrices has very high LAPACK per-matrix overhead; even in
@@ -406,53 +624,10 @@ def rmsd_torch(
         # Result matrix lives on CPU to avoid pinning ~N^2 floats on GPU.
         result = np.zeros((n_frames, n_frames), dtype=np.float32)
 
-        # Pipeline CPU writes with GPU compute: launch chunk N's
-        # einsum/QCP (async), then write chunk N-1 into ``result``
-        # on the CPU while the GPU is still working on chunk N.
-        # Torch CUDA ops are asynchronous so the Python interpreter
-        # can keep working until it hits ``.cpu()``, which blocks
-        # on the current chunk only.  This hides ~tens of ms of
-        # numpy memcpy behind ~seconds of GPU compute and keeps
-        # the device close to 100% busy.
-        #
-        # We also write **whole rows** (not just the upper triangle):
-        # since the RMSD matrix is symmetric, each chunk fills its
-        # own rows end-to-end with a single ``result[a:b] = block``
-        # numpy slice-assign (a pure contiguous memcpy).  The
-        # mirrored ``result[j, i]`` slot is written later by whichever
-        # chunk owns row j; both writes equal RMSD(i, j) up to
-        # float32 noise (~1e-7 nm).
-        prev_cpu_tensor = None
-        prev_range: tuple[int, int] | None = None
-
-        for i_start in range(0, n_frames, row_chunk):
-            i_end = min(i_start + row_chunk, n_frames)
-            xyz_rows = xyz[i_start:i_end]  # (C, M, 3) view
-            # H_block[k, j, m, n] = sum_a xyz_rows[k, a, m] * xyz[j, a, n]
-            H_block = torch.einsum("kam,jan->kjmn", xyz_rows, xyz)
-            rmsd_block = _rmsd_qcp_torch(torch, H_block, traces[i_start:i_end], traces, n_atoms)
-            del H_block
-
-            # Overlap CPU write of the previous chunk with the GPU
-            # compute of the current chunk (the einsum/QCP ops above
-            # were issued asynchronously and are still running).
-            if prev_cpu_tensor is not None:
-                prev_start, prev_end = prev_range  # type: ignore[misc]
-                result[prev_start:prev_end] = prev_cpu_tensor.numpy()
-
-            # Block here until the current chunk finishes and copy
-            # it to host.  The next iteration's compute will start
-            # after this returns and run while we write ``cpu_tensor``.
-            cpu_tensor = rmsd_block.cpu()
-            del rmsd_block
-
-            prev_cpu_tensor = cpu_tensor
-            prev_range = (i_start, i_end)
-
-        # Flush the final chunk.
-        if prev_cpu_tensor is not None:
-            prev_start, prev_end = prev_range  # type: ignore[misc]
-            result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+        if device.type == "cuda":
+            _rmsd_torch_run_gpu(torch, xyz, traces, n_atoms, row_chunk, result)
+        else:
+            _rmsd_torch_run_cpu(torch, xyz, traces, n_atoms, row_chunk, result)
 
     # Zero the diagonal: float32 QCP Newton-Raphson on ``H(i, i)`` does
     # not land exactly on ``lambda_max = G_i``, so self-RMSD picks up
