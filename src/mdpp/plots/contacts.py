@@ -10,7 +10,7 @@ from mdpp.plots.utils import get_axis
 
 
 def plot_contact_map(
-    frequency: NDArray[np.float64],
+    frequency: NDArray[np.floating],
     *,
     residue_ids: NDArray[np.int_] | None = None,
     ax: Axes | None = None,
@@ -59,10 +59,10 @@ def plot_contact_map(
 
 
 def contact_frequency_to_matrix(
-    frequency: NDArray[np.float64],
+    frequency: NDArray[np.floating],
     residue_pairs: NDArray[np.int_],
     n_residues: int,
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Convert per-pair contact frequencies to a symmetric matrix.
 
     Args:
@@ -71,9 +71,10 @@ def contact_frequency_to_matrix(
         n_residues: Total number of residues for the output matrix.
 
     Returns:
-        Symmetric matrix of shape ``(n_residues, n_residues)``.
+        Symmetric matrix of shape ``(n_residues, n_residues)`` in the
+        same floating dtype as ``frequency`` (float32 by default).
     """
-    matrix = np.zeros((n_residues, n_residues), dtype=np.float64)
+    matrix = np.zeros((n_residues, n_residues), dtype=frequency.dtype)
     for pair_index in range(residue_pairs.shape[0]):
         i, j = residue_pairs[pair_index]
         matrix[i, j] = frequency[pair_index]

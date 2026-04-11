@@ -115,9 +115,12 @@ def distances_numba(
             periodic boundary conditions.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` in float64 (numba's
-        ``float()`` cast maps to C ``double``; the wrapper casts
-        ``copy=False`` to the user-resolved dtype).
+        Distances of shape ``(n_frames, n_pairs)`` in **float32**.
+        Intermediate math still promotes to C ``double`` via
+        ``float()`` so precision matches mdtraj's float32 output;
+        only the final store truncates to float32.  Half the
+        memory of the old float64 output (critical at large
+        ``n_frames * n_pairs``).
 
     Raises:
         ValueError: If any pair index is out of range.
@@ -127,10 +130,10 @@ def distances_numba(
     @njit(parallel=True, cache=True)
     def _kernel(
         xyz: NDArray[np.float32], pairs: NDArray[np.int_]
-    ) -> NDArray[np.float64]:  # pragma: no cover - JIT-compiled
+    ) -> NDArray[np.floating]:  # pragma: no cover - JIT-compiled
         n_frames = xyz.shape[0]
         n_pairs = pairs.shape[0]
-        out = np.empty((n_frames, n_pairs), dtype=np.float64)
+        out = np.empty((n_frames, n_pairs), dtype=np.float32)
         for f in prange(n_frames):
             for k in range(n_pairs):
                 i = pairs[k, 0]

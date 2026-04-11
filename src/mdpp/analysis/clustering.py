@@ -79,15 +79,16 @@ def compute_rmsd_matrix(
         ImportError: If the requested backend package is not installed.
 
     Memory note:
-        The GPU backends return their native ``float32`` buffer and
-        this wrapper casts with ``copy=False``, so when the resolved
-        dtype is float32 (the package default) there is **no second
-        copy** of the ``(n_frames, n_frames)`` matrix.  For a
-        120k-frame trajectory this saves ~115 GB of peak RAM versus
-        the old "cast to float64 for the Protocol contract, then
-        cast back" path.  Using ``backend="numba"`` or
-        ``dtype=np.float64`` still forces a copy because the numba
-        kernel is float64 native.
+        Every backend returns its native ``float32`` output matrix
+        (the numba kernel uses float64 accumulators internally but
+        stores float32 in the result buffer; GPU kernels compute in
+        float32 end-to-end).  This wrapper casts with ``copy=False``
+        so when the resolved dtype is float32 (the package default)
+        there is **no second copy** of the ``(n_frames, n_frames)``
+        matrix.  For a 120k-frame trajectory this saves ~115 GB of
+        peak RAM versus the old "cast to float64 for the Protocol
+        contract, then cast back" path.  Passing ``dtype=np.float64``
+        still forces a one-time upcast.
     """
     resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)

@@ -122,9 +122,16 @@ class RMSDMatrixBackendFn(Protocol):
 
 @njit(cache=True)
 def _center_and_traces(
-    xyz: NDArray[np.float64],
-) -> NDArray[np.float64]:  # pragma: no cover - JIT
-    """Center each frame in-place and return per-frame sum-of-squares."""
+    xyz: NDArray[np.floating],
+) -> NDArray[np.floating]:  # pragma: no cover - JIT
+    """Center each frame in-place and return per-frame sum-of-squares.
+
+    ``traces`` is allocated in float64 so the QCP Newton-Raphson
+    subtraction ``G_a + G_b - 2*lambda`` preserves the few extra
+    significant bits that float32 would lose when ``lambda`` is
+    close to ``(G_a + G_b) / 2``.  This buffer is ``O(n_frames)`` so
+    the fp64 cost is negligible even at 120k frames (1 MB).
+    """
     n_frames = xyz.shape[0]
     n_atoms = xyz.shape[1]
     traces = np.empty(n_frames, dtype=np.float64)
@@ -149,11 +156,11 @@ def _center_and_traces(
 
 @njit(parallel=True, cache=True)
 def _pairwise_rmsd(
-    xyz: NDArray[np.float64],
-    traces: NDArray[np.float64],
+    xyz: NDArray[np.floating],
+    traces: NDArray[np.floating],
     pair_i: NDArray[np.int64],
     pair_j: NDArray[np.int64],
-) -> NDArray[np.float64]:  # pragma: no cover - JIT
+) -> NDArray[np.floating]:  # pragma: no cover - JIT
     """Compute symmetric pairwise RMSD matrix with QCP superposition.
 
     Uses the Quaternion Characteristic Polynomial method (Theobald 2005)
@@ -170,11 +177,22 @@ def _pairwise_rmsd(
     and caps CPU utilisation at 60-80%.  A single ``prange`` over the
     flat pair list gives every thread an equal slab of work, pushing
     utilisation close to 100%.
+
+    **Dtype policy.**  The accumulators (``Sxx`` etc.) and the QCP
+    Newton-Raphson state are all ``float64`` scalars (numba's
+    ``0.0`` literal maps to a C ``double``), so the quartic solve
+    preserves full double precision regardless of the input dtype.
+    Only the final store ``result[i, j] = val`` truncates to
+    ``float32``, which halves the O(N^2) output-matrix footprint
+    (58 GB saved at n=120k) while keeping the QCP precision that
+    the float64 accumulation provides.  The ``traces`` buffer is
+    also float64 for the same reason -- see
+    :func:`_center_and_traces`.
     """
     n_frames = xyz.shape[0]
     n_atoms = xyz.shape[1]
     n_pairs = pair_i.shape[0]
-    result = np.zeros((n_frames, n_frames))
+    result = np.zeros((n_frames, n_frames), dtype=np.float32)
     for p in prange(n_pairs):
         i = pair_i[p]
         j = pair_j[p]

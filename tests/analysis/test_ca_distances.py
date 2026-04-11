@@ -203,11 +203,19 @@ class TestNumbaKernel:
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
-    def test_output_dtype_float64(self) -> None:
-        """Numba kernel returns float64 natively (``float()`` -> C double)."""
+    def test_output_dtype_native_float32(self) -> None:
+        """Numba kernel stores float32 output (intermediate math still C double).
+
+        Numba's ``float()`` cast maps to C ``double`` so the per-pair
+        ``dx*dx + dy*dy + dz*dz`` accumulation runs in double precision;
+        only the final ``out[f, k] = np.sqrt(...)`` store truncates to
+        float32.  This halves the ``(n_frames, n_pairs)`` output
+        footprint (critical at large N*M) without losing precision
+        relative to mdtraj's float32 coordinates.
+        """
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
         result = distances_numba(_make_traj(xyz), _PAIR_01)
-        assert result.dtype == np.float64
+        assert result.dtype == np.float32
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)

@@ -353,6 +353,19 @@ class TestComputeRmsdMatrixNoRedundantCopy:
         result = compute_rmsd_matrix(tiny_traj, atom_selection="all", backend="mdtraj")
         assert result.rmsd_matrix_nm.dtype == np.float32
 
+    def test_numba_backend_returns_float32(self, tiny_traj: md.Trajectory) -> None:
+        """``rmsd_numba`` now stores float32 in the result buffer.
+
+        The QCP accumulators and Newton-Raphson state are still
+        float64 inside the JIT kernel (numba's ``0.0`` literal is a C
+        ``double``), so precision is preserved; only the final
+        ``result[i, j] = val`` store truncates to float32.  At
+        n=120k this halves the output-matrix footprint from 115 GB
+        to 57 GB.
+        """
+        result = compute_rmsd_matrix(tiny_traj, atom_selection="all", backend="numba")
+        assert result.rmsd_matrix_nm.dtype == np.float32
+
     def test_wrapper_does_not_copy_when_dtype_matches(
         self,
         monkeypatch: pytest.MonkeyPatch,
