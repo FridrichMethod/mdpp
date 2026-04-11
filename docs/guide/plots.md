@@ -107,7 +107,7 @@ ax = plot_projection(pca_result, color_by=time, cmap="coolwarm")
 from mdpp.analysis.decomposition import featurize_backbone_torsions
 from mdpp.plots import plot_ramachandran
 
-torsions = featurize_backbone_torsions(traj, periodic=False)
+torsions = featurize_backbone_torsions(traj, sincos_embedding=False)
 ax = plot_ramachandran(torsions)
 ```
 

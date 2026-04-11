@@ -7,9 +7,14 @@ for all analysis operations in this package.
 Float64 is **not** forced anywhere in the analysis pipeline.  The only
 places where float64 appears are:
 
-- **Numba JIT kernel** (``decomposition._pairwise_distances_numba``):
-  the compiled kernel outputs float64 due to Numba's ``float()`` cast
-  semantics; callers cast the result to the resolved dtype afterward.
+- **Numba JIT kernels** (``_backends/_distances.distances_numba``,
+  ``_backends/_rmsd_matrix._pairwise_rmsd``): compiled kernels output
+  float64 due to Numba's ``float()`` cast semantics; callers cast the
+  result to the resolved dtype afterward.
+- **GPU backends** (``_backends/_distances`` and
+  ``_backends/_rmsd_matrix`` ``torch``/``jax``/``cupy`` variants):
+  use float64 internally for numerical stability (especially SVD);
+  callers cast to the resolved dtype afterward.
 - **Deeptime TICA** (``decomposition.compute_tica``): deeptime upcasts
   to float64 internally for covariance estimation -- no explicit cast
   is needed from our side.

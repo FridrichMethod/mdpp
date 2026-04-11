@@ -18,14 +18,19 @@ src/mdpp/
 │   │                     # select_atom_indices, residue_ids_from_indices, trajectory_time_ps
 │   └── parsers.py       # read_xvg, read_edr (thin wrappers around panedr/numpy)
 ├── analysis/        # compute_* functions returning frozen dataclass results
+│   ├── _backends/       # private subpackage: pluggable compute backends
+│   │   ├── _registry.py     # BackendRegistry[F] + DistanceBackend/RMSDBackend Literals
+│   │   ├── _imports.py      # lazy require_torch/jax/cupy + has_* flags
+│   │   ├── _distances.py    # 5 pairwise-distance backends (mdtraj/numba/torch/jax/cupy)
+│   │   └── _rmsd_matrix.py  # 5 RMSD matrix backends (same set, QCP kernel for numba)
 │   ├── metrics.py       # RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration
 │   ├── hbond.py         # hydrogen bond detection
 │   ├── contacts.py      # inter-residue contacts, native contacts Q(t)
-│   ├── distance.py      # pairwise distances, minimum distance
+│   ├── distance.py      # pairwise distances, minimum distance (thin wrapper)
 │   ├── dssp.py          # secondary structure (DSSP)
 │   ├── decomposition.py # PCA (with projection), TICA, backbone torsion featurization
 │   ├── fes.py           # 2D free energy surfaces
-│   └── clustering.py    # RMSD matrix, GROMOS clustering
+│   └── clustering.py    # RMSD matrix, GROMOS clustering (thin wrapper)
 ├── chem/            # small-molecule cheminformatics (RDKit-based)
 │   ├── descriptors.py   # molecular descriptor calculation and filtering
 │   ├── filters.py       # Murcko scaffold extraction, PAINS filters
@@ -234,7 +239,7 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **scikit-learn** — PCA, clustering
 - **deeptime** — TICA
 - **rdkit** — cheminformatics: ligand topology, descriptors, fingerprints, similarity
-- **numba** — parallel CPU kernels: pairwise distances (`analysis/distance.py`), RMSD matrix (`analysis/clustering.py`), similarity (`chem/similarity.py`)
+- **numba** — parallel CPU kernels: pairwise distances and RMSD matrix (`analysis/_backends/`), similarity (`chem/similarity.py`)
 - **biopython** — PDB chain extraction (`Bio.PDB.Select`)
 - **biotite** — structural bioinformatics utilities
 - **propka** — pKa prediction (`prep/protein.py`)
@@ -264,6 +269,17 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 1. Add corresponding `plot_*` function in `plots/` if applicable.
 1. Add the plot re-export to `plots/__init__.py` and `__all__`.
 1. Write tests in `tests/analysis/`.
+
+### New compute backend
+
+To add a new backend (e.g. `cupy`) for an existing compute function like the RMSD matrix or pairwise distances:
+
+1. Add an implementation function in the matching `src/mdpp/analysis/_backends/_<kind>.py` file.
+1. Use lazy imports via `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` -- never import optional GPU libraries at module top-level.
+1. Keep the signature aligned with existing backends in the same file (e.g. `(traj, pairs)` for distances, `(traj, atom_indices)` for RMSD matrix).
+1. Register the function in the module's `BackendRegistry` at the bottom of the file.
+1. Add the backend name to the corresponding `Literal` alias in `_backends/_registry.py` (`DistanceBackend` or `RMSDBackend`).
+1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` marker.
 
 ### New cheminformatics function
 

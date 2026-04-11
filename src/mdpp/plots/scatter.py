@@ -72,12 +72,12 @@ def plot_ramachandran(
 ) -> Axes:
     """Plot a Ramachandran diagram from backbone torsion features.
 
-    Expects ``torsions`` to have been computed with ``periodic=False``
+    Expects ``torsions`` to have been computed with ``sincos_embedding=False``
     so that raw phi/psi angles (in radians) are available.
 
     Args:
         torsions: TorsionFeatures from ``featurize_backbone_torsions``
-            with ``periodic=False``.
+            with ``sincos_embedding=False``.
         ax: Optional matplotlib axis.
         s: Marker size.
         alpha: Marker transparency.
@@ -97,7 +97,7 @@ def plot_ramachandran(
     if not phi_cols or not psi_cols:
         raise ValueError(
             "Ramachandran plot requires raw phi/psi angles. "
-            "Use featurize_backbone_torsions(periodic=False)."
+            "Use featurize_backbone_torsions(sincos_embedding=False)."
         )
 
     phi = torsions.values[:, phi_cols].ravel()

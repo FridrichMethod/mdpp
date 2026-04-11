@@ -79,7 +79,7 @@ def featurize_backbone_torsions(
     traj: md.Trajectory,
     *,
     atom_selection: str | None = "protein",
-    periodic: bool = True,
+    sincos_embedding: bool = True,
     dtype: DtypeArg = None,
 ) -> TorsionFeatures:
     """Featurize backbone phi/psi torsions.
@@ -87,7 +87,13 @@ def featurize_backbone_torsions(
     Args:
         traj: Input trajectory.
         atom_selection: Optional atom selection before featurization.
-        periodic: If True, return sin/cos embedding for periodic torsions.
+        sincos_embedding: If True (default), return ``[cos(angle),
+            sin(angle)]`` columns instead of raw radian angles.  This
+            embedding handles the discontinuity at +/-pi correctly and
+            is required for downstream PCA / TICA on circular variables.
+            Set to False to keep raw radian angles (e.g. for Ramachandran
+            plots).  Note: this is unrelated to mdtraj's ``periodic``
+            argument for minimum image convention.
         dtype: Output float dtype. If ``None``, uses the package default
             (see :func:`mdpp.set_default_dtype`).
 
@@ -114,7 +120,7 @@ def featurize_backbone_torsions(
     phi_count = int(phi.shape[1]) if phi.ndim == 2 else 0
     psi_count = int(psi.shape[1]) if psi.ndim == 2 else 0
 
-    if periodic:
+    if sincos_embedding:
         if phi_count > 0:
             blocks.extend([np.cos(phi), np.sin(phi)])
             labels.extend([f"cos(phi_{index})" for index in range(phi_count)])

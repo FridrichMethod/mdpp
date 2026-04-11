@@ -168,7 +168,7 @@ result = compute_dssp(traj, simplified=True)
 ```python
 from mdpp.analysis.decomposition import featurize_backbone_torsions, compute_pca
 
-features = featurize_backbone_torsions(traj, periodic=True)
+features = featurize_backbone_torsions(traj, sincos_embedding=True)
 pca_result = compute_pca(features.values, n_components=2)
 ```
 
@@ -177,7 +177,7 @@ pca_result = compute_pca(features.values, n_components=2)
 ```python
 from mdpp.analysis.decomposition import project_pca
 
-new_features = featurize_backbone_torsions(new_traj, periodic=True)
+new_features = featurize_backbone_torsions(new_traj, sincos_embedding=True)
 projected = project_pca(new_features.values, fitted=pca_result)
 ```
 
