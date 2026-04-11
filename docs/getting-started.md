@@ -17,6 +17,16 @@ conda install -c conda-forge pdbfixer
 pip install -e ".[openmm,dev]"
 ```
 
+For optional GPU compute backends (pairwise distances and RMSD matrix via
+`cupy` / `torch` / `jax`):
+
+```bash
+pip install -e ".[gpu]"
+```
+
+Without `[gpu]`, the `numba` and `mdtraj` backends still work -- only the
+GPU `backend="cupy"` / `"torch"` / `"jax"` options require these extras.
+
 ## Minimal Example
 
 Load a GROMACS trajectory, compute RMSD, and plot it:

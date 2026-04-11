@@ -48,6 +48,7 @@ Source is under `src/mdpp/` using the src-layout convention:
 | `core/` | Trajectory I/O, file parsers | `load_trajectory`, `load_trajectories`, `read_xvg`, `read_edr` |
 | `constants.py` | Physical constants | `GAS_CONSTANT_KJ_MOL_K`, `DEFAULT_TEMPERATURE_K` |
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
+| `analysis/_backends/` | Private backend subpackage | `BackendRegistry[F]`, `require_torch/jax/cupy`, `DistanceBackend`/`RMSDBackend` Literals |
 | `chem/` | Small-molecule cheminformatics | `MolSupplier`, `calc_descs`, `gen_fp`, `calc_sim`, `is_pains` |
 | `plots/` | Visualization (2D, 3D, molecules) | `plot_*(result, *, ax=None) -> Axes`, `draw_mol`, `view_mol_3d` |
 | `prep/` | System preparation | `fix_pdb`, `strip_solvent`, `run_propka`, ligand tools |
@@ -104,6 +105,16 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 1. Add exports to `src/mdpp/analysis/__init__.py`.
 1. If visual output makes sense, add `plot_*` in `src/mdpp/plots/` and export it.
 1. Write tests in `tests/analysis/`.
+
+## Adding a New Compute Backend
+
+For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise distances):
+
+1. Add the implementation in the matching `src/mdpp/analysis/_backends/_<kind>.py` file, matching the existing signature.
+1. Use `require_torch()` / `require_jax()` / `require_cupy()` from `_backends/_imports.py` for optional GPU libraries -- never import them at module top-level.
+1. Register in the module's `BackendRegistry` at the bottom of the file.
+1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend`) in `_backends/_registry.py`.
+1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` skip marker.
 
 ## Adding a New Chem Function
 

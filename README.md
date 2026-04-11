@@ -28,6 +28,7 @@
 - **Trajectory analysis** — RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
 - **Dimensionality reduction** — PCA (with projection), TICA, backbone torsion featurization, free energy surfaces
 - **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
+- **Pluggable compute backends** — pairwise distances and RMSD matrix ship with `mdtraj` / `numba` / `torch` / `jax` / `cupy` backends; switch via `backend=` (50x+ speedup on multi-core CPU or GPU, no PBC on non-mdtraj backends)
 - **Cheminformatics** — molecular descriptors, PAINS filters, fingerprints (Morgan/ECFP), Tanimoto similarity, Butina clustering
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
 - **2D/3D visualization** — molecule structure drawings (RDKit), interactive 3D views (py3Dmol, nglview)
@@ -52,6 +53,20 @@ conda create -n mdpp python=3.12 -y && conda activate mdpp
 conda install -c conda-forge pdbfixer -y
 pip install -e ".[openmm,dev]"
 ```
+
+</details>
+
+<details>
+<summary><b>Optional GPU backends (cupy / torch / jax)</b></summary>
+
+```bash
+pip install -e ".[gpu]"
+```
+
+Enables the `backend="cupy"`, `backend="torch"`, and `backend="jax"` options
+on `compute_rmsd_matrix`, `compute_distances`, and `featurize_ca_distances`.
+These libraries are optional -- the `numba` and `mdtraj` backends work
+without any GPU dependencies.
 
 </details>
 
@@ -175,7 +190,8 @@ Built on the scientific Python ecosystem:
 | [scikit-learn](https://scikit-learn.org) | PCA, clustering |
 | [deeptime](https://deeptime-ml.github.io) | TICA |
 | [RDKit](https://rdkit.org) | Cheminformatics & ligand topology |
-| [Numba](https://numba.pydata.org) | Parallel similarity kernels |
+| [Numba](https://numba.pydata.org) | Parallel CPU kernels: RMSD matrix (QCP), pairwise distances, similarity |
+| [PyTorch](https://pytorch.org) · [JAX](https://jax.readthedocs.io) · [CuPy](https://cupy.dev) | Optional GPU backends (install via `[gpu]` extra) |
 | [PROPKA](https://github.com/jensengroup/propka) | pKa prediction |
 | [BioPython](https://biopython.org) | PDB chain extraction |
 | [matplotlib](https://matplotlib.org) | Static 2D plotting |

@@ -151,6 +151,34 @@ from mdpp.analysis.distance import compute_minimum_distance
 result = compute_minimum_distance(traj, group1="resid 10", group2="resid 50")
 ```
 
+### Compute backend selection
+
+`compute_distances`, `compute_minimum_distance`, and `featurize_ca_distances`
+accept a `backend=` argument. Five backends are available:
+
+| Backend | Device | PBC | Install |
+|------------|--------------------|-----|------------------------------|
+| `"mdtraj"` | CPU (1 thread) | yes | built-in |
+| `"numba"` | CPU (all cores) | no | built-in (numba) |
+| `"cupy"` | NVIDIA GPU | no | `pip install -e ".[gpu]"` |
+| `"torch"` | CUDA GPU / CPU | no | `pip install -e ".[gpu]"` |
+| `"jax"` | GPU / TPU / CPU | no | `pip install -e ".[gpu]"` |
+
+```python
+# Default -- mdtraj (supports periodic boundary conditions)
+result = compute_distances(traj, atom_pairs=pairs, periodic=True)
+
+# Numba: ~5-10x faster than mdtraj on multi-core machines (no PBC)
+result = compute_distances(traj, atom_pairs=pairs, backend="numba", periodic=False)
+
+# GPU backends for very large trajectories
+result = compute_distances(traj, atom_pairs=pairs, backend="cupy", periodic=False)
+```
+
+> **Note:** Only the `mdtraj` backend supports periodic boundary
+> conditions. For the other four backends the `periodic` flag is
+> silently ignored.
+
 ## Secondary Structure (DSSP)
 
 ```python
@@ -208,3 +236,29 @@ clusters = cluster_conformations(rmsd_mat.rmsd_matrix_nm, cutoff_nm=0.15)
 print(f"Found {clusters.n_clusters} clusters")
 print(f"Medoid frames: {clusters.medoid_frames}")
 ```
+
+### RMSD matrix backend selection
+
+`compute_rmsd_matrix` defaults to the **numba** backend, which implements
+the Quaternion Characteristic Polynomial (Theobald 2005) algorithm in a
+Numba-JIT kernel with `prange` parallelism. Five backends are available:
+
+| Backend | Method | Device |
+|------------|--------------------------------------|-----------------|
+| `"numba"` | QCP + Newton-Raphson (default) | CPU (all cores) |
+| `"mdtraj"` | Precentered `md.rmsd` loop | CPU (1 thread) |
+| `"torch"` | Vectorised einsum + batched SVD | CUDA / CPU |
+| `"jax"` | Vectorised einsum + batched SVD | GPU / TPU / CPU |
+| `"cupy"` | Vectorised einsum + batched SVD | NVIDIA GPU |
+
+```python
+# Default (numba) -- 50-200x faster than mdtraj on multi-core machines
+rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone")
+
+# GPU backend for very large trajectories (>1000 frames)
+rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone", backend="torch")
+```
+
+All backends agree to within ~5e-5 nm and produce symmetric matrices
+with a zero diagonal. GPU backends (`torch`, `jax`, `cupy`) require
+the optional `[gpu]` extra.

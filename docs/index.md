@@ -29,6 +29,12 @@ For OpenMM-based preparation tools:
 pip install -e ".[openmm]"
 ```
 
+For optional GPU compute backends (`cupy` / `torch` / `jax`):
+
+```bash
+pip install -e ".[gpu]"
+```
+
 ## Links
 
 - [Getting Started](getting-started.md)
