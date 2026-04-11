@@ -83,6 +83,8 @@ def _center_and_traces(
 def _pairwise_rmsd(
     xyz: NDArray[np.float64],
     traces: NDArray[np.float64],
+    pair_i: NDArray[np.int64],
+    pair_j: NDArray[np.int64],
 ) -> NDArray[np.float64]:  # pragma: no cover - JIT
     """Compute symmetric pairwise RMSD matrix with QCP superposition.
 
@@ -90,96 +92,107 @@ def _pairwise_rmsd(
     to find the optimal rotational RMSD for each pair.  The largest
     eigenvalue of the 4x4 key matrix is found via Newton-Raphson on
     the characteristic polynomial -- pure scalar arithmetic with no
-    LAPACK calls, so the ``prange`` outer loop scales across all cores.
+    LAPACK calls.
+
+    The kernel iterates over a **flat** list of upper-triangle pair
+    indices (``pair_i[p]``, ``pair_j[p]``) rather than the original
+    nested ``prange(n_frames)`` / ``range(i+1, n_frames)``.  A nested
+    loop is statically load-imbalanced -- thread 0 gets ``i=0``
+    (``n-1`` pairs) while the last thread gets ``i=n-1`` (0 pairs) --
+    and caps CPU utilisation at 60-80%.  A single ``prange`` over the
+    flat pair list gives every thread an equal slab of work, pushing
+    utilisation close to 100%.
     """
     n_frames = xyz.shape[0]
     n_atoms = xyz.shape[1]
+    n_pairs = pair_i.shape[0]
     result = np.zeros((n_frames, n_frames))
-    for i in prange(n_frames):
-        for j in range(i + 1, n_frames):
-            # Cross-covariance matrix elements
-            Sxx = Sxy = Sxz = 0.0
-            Syx = Syy = Syz = 0.0
-            Szx = Szy = Szz = 0.0
-            for k in range(n_atoms):
-                x1 = xyz[i, k, 0]
-                y1 = xyz[i, k, 1]
-                z1 = xyz[i, k, 2]
-                x2 = xyz[j, k, 0]
-                y2 = xyz[j, k, 1]
-                z2 = xyz[j, k, 2]
-                Sxx += x1 * x2
-                Sxy += x1 * y2
-                Sxz += x1 * z2
-                Syx += y1 * x2
-                Syy += y1 * y2
-                Syz += y1 * z2
-                Szx += z1 * x2
-                Szy += z1 * y2
-                Szz += z1 * z2
+    for p in prange(n_pairs):
+        i = pair_i[p]
+        j = pair_j[p]
+        # Cross-covariance matrix elements
+        Sxx = Sxy = Sxz = 0.0
+        Syx = Syy = Syz = 0.0
+        Szx = Szy = Szz = 0.0
+        for k in range(n_atoms):
+            x1 = xyz[i, k, 0]
+            y1 = xyz[i, k, 1]
+            z1 = xyz[i, k, 2]
+            x2 = xyz[j, k, 0]
+            y2 = xyz[j, k, 1]
+            z2 = xyz[j, k, 2]
+            Sxx += x1 * x2
+            Sxy += x1 * y2
+            Sxz += x1 * z2
+            Syx += y1 * x2
+            Syy += y1 * y2
+            Syz += y1 * z2
+            Szx += z1 * x2
+            Szy += z1 * y2
+            Szz += z1 * z2
 
-            # Characteristic polynomial coefficients (Theobald 2005)
-            # P(lam) = lam^4 + c2*lam^2 + c1*lam + c0
-            c2 = -2.0 * (
-                Sxx * Sxx
-                + Sxy * Sxy
-                + Sxz * Sxz
-                + Syx * Syx
-                + Syy * Syy
-                + Syz * Syz
-                + Szx * Szx
-                + Szy * Szy
-                + Szz * Szz
-            )
-            c1 = -8.0 * (
-                Sxx * (Syy * Szz - Syz * Szy)
-                - Sxy * (Syx * Szz - Syz * Szx)
-                + Sxz * (Syx * Szy - Syy * Szx)
-            )
+        # Characteristic polynomial coefficients (Theobald 2005)
+        # P(lam) = lam^4 + c2*lam^2 + c1*lam + c0
+        c2 = -2.0 * (
+            Sxx * Sxx
+            + Sxy * Sxy
+            + Sxz * Sxz
+            + Syx * Syx
+            + Syy * Syy
+            + Syz * Syz
+            + Szx * Szx
+            + Szy * Szy
+            + Szz * Szz
+        )
+        c1 = -8.0 * (
+            Sxx * (Syy * Szz - Syz * Szy)
+            - Sxy * (Syx * Szz - Syz * Szx)
+            + Sxz * (Syx * Szy - Syy * Szx)
+        )
 
-            # det(K) via cofactor expansion of the 4x4 key matrix
-            ka = Sxx + Syy + Szz
-            kb = Syz - Szy
-            kc = Szx - Sxz
-            kd = Sxy - Syx
-            ke = Sxx - Syy - Szz
-            kf = Sxy + Syx
-            kg = Szx + Sxz
-            kh = -Sxx + Syy - Szz
-            km = Syz + Szy
-            kn = -Sxx - Syy + Szz
+        # det(K) via cofactor expansion of the 4x4 key matrix
+        ka = Sxx + Syy + Szz
+        kb = Syz - Szy
+        kc = Szx - Sxz
+        kd = Sxy - Syx
+        ke = Sxx - Syy - Szz
+        kf = Sxy + Syx
+        kg = Szx + Sxz
+        kh = -Sxx + Syy - Szz
+        km = Syz + Szy
+        kn = -Sxx - Syy + Szz
 
-            hn_mm = kh * kn - km * km
-            fn_mg = kf * kn - km * kg
-            fm_hg = kf * km - kh * kg
-            cn_md = kc * kn - km * kd
-            cm_hd = kc * km - kh * kd
-            cg_fd = kc * kg - kf * kd
+        hn_mm = kh * kn - km * km
+        fn_mg = kf * kn - km * kg
+        fm_hg = kf * km - kh * kg
+        cn_md = kc * kn - km * kd
+        cm_hd = kc * km - kh * kd
+        cg_fd = kc * kg - kf * kd
 
-            c0 = (
-                ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-                - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-                + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-                - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-            )
+        c0 = (
+            ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
+            - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
+            + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
+            - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
+        )
 
-            # Newton-Raphson for the largest eigenvalue
-            lam = (traces[i] + traces[j]) * 0.5
-            for _ in range(50):
-                l2 = lam * lam
-                f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-                fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-                if fp_val == 0.0:
-                    break
-                delta = f_val / fp_val
-                lam -= delta
-                if abs(delta) < 1e-11 * abs(lam):
-                    break
+        # Newton-Raphson for the largest eigenvalue
+        lam = (traces[i] + traces[j]) * 0.5
+        for _ in range(50):
+            l2 = lam * lam
+            f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
+            fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
+            if fp_val == 0.0:
+                break
+            delta = f_val / fp_val
+            lam -= delta
+            if abs(delta) < 1e-11 * abs(lam):
+                break
 
-            rmsd_sq = (traces[i] + traces[j] - 2.0 * lam) / n_atoms
-            val = np.sqrt(max(0.0, rmsd_sq))
-            result[i, j] = val
-            result[j, i] = val
+        rmsd_sq = (traces[i] + traces[j] - 2.0 * lam) / n_atoms
+        val = np.sqrt(max(0.0, rmsd_sq))
+        result[i, j] = val
+        result[j, i] = val
     return result
 
 
@@ -192,10 +205,23 @@ def rmsd_numba(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
 ) -> NDArray[np.float64]:
-    """Compute pairwise RMSD matrix using the Numba QCP kernel."""
+    """Compute pairwise RMSD matrix using the Numba QCP kernel.
+
+    Pre-centers each frame, then dispatches all ``n*(n-1)/2`` upper
+    triangle pair indices to a single ``prange`` so every thread gets
+    an equal share of the work (the nested-loop form would leave
+    high-index threads idle early).
+    """
     xyz = np.ascontiguousarray(traj.xyz[:, atom_indices, :], dtype=np.float64)
     traces = _center_and_traces(xyz)
-    return _pairwise_rmsd(xyz, traces)
+    n_frames = xyz.shape[0]
+    pair_i, pair_j = np.triu_indices(n_frames, k=1)
+    return _pairwise_rmsd(
+        xyz,
+        traces,
+        np.ascontiguousarray(pair_i, dtype=np.int64),
+        np.ascontiguousarray(pair_j, dtype=np.int64),
+    )
 
 
 def rmsd_mdtraj(
