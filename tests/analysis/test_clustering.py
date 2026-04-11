@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis._backends import free_gpu_cache, has_cupy, has_jax, has_torch
+from mdpp.analysis._backends import has_cupy, has_jax, has_torch
 from mdpp.analysis.clustering import (
     ClusteringResult,
     RMSDMatrixResult,
@@ -260,9 +260,10 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
     since mdtraj is the default backend for every analysis function.
 
     GPU backends that run out of memory on shared/contended GPUs are
-    skipped with a printed note instead of failing the test.
+    skipped with a printed note instead of failing the test.  Each
+    kernel releases its own framework cache via the ``@clean_*_cache``
+    decorators, so no pre-run defragmentation is needed.
     """
-    free_gpu_cache()
     ref = compute_rmsd_matrix(traj, atom_selection="all", backend="mdtraj")
     # Symmetrise mdtraj result (md.rmsd loop is not numerically symmetric).
     ref_mat = (ref.rmsd_matrix_nm + ref.rmsd_matrix_nm.T) / 2.0
@@ -291,7 +292,6 @@ def _run_rmsd_benchmark(traj: md.Trajectory) -> None:
         except Exception as exc:
             if _is_gpu_oom(exc):
                 skipped[name] = "GPU OOM"
-                free_gpu_cache()
                 continue
             raise
 

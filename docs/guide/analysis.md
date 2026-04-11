@@ -184,7 +184,7 @@ result = compute_distances(traj, atom_pairs=pairs, backend="cupy", periodic=Fals
 > conditions. For the other four backends the `periodic` flag is
 > silently ignored.
 
-#### Releasing cached GPU memory
+#### Cached GPU memory is released automatically
 
 PyTorch, CuPy, and JAX all use caching memory allocators that hold
 GPU blocks in a pool so subsequent calls can reuse them without
@@ -203,21 +203,19 @@ def distances_cupy(...): ...
 ```
 
 In practice, `nvidia-smi` reflects the release automatically after
-every `compute_rmsd_matrix` / `compute_distances` / `featurize_ca_distances`
-call that uses a GPU backend -- no manual cleanup needed.
-
-If you want to force a cache release manually (for example, after a
-batch of mixed-framework calls or when interactively debugging), use
-the public helper:
+every `compute_rmsd_matrix` / `compute_distances` /
+`featurize_ca_distances` call that uses a GPU backend -- no manual
+cleanup is needed. If you interleave mdpp with raw
+`torch`/`cupy`/`jax` code and need to force a release across
+frameworks, use the native APIs:
 
 ```python
-from mdpp.analysis import free_gpu_cache
+import torch
+import cupy as cp
 
-free_gpu_cache()   # clears torch + cupy + jax caches in one call
+torch.cuda.empty_cache()
+cp.get_default_memory_pool().free_all_blocks()
 ```
-
-`free_gpu_cache` silently touches only the frameworks actually
-installed and is safe to call even on CPU-only machines.
 
 ## Secondary Structure (DSSP)
 

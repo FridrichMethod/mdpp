@@ -8,7 +8,7 @@ import mdtraj as md
 import numpy as np
 import pytest
 
-from mdpp.analysis._backends import free_gpu_cache, has_cupy, has_jax, has_torch
+from mdpp.analysis._backends import has_cupy, has_jax, has_torch
 from mdpp.analysis._backends._distances import (
     distances_cupy,
     distances_jax,
@@ -553,10 +553,13 @@ def _is_gpu_oom(exc: BaseException) -> bool:
 
 
 def _run_benchmark(n_frames: int, n_atoms: int) -> None:
-    """Run all available backends on a synthetic trajectory and print results."""
-    import time
+    """Run all available backends on a synthetic trajectory and print results.
 
-    free_gpu_cache()
+    Each kernel releases its own framework cache via the
+    ``@clean_*_cache`` decorators, so no pre-run defragmentation is
+    needed.
+    """
+    import time
 
     rng = np.random.default_rng(42)
     xyz = rng.normal(size=(n_frames, n_atoms, 3)).astype(np.float32) * 0.1
@@ -597,7 +600,6 @@ def _run_benchmark(n_frames: int, n_atoms: int) -> None:
         except Exception as exc:
             if _is_gpu_oom(exc):
                 skipped[name] = "GPU OOM"
-                free_gpu_cache()
                 continue
             raise
 

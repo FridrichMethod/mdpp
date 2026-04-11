@@ -1,6 +1,5 @@
 """Analysis subpackage for molecular dynamics trajectories."""
 
-from mdpp.analysis._backends import free_gpu_cache
 from mdpp.analysis.clustering import cluster_conformations, compute_rmsd_matrix
 from mdpp.analysis.contacts import (
     compute_contact_frequency,
@@ -50,6 +49,5 @@ __all__ = [
     "featurize_backbone_torsions",
     "featurize_ca_distances",
     "format_hbond_triplets",
-    "free_gpu_cache",
     "project_pca",
 ]
