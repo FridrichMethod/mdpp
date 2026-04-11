@@ -37,6 +37,50 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
+def query_free_gpu_bytes(fallback_bytes: int = 1 << 32) -> int:
+    """Best-effort query of free GPU memory in bytes.
+
+    Returns the number of bytes currently free on the default CUDA
+    device, accounting for allocations from other processes and other
+    frameworks on the same card.  Tries torch and cupy in order, since
+    each calls the CUDA driver's ``cudaMemGetInfo`` directly.  Falls
+    back to *fallback_bytes* (default 4 GiB) when no CUDA query is
+    available -- e.g. on CPU-only machines or when neither torch nor
+    cupy is installed.
+
+    Useful for backends that need adaptive chunk sizing but whose
+    native framework (e.g. JAX) does not expose a reliable free-memory
+    query.
+
+    Args:
+        fallback_bytes: Value returned when no CUDA query path is
+            available.  Defaults to 4 GiB, chosen to fit comfortably
+            on even modest GPUs.
+
+    Returns:
+        Free GPU memory in bytes, or ``fallback_bytes`` if no query
+        path succeeds.
+    """
+    if has_torch:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                free, _total = torch.cuda.mem_get_info()
+                return int(free)
+        except Exception:  # pragma: no cover - defensive
+            pass
+    if has_cupy:
+        try:
+            import cupy as cp
+
+            free, _total = cp.cuda.Device().mem_info
+            return int(free)
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return fallback_bytes
+
+
 def require_cupy() -> ModuleType:
     """Return the ``cupy`` module or raise with install instructions."""
     try:

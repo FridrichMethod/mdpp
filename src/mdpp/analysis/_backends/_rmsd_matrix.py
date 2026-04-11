@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 from mdpp.analysis._backends._imports import (
     clean_cupy_cache,
     clean_torch_cache,
+    query_free_gpu_bytes,
     require_cupy,
     require_jax,
     require_torch,
@@ -502,12 +503,15 @@ def _rmsd_qcp_jax(
 def _rmsd_jax_row_chunk(n_frames: int) -> int:
     """Row-block size for the jax QCP kernel.
 
-    JAX allocates opaquely and does not expose a reliable free-memory
-    query, so we pick a conservative fixed upper bound: each block
-    peak-allocates ~180 bytes per pair, so target ~4 GB per block.
+    JAX does not expose a reliable free-memory query, but torch or
+    cupy (almost always installed alongside JAX on CUDA systems) can
+    call ``cudaMemGetInfo`` directly.  We piggyback on those via
+    :func:`query_free_gpu_bytes`, which falls back to a conservative
+    4 GiB budget when no CUDA query is available (e.g. CPU-only).
     """
     per_pair_bytes = 180
-    budget = 4 * (1 << 30)  # 4 GiB
+    free_bytes = query_free_gpu_bytes()
+    budget = max(free_bytes // 4, 1)
     chunk = budget // (per_pair_bytes * max(n_frames, 1))
     return int(max(1, min(chunk, n_frames)))
 

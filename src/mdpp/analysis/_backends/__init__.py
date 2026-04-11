@@ -6,6 +6,7 @@ from mdpp.analysis._backends._imports import (
     has_cupy,
     has_jax,
     has_torch,
+    query_free_gpu_bytes,
 )
 from mdpp.analysis._backends._registry import (
     BackendRegistry,
@@ -22,4 +23,5 @@ __all__ = [
     "has_cupy",
     "has_jax",
     "has_torch",
+    "query_free_gpu_bytes",
 ]
