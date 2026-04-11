@@ -319,7 +319,7 @@ class RMSDMatrixBackendFn(Protocol):
         self,
         traj: md.Trajectory,
         atom_indices: NDArray[np.int_],
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.floating]: ...
 
 rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
 ```
@@ -330,6 +330,18 @@ would lose the signature of `compute_fn` at the call site. The
 Protocol lives in the same `_backends/_<kind>.py` file as the backends
 it describes (not in the shared `_registry.py`) so the registry module
 stays decoupled from any particular backend signature.
+
+**Backend dtype rule**: Protocols return `NDArray[np.floating]` (not
+`NDArray[np.float64]`) and every backend returns its **native** dtype
+-- float32 for mdtraj and the GPU backends (torch/jax/cupy), float64
+for numba. Public `compute_*` wrappers then cast with
+`astype(resolved, copy=False)` (or `np.asarray(result, dtype=resolved)`,
+which is also no-copy when the dtype matches) so when the backend's
+native dtype already matches the user's resolved dtype (float32 by
+default) **no redundant copy** is made. This is essential at large
+N: forcing `float64` on an N^2 matrix would cost 115 GB at n=120k
+purely for a type contract and would OOM any 128 GB host. **Never
+add an unconditional `.astype(np.float64)` at a backend boundary.**
 
 **GPU cache cleanup rule**: torch and cupy GPU-backed compute
 kernels MUST be decorated with the matching framework-specific

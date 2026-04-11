@@ -18,11 +18,16 @@ necessary or where an external library forces it:
   ``_backends/_rmsd_matrix`` ``torch``/``jax``/``cupy`` variants):
   compute **internally in float32** because consumer and workstation
   NVIDIA GPUs run float64 at 1/36 -- 1/64 the throughput of float32.
-  The final result is cast to float64 only to match the
-  ``NDArray[np.float64]`` return-type contract of the backend
-  ``Protocol``; the public ``compute_*`` wrappers then cast again to
-  the user-selected dtype.  Float32 QCP agrees with the float64 numba
-  reference to ~1e-6 nm on realistic trajectories.
+  Since 2026-04-11 these backends also **return native float32**
+  (the ``RMSDMatrixBackendFn`` / ``DistanceBackendFn`` Protocols were
+  widened from ``NDArray[np.float64]`` to ``NDArray[np.floating]``
+  so backends can report their natural dtype).  The public
+  ``compute_*`` wrappers then cast with ``astype(resolved, copy=False)``
+  so when the resolved dtype is also float32 (the package default)
+  **no additional copy is made** -- critical for large N where
+  every redundant copy of the ``(n_frames, n_frames)`` RMSD matrix
+  costs tens of GB (57 GB at n=120k).  Float32 QCP agrees with the
+  float64 numba reference to ~1e-6 nm on realistic trajectories.
 - **Deeptime TICA** (``decomposition.compute_tica``): deeptime upcasts
   to float64 internally for covariance estimation -- no explicit cast
   is needed from our side.

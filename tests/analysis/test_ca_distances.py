@@ -204,6 +204,7 @@ class TestNumbaKernel:
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
     def test_output_dtype_float64(self) -> None:
+        """Numba kernel returns float64 natively (``float()`` -> C double)."""
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
         result = distances_numba(_make_traj(xyz), _PAIR_01)
         assert result.dtype == np.float64
@@ -260,12 +261,18 @@ class TestMdtrajKernel:
         result = distances_mdtraj(traj, pairs, periodic=True)
         assert result[0, 0] == pytest.approx(1.0, abs=1e-5)
 
-    def test_output_dtype_float64(self) -> None:
-        """All backends return float64 for consistency across kernels."""
+    def test_output_dtype_native_float32(self) -> None:
+        """Mdtraj kernel returns float32 natively (matches ``traj.xyz`` dtype).
+
+        The public :func:`compute_distances` wrapper then casts with
+        ``copy=False`` to the user-resolved dtype, so returning the
+        native float32 avoids a redundant copy of the ``(n_frames,
+        n_pairs)`` matrix.
+        """
         traj = _make_traj(np.zeros((2, 2, 3), dtype=np.float32))
         pairs = np.array([[0, 1]], dtype=np.int_)
         result = distances_mdtraj(traj, pairs, periodic=False)
-        assert result.dtype == np.float64
+        assert result.dtype == np.float32
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +303,11 @@ class TestCupyKernel:
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
-    def test_output_dtype_float64(self) -> None:
+    def test_output_dtype_native_float32(self) -> None:
+        """CuPy kernel returns float32 natively (no unnecessary copy to float64)."""
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
         result = distances_cupy(_make_traj(xyz), _PAIR_01)
-        assert result.dtype == np.float64
+        assert result.dtype == np.float32
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
@@ -348,10 +356,11 @@ class TestTorchKernel:
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
-    def test_output_dtype_float64(self) -> None:
+    def test_output_dtype_native_float32(self) -> None:
+        """Torch kernel returns float32 natively (no unnecessary copy to float64)."""
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
         result = distances_torch(_make_traj(xyz), _PAIR_01)
-        assert result.dtype == np.float64
+        assert result.dtype == np.float32
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)
@@ -400,10 +409,11 @@ class TestJaxKernel:
         assert result[0, 0] == pytest.approx(1.0, abs=1e-6)
         assert result[1, 0] == pytest.approx(2.0, abs=1e-6)
 
-    def test_output_dtype_float64(self) -> None:
+    def test_output_dtype_native_float32(self) -> None:
+        """JAX kernel returns float32 natively (no unnecessary copy to float64)."""
         xyz = np.zeros((2, 2, 3), dtype=np.float32)
         result = distances_jax(_make_traj(xyz), _PAIR_01)
-        assert result.dtype == np.float64
+        assert result.dtype == np.float32
 
     def test_out_of_range_pair_raises(self) -> None:
         xyz = np.zeros((2, 3, 3), dtype=np.float32)

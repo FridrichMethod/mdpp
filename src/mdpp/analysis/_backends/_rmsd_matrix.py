@@ -97,15 +97,22 @@ class RMSDMatrixBackendFn(Protocol):
     """Callable signature for a pairwise RMSD matrix backend.
 
     All registered backends return a symmetric ``(n_frames, n_frames)``
-    float64 numpy array of RMSD values (in nm) computed over the
-    selected ``atom_indices``.
+    floating-point numpy array of RMSD values (in nm) computed over
+    the selected ``atom_indices``.  Backends return their **native**
+    dtype (float32 for the GPU backends, float64 for numba and
+    mdtraj); the public :func:`compute_rmsd_matrix` wrapper then
+    casts with ``copy=False`` to the user-selected dtype, which is a
+    no-op when the dtypes already match.  Requiring a specific
+    floating dtype here would force every backend to produce a
+    redundant ~N^2-sized copy purely for the type contract -- a real
+    problem at 120k frames where one float64 matrix is 115 GB.
     """
 
     def __call__(
         self,
         traj: md.Trajectory,
         atom_indices: NDArray[np.int_],
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.floating]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +272,7 @@ def _pairwise_rmsd(
 def rmsd_numba(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute pairwise RMSD matrix using the Numba QCP kernel.
 
     Pre-centers each frame, then dispatches all ``n*(n-1)/2`` upper
@@ -288,12 +295,19 @@ def rmsd_numba(
 def rmsd_mdtraj(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
-) -> NDArray[np.float64]:
-    """Compute pairwise RMSD matrix using mdtraj's precentered loop."""
+) -> NDArray[np.floating]:
+    """Compute pairwise RMSD matrix using mdtraj's precentered loop.
+
+    Allocates a ``float32`` result to match mdtraj's native coordinate
+    precision.  For 120k frames this is 57 GB instead of the 115 GB an
+    up-cast to float64 would need; the public wrapper casts with
+    ``copy=False`` so no second allocation happens when the user's
+    resolved dtype is also float32.
+    """
     subset = traj.atom_slice(atom_indices)
     subset.center_coordinates()
     n_frames = subset.n_frames
-    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=np.float64)
+    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=np.float32)
     for i in range(n_frames):
         rmsd_matrix[i] = md.rmsd(subset, subset, frame=i, precentered=True)
     return rmsd_matrix
@@ -543,7 +557,7 @@ def _rmsd_torch_run_gpu(
 def rmsd_torch(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute pairwise RMSD matrix using PyTorch (CUDA if available).
 
     Implements the Quaternion Characteristic Polynomial (Theobald 2005)
@@ -634,7 +648,11 @@ def rmsd_torch(
     # ~1e-4 nm of noise that would violate ``test_diagonal_is_zero``.
     np.fill_diagonal(result, 0.0)
 
-    return result.astype(np.float64)
+    # Return native float32.  The public wrapper uses ``astype(copy=False)``
+    # so no redundant N^2 copy is made when the user's resolved dtype is
+    # also float32 (the default) -- critical at 120k frames where each
+    # copy costs 57 GB.
+    return result
 
 
 def _rmsd_qcp_jax(
@@ -731,7 +749,7 @@ def _rmsd_jax_row_chunk(n_frames: int) -> int:
 def rmsd_jax(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute pairwise RMSD matrix using JAX.
 
     JAX auto-selects the best available device (GPU > TPU > CPU).
@@ -793,7 +811,7 @@ def rmsd_jax(
 
     np.fill_diagonal(result, 0.0)
 
-    return result.astype(np.float64)
+    return result
 
 
 def _rmsd_qcp_cupy(
@@ -888,7 +906,7 @@ def _rmsd_cupy_row_chunk(free_bytes: int, n_frames: int) -> int:
 def rmsd_cupy(
     traj: md.Trajectory,
     atom_indices: NDArray[np.int_],
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute pairwise RMSD matrix using CuPy (CUDA).
 
     Requires a CUDA-capable GPU.  Row-chunked streaming QCP solve
@@ -939,7 +957,7 @@ def rmsd_cupy(
 
     np.fill_diagonal(result, 0.0)
 
-    return result.astype(np.float64)
+    return result
 
 
 # ---------------------------------------------------------------------------

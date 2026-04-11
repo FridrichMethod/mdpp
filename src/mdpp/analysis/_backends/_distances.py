@@ -9,7 +9,11 @@ Provides five backends for pairwise distances between atom pairs:
 - ``jax`` -- JAX/XLA vectorised operations on GPU/CPU.
 
 All backends share the same positional signature ``(traj, pairs)`` and
-return a float64 numpy array of shape ``(n_frames, n_pairs)``.
+return a floating-point numpy array of shape ``(n_frames, n_pairs)``
+in the backend's **native** dtype (float32 for mdtraj / GPU backends,
+float64 for numba).  The public :func:`compute_distances` wrapper
+casts with ``copy=False`` so no redundant copy is made when the
+resolved user dtype already matches.
 
 The mdtraj backend additionally accepts a keyword-only ``periodic``
 argument for minimum image convention; non-mdtraj backends do not
@@ -39,9 +43,15 @@ class DistanceBackendFn(Protocol):
     """Callable signature for a pairwise distance backend.
 
     All registered backends accept a trajectory and an ``(n_pairs, 2)``
-    array of 0-based atom-index pairs.  The mdtraj backend additionally
-    accepts ``periodic`` as a keyword-only argument; all other backends
-    silently ignore PBC.
+    array of 0-based atom-index pairs, returning an
+    ``(n_frames, n_pairs)`` floating-point array in the backend's
+    native dtype (typically float32).  The public
+    :func:`compute_distances` wrapper casts with ``copy=False`` to
+    the user-resolved dtype, so same-dtype returns do not duplicate
+    memory.
+
+    The mdtraj backend additionally accepts ``periodic`` as a
+    keyword-only argument; all other backends silently ignore PBC.
     """
 
     def __call__(
@@ -50,7 +60,7 @@ class DistanceBackendFn(Protocol):
         pairs: NDArray[np.int_],
         *,
         periodic: bool = ...,
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.floating]: ...
 
 
 def _validate_pairs(n_atoms: int, pairs: NDArray[np.int_]) -> None:
@@ -67,7 +77,7 @@ def distances_mdtraj(
     pairs: NDArray[np.int_],
     *,
     periodic: bool = False,
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute pairwise distances using mdtraj's optimised C/SSE kernel.
 
     Supports periodic boundary conditions via minimum image convention
@@ -79,12 +89,11 @@ def distances_mdtraj(
         periodic: Whether to apply minimum image convention.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` (float64).
+        Distances of shape ``(n_frames, n_pairs)`` in mdtraj's native
+        float32.  The public :func:`compute_distances` wrapper casts
+        with ``copy=False`` to the user-resolved dtype.
     """
-    return np.asarray(
-        md.compute_distances(traj, pairs, periodic=periodic),
-        dtype=np.float64,
-    )
+    return md.compute_distances(traj, pairs, periodic=periodic)
 
 
 def distances_numba(
@@ -92,7 +101,7 @@ def distances_numba(
     pairs: NDArray[np.int_],
     *,
     periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute non-periodic pairwise distances using a Numba-parallel kernel.
 
     Parallelises the frame loop using ``prange``, giving ~5x speedup over
@@ -106,7 +115,9 @@ def distances_numba(
             periodic boundary conditions.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` (float64).
+        Distances of shape ``(n_frames, n_pairs)`` in float64 (numba's
+        ``float()`` cast maps to C ``double``; the wrapper casts
+        ``copy=False`` to the user-resolved dtype).
 
     Raises:
         ValueError: If any pair index is out of range.
@@ -139,7 +150,7 @@ def distances_cupy(
     pairs: NDArray[np.int_],
     *,
     periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute non-periodic pairwise distances on GPU using CuPy.
 
     Args:
@@ -150,7 +161,9 @@ def distances_cupy(
             periodic boundary conditions.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` (float64).
+        Distances of shape ``(n_frames, n_pairs)`` in float32 (cupy
+        inherits the float32 of ``traj.xyz``).  The wrapper casts
+        ``copy=False`` to the user-resolved dtype.
 
     Raises:
         ImportError: If CuPy is not installed.
@@ -163,7 +176,7 @@ def distances_cupy(
     pairs_gpu = cp.asarray(pairs)
     diffs = xyz_gpu[:, pairs_gpu[:, 0], :] - xyz_gpu[:, pairs_gpu[:, 1], :]
     distances = cp.sqrt(cp.sum(diffs * diffs, axis=2))
-    return cp.asnumpy(distances).astype(np.float64)
+    return cp.asnumpy(distances)
 
 
 @clean_torch_cache
@@ -172,7 +185,7 @@ def distances_torch(
     pairs: NDArray[np.int_],
     *,
     periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute non-periodic pairwise distances using PyTorch.
 
     Uses CUDA if available, otherwise falls back to CPU.
@@ -185,7 +198,9 @@ def distances_torch(
             periodic boundary conditions.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` (float64).
+        Distances of shape ``(n_frames, n_pairs)`` in float32 (torch
+        inherits the float32 of ``traj.xyz``).  The wrapper casts
+        ``copy=False`` to the user-resolved dtype.
 
     Raises:
         ImportError: If PyTorch is not installed.
@@ -200,7 +215,7 @@ def distances_torch(
         pairs_t = torch.as_tensor(pairs.astype(np.int64), device=device)
         diffs = xyz_t[:, pairs_t[:, 0], :] - xyz_t[:, pairs_t[:, 1], :]
         distances = torch.sqrt(torch.sum(diffs * diffs, dim=2))
-    return distances.cpu().numpy().astype(np.float64)
+    return distances.cpu().numpy()
 
 
 def distances_jax(
@@ -208,7 +223,7 @@ def distances_jax(
     pairs: NDArray[np.int_],
     *,
     periodic: bool = False,  # noqa: ARG001 - accepted for Protocol uniformity, ignored
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating]:
     """Compute non-periodic pairwise distances using JAX.
 
     JAX auto-selects the best available backend (GPU > TPU > CPU).
@@ -226,7 +241,9 @@ def distances_jax(
             periodic boundary conditions.
 
     Returns:
-        Distances of shape ``(n_frames, n_pairs)`` (float64).
+        Distances of shape ``(n_frames, n_pairs)`` in float32 (jax
+        inherits the float32 of ``traj.xyz``).  The wrapper casts
+        ``copy=False`` to the user-resolved dtype.
 
     Raises:
         ImportError: If JAX is not installed.
@@ -239,7 +256,7 @@ def distances_jax(
     pairs_j = jnp.asarray(pairs)
     diffs = xyz_j[:, pairs_j[:, 0], :] - xyz_j[:, pairs_j[:, 1], :]
     distances = jnp.sqrt(jnp.sum(diffs * diffs, axis=2))
-    return np.asarray(distances).astype(np.float64)
+    return np.asarray(distances)
 
 
 # ---------------------------------------------------------------------------

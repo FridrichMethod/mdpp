@@ -7,6 +7,7 @@ import time
 import mdtraj as md
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from mdpp.analysis._backends import has_cupy, has_jax, has_torch
 from mdpp.analysis.clustering import (
@@ -238,6 +239,187 @@ class TestClusterConformations:
         with pytest.raises(ValueError, match="Unsupported clustering method"):
             cluster_conformations(dummy_matrix, method="kmeans")
 
+    def test_float32_matrix_matches_float64(self, backbone_trajectory: md.Trajectory) -> None:
+        """Clustering must accept float32 matrices and give the same result as float64."""
+        result_f32 = compute_rmsd_matrix(
+            backbone_trajectory, atom_selection="all", dtype=np.float32
+        )
+        result_f64 = compute_rmsd_matrix(
+            backbone_trajectory, atom_selection="all", dtype=np.float64
+        )
+        assert result_f32.rmsd_matrix_nm.dtype == np.float32
+        assert result_f64.rmsd_matrix_nm.dtype == np.float64
+
+        clust_f32 = cluster_conformations(result_f32.rmsd_matrix_nm, cutoff_nm=0.2)
+        clust_f64 = cluster_conformations(result_f64.rmsd_matrix_nm, cutoff_nm=0.2)
+
+        # Labels may not be identical if two centres tie, but the number
+        # of clusters should match at a safe cutoff above the matrix noise.
+        assert clust_f32.n_clusters == clust_f64.n_clusters
+        # Every member of cluster k in f32 should share the same label in f64
+        # (modulo the label id -- use a canonical remapping).
+        mapping: dict[int, int] = {}
+        for a, b in zip(clust_f32.labels, clust_f64.labels, strict=True):
+            mapping.setdefault(int(a), int(b))
+            assert mapping[int(a)] == int(b)
+
+    def test_known_greedy_result_small(self) -> None:
+        """Hand-checked GROMOS result on a 6x6 matrix.
+
+        Frames 0-2 are within cutoff of each other; frames 3-4 form a
+        second tight pair; frame 5 is an isolated singleton.  GROMOS
+        picks the largest cluster first (3 members), then the pair, then
+        the singleton.
+        """
+        rmsd = np.array(
+            [
+                [0.00, 0.05, 0.07, 0.80, 0.82, 1.50],
+                [0.05, 0.00, 0.06, 0.81, 0.83, 1.51],
+                [0.07, 0.06, 0.00, 0.79, 0.80, 1.49],
+                [0.80, 0.81, 0.79, 0.00, 0.10, 1.00],
+                [0.82, 0.83, 0.80, 0.10, 0.00, 0.99],
+                [1.50, 1.51, 1.49, 1.00, 0.99, 0.00],
+            ],
+            dtype=np.float32,
+        )
+        result = cluster_conformations(rmsd, cutoff_nm=0.15)
+        assert result.n_clusters == 3
+        # First (largest) cluster should contain the 3 tight frames.
+        first = {i for i in range(6) if result.labels[i] == 0}
+        assert first == {0, 1, 2}
+        # Second cluster: the tight pair.
+        second = {i for i in range(6) if result.labels[i] == 1}
+        assert second == {3, 4}
+        # Third: the singleton.
+        third = {i for i in range(6) if result.labels[i] == 2}
+        assert third == {5}
+
+    def test_single_frame(self) -> None:
+        """A 1x1 matrix must produce a single cluster with one medoid."""
+        result = cluster_conformations(np.zeros((1, 1), dtype=np.float32), cutoff_nm=0.1)
+        assert result.n_clusters == 1
+        assert result.labels[0] == 0
+        assert result.medoid_frames.tolist() == [0]
+
+    def test_all_frames_within_cutoff(self) -> None:
+        """If every pair is within the cutoff, all frames collapse to one cluster."""
+        n = 8
+        rmsd = np.zeros((n, n), dtype=np.float32)
+        result = cluster_conformations(rmsd, cutoff_nm=0.1)
+        assert result.n_clusters == 1
+        assert np.all(result.labels == 0)
+
+    def test_all_frames_isolated(self) -> None:
+        """If every pair exceeds the cutoff, each frame becomes its own cluster."""
+        n = 5
+        rmsd = np.full((n, n), 10.0, dtype=np.float32)
+        np.fill_diagonal(rmsd, 0.0)
+        result = cluster_conformations(rmsd, cutoff_nm=0.1)
+        assert result.n_clusters == n
+        assert len(np.unique(result.labels)) == n
+
+
+# ---------------------------------------------------------------------------
+# Wrapper dtype / memory tests: verify compute_rmsd_matrix does no redundant copy
+# ---------------------------------------------------------------------------
+
+
+class TestComputeRmsdMatrixNoRedundantCopy:
+    """``compute_rmsd_matrix`` must not duplicate the backend's buffer.
+
+    The fix for the 120k-frame OOM relies on two guarantees:
+
+    1. GPU backends return their native ``float32`` (not a ``.astype(np.float64)``).
+    2. The wrapper uses ``astype(resolved, copy=False)`` so when the
+       backend's dtype already matches the user-resolved dtype, the
+       returned buffer is the same object as the backend output.
+
+    These tests drive a stub backend so they do not depend on GPU
+    availability.
+    """
+
+    @pytest.fixture()
+    def tiny_traj(self, backbone_trajectory: md.Trajectory) -> md.Trajectory:
+        return backbone_trajectory
+
+    def test_torch_backend_returns_float32(self, tiny_traj: md.Trajectory) -> None:
+        """``rmsd_torch`` now returns float32 natively (no float64 upcast)."""
+        pytest.importorskip("torch")
+        result = compute_rmsd_matrix(tiny_traj, atom_selection="all", backend="torch")
+        assert result.rmsd_matrix_nm.dtype == np.float32
+
+    def test_mdtraj_backend_returns_float32(self, tiny_traj: md.Trajectory) -> None:
+        """``rmsd_mdtraj`` now allocates float32 (not float64)."""
+        result = compute_rmsd_matrix(tiny_traj, atom_selection="all", backend="mdtraj")
+        assert result.rmsd_matrix_nm.dtype == np.float32
+
+    def test_wrapper_does_not_copy_when_dtype_matches(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tiny_traj: md.Trajectory,
+    ) -> None:
+        """When backend dtype == resolved dtype, the wrapper's output shares memory.
+
+        Monkeypatch the ``mdtraj`` backend with a stub that returns a
+        tagged float32 buffer, then check ``np.shares_memory`` between
+        the stub's buffer and the wrapper's output.  If the fix
+        regresses (e.g. someone re-adds ``.astype(resolved)`` without
+        ``copy=False``), this test catches it immediately.
+        """
+        from mdpp.analysis._backends._rmsd_matrix import rmsd_matrix_backends
+
+        n = tiny_traj.n_frames
+        sentinel = np.zeros((n, n), dtype=np.float32)
+        sentinel[0, 0] = 3.1415  # marker so we can prove identity
+
+        def stub_backend(
+            traj: md.Trajectory,
+            atom_indices: NDArray[np.int_],  # noqa: ARG001
+        ) -> NDArray[np.floating]:
+            assert traj is tiny_traj
+            return sentinel
+
+        monkeypatch.setitem(rmsd_matrix_backends._backends, "mdtraj", stub_backend)
+
+        result = compute_rmsd_matrix(
+            tiny_traj, atom_selection="all", backend="mdtraj", dtype=np.float32
+        )
+        assert result.rmsd_matrix_nm.dtype == np.float32
+        assert np.shares_memory(result.rmsd_matrix_nm, sentinel), (
+            "wrapper allocated a second buffer even though dtypes match"
+        )
+        assert result.rmsd_matrix_nm[0, 0] == np.float32(3.1415)
+
+    def test_wrapper_casts_when_dtype_differs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tiny_traj: md.Trajectory,
+    ) -> None:
+        """When the user asks for float64 and the backend gives float32, a cast happens.
+
+        This is the one case where a copy is unavoidable -- confirm
+        the result is numerically correct and has the requested dtype.
+        """
+        from mdpp.analysis._backends._rmsd_matrix import rmsd_matrix_backends
+
+        n = tiny_traj.n_frames
+        sentinel = np.full((n, n), 0.125, dtype=np.float32)
+
+        def stub_backend(
+            traj: md.Trajectory,  # noqa: ARG001
+            atom_indices: NDArray[np.int_],  # noqa: ARG001
+        ) -> NDArray[np.floating]:
+            return sentinel
+
+        monkeypatch.setitem(rmsd_matrix_backends._backends, "mdtraj", stub_backend)
+
+        result = compute_rmsd_matrix(
+            tiny_traj, atom_selection="all", backend="mdtraj", dtype=np.float64
+        )
+        assert result.rmsd_matrix_nm.dtype == np.float64
+        assert not np.shares_memory(result.rmsd_matrix_nm, sentinel)
+        np.testing.assert_allclose(result.rmsd_matrix_nm, 0.125)
+
 
 # ---------------------------------------------------------------------------
 # Benchmark tests
@@ -376,3 +558,110 @@ def test_benchmark_rmsd_backends_slow(n_frames: int, n_residues: int) -> None:
     """
     traj = _make_alanine_traj(n_frames, n_residues)
     _run_rmsd_benchmark(traj)
+
+
+# ---------------------------------------------------------------------------
+# GROMOS clustering benchmarks
+# ---------------------------------------------------------------------------
+
+
+def _make_synthetic_rmsd_matrix(
+    n_frames: int,
+    n_clusters: int,
+    seed: int = 0,
+) -> np.ndarray:
+    """Build a synthetic RMSD matrix with a known cluster structure.
+
+    Places each cluster at a distinct point on a 1-D axis, spacing
+    2.0 nm apart; every cluster gets at least ``n_frames //
+    n_clusters`` members via a shuffled round-robin assignment.
+    Intra-cluster RMSD is pure Gaussian noise at ~0.01 nm, so every
+    member stays well within a 0.1 nm cutoff while inter-cluster
+    RMSD is always >= 2.0 nm -- GROMOS recovers exactly
+    ``n_clusters`` groups at any cutoff in (0.05, 2.0).
+    """
+    rng = np.random.RandomState(seed)
+    # Round-robin assignment so every cluster has >= one member.
+    assignments = np.arange(n_frames) % n_clusters
+    rng.shuffle(assignments)
+    # 1-D positions: cluster k is centred at 2.0 * k.
+    centres = np.arange(n_clusters, dtype=np.float32) * 2.0
+    positions = centres[assignments] + rng.randn(n_frames).astype(np.float32) * 0.01
+    # |a - b| in 1-D is a valid metric and the resulting matrix is
+    # symmetric with zero diagonal.
+    rmsd = np.abs(positions[:, None] - positions[None, :])
+    return rmsd.astype(np.float32)
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("n_frames", "n_clusters"),
+    [
+        pytest.param(1000, 8, id="fast-1000f-8c"),
+        pytest.param(2000, 20, id="fast-2000f-20c"),
+    ],
+)
+def test_benchmark_cluster_conformations_fast(
+    n_frames: int,
+    n_clusters: int,
+) -> None:
+    """Fast clustering benchmark -- exercise the numba GROMOS kernel.
+
+    Builds a synthetic RMSD matrix with a known cluster structure and
+    measures wall time.  The kernel is warmed up with a small pre-pass
+    so the reported time excludes numba JIT compilation.
+    """
+    rmsd = _make_synthetic_rmsd_matrix(n_frames, n_clusters, seed=1)
+
+    warmup = _make_synthetic_rmsd_matrix(32, 4, seed=99)
+    cluster_conformations(warmup, cutoff_nm=0.1)
+
+    t0 = time.perf_counter()
+    result = cluster_conformations(rmsd, cutoff_nm=0.1)
+    elapsed = time.perf_counter() - t0
+
+    print(
+        f"\n  GROMOS clustering: n={n_frames} cutoff=0.1 "
+        f"({result.n_clusters} clusters)  wall={elapsed:.4f} s"
+    )
+    # Sanity: we should recover the planted cluster count within a
+    # small tolerance (the synthetic centres may occasionally merge or
+    # split by one or two clusters at this cutoff).
+    assert abs(result.n_clusters - n_clusters) <= max(2, n_clusters // 4)
+
+
+@pytest.mark.slow
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("n_frames", "n_clusters"),
+    [
+        pytest.param(5000, 50, id="slow-5000f-50c"),
+        pytest.param(10000, 100, id="slow-10000f-100c"),
+    ],
+)
+def test_benchmark_cluster_conformations_slow(
+    n_frames: int,
+    n_clusters: int,
+) -> None:
+    """Slow clustering benchmark -- larger matrices that stress the loop.
+
+    The numba GROMOS loop is O(n^2) for the initial neighbour count
+    and then O(|members| * n) per cluster.  For n=10k with 100
+    clusters on a modern CPU this should run in a few seconds;
+    regressions (e.g. someone re-introducing the O(k*n^2) full
+    recompute) would push this to minutes.
+    """
+    rmsd = _make_synthetic_rmsd_matrix(n_frames, n_clusters, seed=2)
+
+    warmup = _make_synthetic_rmsd_matrix(32, 4, seed=99)
+    cluster_conformations(warmup, cutoff_nm=0.1)
+
+    t0 = time.perf_counter()
+    result = cluster_conformations(rmsd, cutoff_nm=0.1)
+    elapsed = time.perf_counter() - t0
+
+    print(
+        f"\n  GROMOS clustering: n={n_frames} cutoff=0.1 "
+        f"({result.n_clusters} clusters)  wall={elapsed:.4f} s"
+    )
+    assert abs(result.n_clusters - n_clusters) <= max(5, n_clusters // 4)
