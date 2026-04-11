@@ -270,6 +270,27 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 1. Add the plot re-export to `plots/__init__.py` and `__all__`.
 1. Write tests in `tests/analysis/`.
 
+### Compute backend conventions
+
+**Default backend rule**: every public compute function that accepts a
+`backend=` argument MUST default to `"mdtraj"`. Other backends exist
+for performance (`"numba"` for CPU-parallel, `"torch"`/`"jax"`/`"cupy"`
+for GPU) and MUST be opted into explicitly by the caller.
+
+Rationale:
+
+- **Correctness first**: only `mdtraj` supports periodic boundary
+  conditions. Defaulting to anything else would silently drop PBC for
+  users who rely on unit cells without reading the backend parameter.
+- **API consistency**: all analysis functions share the same default so
+  switching between `compute_distances`, `compute_rmsd_matrix`,
+  `featurize_ca_distances`, etc. doesn't silently change semantics.
+- **No hidden GPU dependency**: defaulting to `numba`/`torch`/`jax`/`cupy`
+  would require heavy optional dependencies for the common path.
+
+Users who want performance explicitly pass `backend="numba"` (or a GPU
+backend) and accept the PBC limitation.
+
 ### New compute backend
 
 To add a new backend (e.g. `cupy`) for an existing compute function like the RMSD matrix or pairwise distances:
@@ -280,6 +301,7 @@ To add a new backend (e.g. `cupy`) for an existing compute function like the RMS
 1. Register the function in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias in `_backends/_registry.py` (`DistanceBackend` or `RMSDBackend`).
 1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` marker.
+1. **Do not change the public function's default backend** -- keep it at `"mdtraj"`.
 
 ### New cheminformatics function
 

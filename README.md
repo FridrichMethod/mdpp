@@ -28,7 +28,7 @@
 - **Trajectory analysis** — RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
 - **Dimensionality reduction** — PCA (with projection), TICA, backbone torsion featurization, free energy surfaces
 - **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
-- **Pluggable compute backends** — pairwise distances and RMSD matrix ship with `mdtraj` / `numba` / `torch` / `jax` / `cupy` backends; switch via `backend=` (50x+ speedup on multi-core CPU or GPU, no PBC on non-mdtraj backends)
+- **Pluggable compute backends** — pairwise distances and RMSD matrix ship with `mdtraj` / `numba` / `torch` / `jax` / `cupy` backends; all functions default to `mdtraj` for API consistency and correctness (only mdtraj supports PBC), opt in to `numba` for 50x+ CPU speedup or the GPU backends for very large trajectories
 - **Cheminformatics** — molecular descriptors, PAINS filters, fingerprints (Morgan/ECFP), Tanimoto similarity, Butina clustering
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
 - **2D/3D visualization** — molecule structure drawings (RDKit), interactive 3D views (py3Dmol, nglview)

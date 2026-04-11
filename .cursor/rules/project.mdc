@@ -38,6 +38,18 @@ Every `compute_*` function follows this contract:
 3. Returns a **frozen dataclass** with `slots=True`.
 4. Unit properties (e.g. `.time_ns`, `.rmsd_angstrom`) as `@property` on the dataclass.
 
+## Compute Backend Default Rule
+
+Every public analysis function that accepts a `backend=` argument MUST default to `"mdtraj"`. Other backends (`numba`, `torch`, `jax`, `cupy`) exist for performance (50-200x CPU speedup or GPU acceleration) and MUST be opted into explicitly by the caller.
+
+Why:
+
+- Only `mdtraj` supports periodic boundary conditions -- defaulting to anything else silently drops PBC.
+- Consistent defaults across all analysis functions avoid surprising behavior when users switch between them.
+- The GPU backends (`[gpu]` extra) must never be required for the common path.
+
+**Never change a public function's default backend away from `"mdtraj"`.** Add performance notes in the docstring pointing users to `backend="numba"` or a GPU backend when they need speed.
+
 ## Plotting Module Patterns
 
 Every `plot_*` function follows this contract:

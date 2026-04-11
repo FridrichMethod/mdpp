@@ -50,7 +50,7 @@ def compute_rmsd_matrix(
     traj: md.Trajectory,
     *,
     atom_selection: str = "backbone",
-    backend: RMSDBackend = "numba",
+    backend: RMSDBackend = "mdtraj",
     dtype: DtypeArg = None,
 ) -> RMSDMatrixResult:
     """Compute an all-vs-all RMSD matrix between trajectory frames.
@@ -58,10 +58,12 @@ def compute_rmsd_matrix(
     Args:
         traj: Input trajectory.
         atom_selection: Atoms used for RMSD calculation.
-        backend: Computation backend.
+        backend: Computation backend.  Defaults to ``"mdtraj"`` for
+            API consistency with other analysis functions; switch to a
+            faster backend explicitly when performance matters.
 
-            - ``"numba"`` (default) -- Numba-parallel QCP kernel (CPU).
-            - ``"mdtraj"`` -- mdtraj precentered RMSD loop (CPU).
+            - ``"mdtraj"`` (default) -- mdtraj precentered RMSD loop (CPU).
+            - ``"numba"`` -- Numba-parallel QCP kernel (CPU, 50-200x faster).
             - ``"torch"`` -- PyTorch einsum + batched SVD (CUDA/CPU).
             - ``"jax"`` -- JAX einsum + batched SVD (GPU/TPU/CPU).
             - ``"cupy"`` -- CuPy einsum + batched SVD (CUDA).

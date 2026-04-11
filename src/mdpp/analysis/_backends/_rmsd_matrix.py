@@ -320,7 +320,7 @@ def rmsd_cupy(
 # Registry
 # ---------------------------------------------------------------------------
 
-rmsd_matrix_backends: BackendRegistry = BackendRegistry(default="numba")
+rmsd_matrix_backends: BackendRegistry = BackendRegistry(default="mdtraj")
 rmsd_matrix_backends.register("numba", rmsd_numba)
 rmsd_matrix_backends.register("mdtraj", rmsd_mdtraj)
 rmsd_matrix_backends.register("torch", rmsd_torch)

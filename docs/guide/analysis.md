@@ -157,18 +157,23 @@ result = compute_minimum_distance(traj, group1="resid 10", group2="resid 50")
 accept a `backend=` argument. Five backends are available:
 
 | Backend | Device | PBC | Install |
-|------------|--------------------|-----|------------------------------|
-| `"mdtraj"` | CPU (1 thread) | yes | built-in |
+| ---------- | --------------- | --- | ------------------------- |
+| `"mdtraj"` | CPU (1 thread) | yes | built-in (default) |
 | `"numba"` | CPU (all cores) | no | built-in (numba) |
 | `"cupy"` | NVIDIA GPU | no | `pip install -e ".[gpu]"` |
 | `"torch"` | CUDA GPU / CPU | no | `pip install -e ".[gpu]"` |
 | `"jax"` | GPU / TPU / CPU | no | `pip install -e ".[gpu]"` |
 
+**Default is `"mdtraj"` across every analysis function** for API
+consistency and correctness (only mdtraj supports periodic boundary
+conditions). Opt in to faster backends explicitly when performance
+matters:
+
 ```python
 # Default -- mdtraj (supports periodic boundary conditions)
 result = compute_distances(traj, atom_pairs=pairs, periodic=True)
 
-# Numba: ~5-10x faster than mdtraj on multi-core machines (no PBC)
+# Numba: 5-10x faster than mdtraj on multi-core CPU (no PBC)
 result = compute_distances(traj, atom_pairs=pairs, backend="numba", periodic=False)
 
 # GPU backends for very large trajectories
@@ -239,21 +244,24 @@ print(f"Medoid frames: {clusters.medoid_frames}")
 
 ### RMSD matrix backend selection
 
-`compute_rmsd_matrix` defaults to the **numba** backend, which implements
-the Quaternion Characteristic Polynomial (Theobald 2005) algorithm in a
-Numba-JIT kernel with `prange` parallelism. Five backends are available:
+`compute_rmsd_matrix` defaults to the **mdtraj** backend for API
+consistency with other analysis functions. Five backends are
+available:
 
 | Backend | Method | Device |
-|------------|--------------------------------------|-----------------|
-| `"numba"` | QCP + Newton-Raphson (default) | CPU (all cores) |
+| ---------- | ------------------------------- | --------------- |
 | `"mdtraj"` | Precentered `md.rmsd` loop | CPU (1 thread) |
+| `"numba"` | QCP + Newton-Raphson | CPU (all cores) |
 | `"torch"` | Vectorised einsum + batched SVD | CUDA / CPU |
 | `"jax"` | Vectorised einsum + batched SVD | GPU / TPU / CPU |
 | `"cupy"` | Vectorised einsum + batched SVD | NVIDIA GPU |
 
 ```python
-# Default (numba) -- 50-200x faster than mdtraj on multi-core machines
+# Default -- mdtraj
 rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone")
+
+# Numba QCP: 50-200x faster than mdtraj on multi-core CPU
+rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone", backend="numba")
 
 # GPU backend for very large trajectories (>1000 frames)
 rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone", backend="torch")

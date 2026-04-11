@@ -106,6 +106,18 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 1. If visual output makes sense, add `plot_*` in `src/mdpp/plots/` and export it.
 1. Write tests in `tests/analysis/`.
 
+## Compute Backend Conventions
+
+**Default backend rule**: every public compute function that accepts a `backend=` argument MUST default to `"mdtraj"`. Other backends (`numba`, `torch`, `jax`, `cupy`) are performance options that callers must opt into explicitly.
+
+Reasons:
+
+- Only `mdtraj` supports periodic boundary conditions -- defaulting to anything else would silently drop PBC for users who don't read the backend parameter.
+- All analysis functions sharing the same default keeps API behavior consistent across `compute_distances`, `compute_rmsd_matrix`, `featurize_ca_distances`, etc.
+- The optional GPU backends (`[gpu]` extra) must never be required for the common path.
+
+When reviewing or writing code, never change a public function's default backend away from `"mdtraj"`.
+
 ## Adding a New Compute Backend
 
 For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise distances):
@@ -115,6 +127,7 @@ For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise dista
 1. Register in the module's `BackendRegistry` at the bottom of the file.
 1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend`) in `_backends/_registry.py`.
 1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` skip marker.
+1. **Do not change the public function's default backend** -- keep it at `"mdtraj"`.
 
 ## Adding a New Chem Function
 

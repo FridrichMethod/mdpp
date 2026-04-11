@@ -148,7 +148,7 @@ def featurize_ca_distances(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
-    backend: DistanceBackend = "numba",
+    backend: DistanceBackend = "mdtraj",
     periodic: bool = False,
     dtype: DtypeArg = None,
 ) -> DistanceFeatures:
@@ -159,18 +159,18 @@ def featurize_ca_distances(
 
     Five backends are available (see
     :func:`mdpp.analysis.distance._compute_pairwise_distances`):
-    ``"numba"`` (default, CPU-parallel), ``"cupy"``/``"torch"``/
-    ``"jax"`` (GPU-accelerated), and ``"mdtraj"`` (PBC-capable,
-    single-threaded).  Non-mdtraj backends do not support periodic
-    boundary conditions.
+    ``"mdtraj"`` (default, PBC-capable, single-threaded), ``"numba"``
+    (CPU-parallel), and ``"cupy"``/``"torch"``/``"jax"`` (GPU-accelerated).
+    Non-mdtraj backends do not support periodic boundary conditions.
 
     Args:
         traj: Input trajectory.
         atom_selection: MDTraj selection string for the atoms to include.
             Defaults to ``"name CA"`` for alpha-carbon distances.
-        backend: Distance computation backend. ``"numba"``
-            (default, CPU-parallel), ``"cupy"``/``"torch"``/``"jax"``
-            (GPU-accelerated), or ``"mdtraj"`` (PBC-capable).
+        backend: Distance computation backend. Defaults to ``"mdtraj"``
+            for API consistency; switch to ``"numba"`` (CPU-parallel)
+            or ``"cupy"``/``"torch"``/``"jax"`` (GPU-accelerated)
+            explicitly when performance matters.
         periodic: Whether to apply minimum image convention. Only
             effective with ``backend="mdtraj"``.
         dtype: Output float dtype. If ``None``, uses the package default
