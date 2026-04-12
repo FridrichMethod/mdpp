@@ -30,7 +30,7 @@ src/mdpp/
 │   ├── dssp.py          # secondary structure (DSSP)
 │   ├── decomposition.py # PCA (with projection), TICA, backbone torsion featurization
 │   ├── fes.py           # 2D free energy surfaces
-│   └── clustering.py    # RMSD matrix, GROMOS clustering (thin wrapper)
+│   └── clustering.py    # RMSD matrix, clustering methods (Gromos/DBSCAN/HDBSCAN/Hierarchical/KMeans/MiniBatchKMeans/RegularSpace)
 ├── chem/            # small-molecule cheminformatics (RDKit-based)
 │   ├── descriptors.py   # molecular descriptor calculation and filtering
 │   ├── filters.py       # Murcko scaffold extraction, PAINS filters

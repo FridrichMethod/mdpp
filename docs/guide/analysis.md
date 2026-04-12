@@ -266,14 +266,63 @@ fes = compute_fes_from_projection(pca_result.projections)
 
 ## Conformational Clustering
 
+Each clustering method is a frozen dataclass configured at construction
+time and called on the data matrix:
+
 ```python
-from mdpp.analysis.clustering import compute_rmsd_matrix, cluster_conformations
+from mdpp.analysis.clustering import (
+    Gromos, Hierarchical, DBSCAN, HDBSCAN,
+    KMeans, MiniBatchKMeans, RegularSpace,
+    compute_rmsd_matrix,
+)
+
+# --- Distance-matrix methods (take an RMSD matrix) ---
 
 rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone")
-clusters = cluster_conformations(rmsd_mat.rmsd_matrix_nm, cutoff_nm=0.15)
-print(f"Found {clusters.n_clusters} clusters")
-print(f"Medoid frames: {clusters.medoid_frames}")
+
+# GROMOS (greedy largest-cluster-first, Numba JIT, O(n) aux memory)
+result = Gromos(cutoff_nm=0.15)(rmsd_mat.rmsd_matrix_nm)
+
+# Hierarchical agglomerative (scipy)
+result = Hierarchical(linkage_method="average", distance_threshold=0.2)(rmsd_mat.rmsd_matrix_nm)
+result = Hierarchical(linkage_method="average", n_clusters=10)(rmsd_mat.rmsd_matrix_nm)
+
+# DBSCAN (Numba JIT default, sklearn backend available)
+result = DBSCAN(eps=0.15, min_samples=5)(rmsd_mat.rmsd_matrix_nm)
+result = DBSCAN(eps=0.15, min_samples=5, backend="sklearn")(rmsd_mat.rmsd_matrix_nm)
+
+# HDBSCAN (sklearn)
+result = HDBSCAN(min_cluster_size=50, min_samples=5)(rmsd_mat.rmsd_matrix_nm)
+
+print(f"Found {result.n_clusters} clusters")
+print(f"Medoid frames: {result.medoid_frames}")
+
+# --- Feature-vector methods (take PCA/TICA projections) ---
+
+from mdpp.analysis.decomposition import featurize_backbone_torsions, compute_pca
+
+torsions = featurize_backbone_torsions(traj, atom_selection="protein")
+pca = compute_pca(torsions.values, n_components=10)
+
+result = KMeans(n_clusters=10)(pca.projections)
+result = MiniBatchKMeans(n_clusters=10, batch_size=1024)(pca.projections)
+result = RegularSpace(dmin=0.5)(pca.projections)
+
+# result.labels, result.n_clusters, result.cluster_centers,
+# result.medoid_frames, result.inertia
 ```
+
+### Clustering backend selection
+
+DBSCAN provides two backends:
+
+| Backend | Method | Aux memory |
+| ---------- | ---------------------------------- | ---------- |
+| `"numba"` | Custom Numba-JIT BFS (default) | O(n) |
+| `"sklearn"` | scikit-learn `DBSCAN(metric="precomputed")` | O(n^2) |
+
+The `"numba"` backend handles 120k+ frames without OOM by reading the
+RMSD matrix in place and using only O(n) auxiliary buffers.
 
 ### RMSD matrix backend selection
 

@@ -994,7 +994,7 @@ def _make_synthetic_rmsd_matrix(
         pytest.param(2000, 20, id="fast-2000f-20c"),
     ],
 )
-def test_benchmark_cluster_conformations_fast(
+def test_benchmark_gromos_fast(
     n_frames: int,
     n_clusters: int,
 ) -> None:
@@ -1032,7 +1032,7 @@ def test_benchmark_cluster_conformations_fast(
         pytest.param(10000, 100, id="slow-10000f-100c"),
     ],
 )
-def test_benchmark_cluster_conformations_slow(
+def test_benchmark_gromos_slow(
     n_frames: int,
     n_clusters: int,
 ) -> None:
