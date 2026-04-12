@@ -66,7 +66,16 @@ scripts/             # shell scripts (NOT packaged, copy to MD working directori
 │   ├── quickrun/        # quickrun.sh, quickrun.sbatch
 │   └── runtime/         # check_status.sh, monitor.sbatch
 examples/            # worked examples and notebooks
-├── gromacs/             # GROMACS analysis notebooks (RMSD, RMSF, DCCM, FES, I/O)
+├── gromacs/             # GROMACS analysis notebooks
+│   ├── io_preprocessing.ipynb   # trajectory loading, atom selection, alignment
+│   ├── rmsd_rmsf.ipynb          # RMSD, RMSF, SASA, radius of gyration
+│   ├── dccm.ipynb               # DCCM, hydrogen bonds
+│   ├── contacts.ipynb           # inter-residue contacts, contact frequency, Q(t)
+│   ├── distances.ipynb          # pairwise distances, minimum distance, backends
+│   ├── dssp.ipynb               # secondary structure (DSSP)
+│   ├── fes.ipynb                # PCA/TICA + free energy surfaces
+│   ├── projections.ipynb        # scree plot, cumulative variance, Ramachandran
+│   └── clustering.ipynb         # all 7 clustering methods (Gromos/DBSCAN/...)
 ├── openfe/              # OpenFE RBFE workflow notebook + input PDBs
 └── browndye/            # BrownDye2 complex PQR preparation
 
