@@ -1,8 +1,22 @@
-"""Conformational clustering from RMSD matrices."""
+"""Conformational clustering from RMSD matrices.
+
+Each clustering algorithm is a frozen dataclass configured at
+construction time and invoked as a callable on the data matrix::
+
+    result = Gromos(cutoff_nm=0.2)(rmsd_matrix)
+    result = DBSCAN(eps=0.15, min_samples=5)(rmsd_matrix)
+    result = KMeans(n_clusters=10)(pca.projections)
+
+The legacy functions :func:`cluster_conformations` and
+:func:`cluster_features` still work for backward compatibility and
+accept either a string method name or a method instance.
+"""
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
+from typing import Any, Literal
 
 import mdtraj as md
 import numpy as np
@@ -60,7 +74,7 @@ class FeatureClusteringResult:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public API: RMSD matrix computation
 # ---------------------------------------------------------------------------
 
 
@@ -121,6 +135,11 @@ def compute_rmsd_matrix(
     )
 
 
+# ---------------------------------------------------------------------------
+# Numba JIT kernels
+# ---------------------------------------------------------------------------
+
+
 @njit(parallel=True, cache=True)
 def _gromos_initial_counts(
     rmsd_matrix: NDArray[np.floating],
@@ -128,8 +147,8 @@ def _gromos_initial_counts(
 ) -> NDArray[np.int64]:  # pragma: no cover - JIT-compiled
     """Count each row's neighbors within ``cutoff_nm`` (inclusive).
 
-    Parallel over rows.  This runs once at the start of the GROMOS
-    loop and dominates wall time for small cluster counts.
+    Parallel over rows.  Each row index is owned by exactly one thread
+    so the write to ``counts[i]`` is race-free.
     """
     n = rmsd_matrix.shape[0]
     counts = np.zeros(n, dtype=np.int64)
@@ -179,17 +198,11 @@ def _gromos_loop(
     n = rmsd_matrix.shape[0]
     labels = np.full(n, -1, dtype=np.int64)
     assigned = np.zeros(n, dtype=np.bool_)
-    # Pre-allocate medoid storage -- at most ``n`` clusters.
     medoids_buf = np.empty(n, dtype=np.int64)
+    members_buf = np.empty(n, dtype=np.int64)
     cluster_id = 0
 
-    # Working buffer for newly-assigned member indices in the current
-    # cluster -- sized for the worst case (first cluster might absorb
-    # the entire trajectory).
-    members_buf = np.empty(n, dtype=np.int64)
-
     while True:
-        # Pick the unassigned row with the largest neighbour count.
         best = -1
         best_count = -1
         for i in range(n):
@@ -199,8 +212,6 @@ def _gromos_loop(
         if best < 0:
             break
 
-        # Collect this cluster's members: every unassigned row within
-        # cutoff of ``best`` (includes ``best`` itself).
         n_members = 0
         for j in range(n):
             if not assigned[j] and rmsd_matrix[best, j] <= cutoff_nm:
@@ -209,10 +220,6 @@ def _gromos_loop(
                 labels[j] = cluster_id
                 assigned[j] = True
 
-        # Incrementally refresh ``counts``: for every newly assigned
-        # member ``m``, each of ``m``'s neighbours loses one
-        # still-unassigned neighbour.  Walk row ``m`` (cache-friendly
-        # contiguous access) and decrement in place.
         for k in range(n_members):
             m = members_buf[k]
             for i in range(n):
@@ -249,13 +256,6 @@ def _dbscan_label(
     When multiple core points could seed a cluster, the one with the
     smallest frame index seeds first (deterministic tie-breaking).
 
-    Args:
-        rmsd_matrix: Symmetric ``(n, n)`` pairwise RMSD matrix.
-        counts: Pre-computed neighbour counts from
-            ``_gromos_initial_counts(rmsd_matrix, eps)``.
-        eps: Neighbourhood radius (same as ``cutoff_nm``).
-        min_samples: Minimum neighbours to qualify as a core point.
-
     Returns:
         ``(labels, n_clusters)`` -- labels array with -1 for noise,
         and the number of non-noise clusters found.
@@ -263,13 +263,11 @@ def _dbscan_label(
     n = rmsd_matrix.shape[0]
     labels = np.full(n, -1, dtype=np.int64)
 
-    # Core-point mask.
     is_core = np.zeros(n, dtype=np.bool_)
     for i in range(n):
         if counts[i] >= min_samples:
             is_core[i] = True
 
-    # Stack buffer for BFS -- worst case all points in one component.
     stack = np.empty(n, dtype=np.int64)
     cluster_id = 0
 
@@ -277,7 +275,6 @@ def _dbscan_label(
         if labels[seed] != -1 or not is_core[seed]:
             continue
 
-        # Seed a new cluster from this core point.
         labels[seed] = cluster_id
         stack_top = 1
         stack[0] = seed
@@ -286,7 +283,6 @@ def _dbscan_label(
             stack_top -= 1
             p = stack[stack_top]
 
-            # Scan row p for unassigned neighbours within eps.
             for q in range(n):
                 if rmsd_matrix[p, q] <= eps and labels[q] == -1:
                     labels[q] = cluster_id
@@ -299,16 +295,25 @@ def _dbscan_label(
     return labels, cluster_id
 
 
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_rmsd_matrix(rmsd_matrix: NDArray[np.floating]) -> None:
+    """Validate that *rmsd_matrix* is a finite, square, 2-D array."""
+    if rmsd_matrix.ndim != 2 or rmsd_matrix.shape[0] != rmsd_matrix.shape[1]:
+        raise ValueError(f"rmsd_matrix must be a square 2-D array, got shape {rmsd_matrix.shape}")
+    if rmsd_matrix.size > 0 and not np.isfinite(rmsd_matrix).all():
+        raise ValueError("rmsd_matrix contains NaN or Inf values")
+
+
 def _compute_medoids(
     rmsd_matrix: NDArray[np.floating],
     labels: NDArray[np.int_],
     n_clusters: int,
 ) -> NDArray[np.int_]:
-    """Compute the medoid frame index for each cluster.
-
-    The medoid is the frame with the minimum sum of within-cluster
-    distances.  Noise frames (label == -1) are ignored.
-    """
+    """Compute medoid frame index per cluster from the RMSD matrix."""
     medoids = np.empty(n_clusters, dtype=np.int_)
     for k in range(n_clusters):
         members = np.where(labels == k)[0]
@@ -317,310 +322,456 @@ def _compute_medoids(
     return medoids
 
 
-def _cluster_hierarchical(
+def _make_clustering_result(
     rmsd_matrix: NDArray[np.floating],
-    *,
-    cutoff_nm: float,
-    linkage_method: str,
-    n_clusters: int | None,
-) -> tuple[NDArray[np.int_], int]:
-    """Hierarchical agglomerative clustering via scipy.
-
-    Raises:
-        MemoryError: When the condensed distance matrix would exceed
-            8 GB.  Subsample the RMSD matrix first (e.g.
-            ``rmsd_matrix[::stride, ::stride]``).
-    """
-    n = rmsd_matrix.shape[0]
-    condensed_bytes = n * (n - 1) // 2 * 8  # float64 condensed vector
-    if condensed_bytes > 8 * 1024**3:
-        gb = condensed_bytes / 1024**3
-        raise MemoryError(
-            f"Hierarchical clustering on {n} frames needs ~{gb:.0f} GB for the "
-            f"condensed distance matrix (float64). Subsample first, e.g. "
-            f"rmsd_matrix[::10, ::10]."
-        )
-
-    from scipy.cluster.hierarchy import fcluster, linkage
-    from scipy.spatial.distance import squareform
-
-    condensed = squareform(rmsd_matrix, checks=False)
-    z = linkage(condensed, method=linkage_method)
-    if n_clusters is not None:
-        raw_labels = fcluster(z, t=n_clusters, criterion="maxclust")
-    else:
-        raw_labels = fcluster(z, t=cutoff_nm, criterion="distance")
-    # fcluster labels start at 1; shift to 0-based
-    labels = raw_labels - 1
-    n = int(labels.max()) + 1
-    return labels.astype(np.int_), n
-
-
-def _cluster_dbscan(
-    rmsd_matrix: NDArray[np.floating],
-    *,
-    cutoff_nm: float,
-    min_samples: int,
-) -> tuple[NDArray[np.int_], int]:
-    """DBSCAN clustering via Numba JIT kernels.
-
-    Reuses ``_gromos_initial_counts`` for the parallel neighbour count
-    and ``_dbscan_label`` for the sequential BFS assignment.  Total
-    auxiliary memory is ``O(n)`` -- no copies of the RMSD matrix.
-    """
-    counts = _gromos_initial_counts(rmsd_matrix, cutoff_nm)
-    labels, n_cls = _dbscan_label(rmsd_matrix, counts, cutoff_nm, min_samples)
-    return labels.astype(np.int_), int(n_cls)
-
-
-def _cluster_hdbscan(
-    rmsd_matrix: NDArray[np.floating],
-    *,
-    min_cluster_size: int,
-    min_samples: int,
-) -> tuple[NDArray[np.int_], int]:
-    """HDBSCAN clustering via scikit-learn (>= 1.3)."""
-    from sklearn.cluster import HDBSCAN
-
-    hdb = HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        min_samples=min_samples,
-        metric="precomputed",
-    )
-    labels = hdb.fit_predict(rmsd_matrix).astype(np.int_)
-    n = int(labels.max()) + 1 if labels.max() >= 0 else 0
-    return labels, n
-
-
-def cluster_conformations(
-    rmsd_matrix: NDArray[np.floating],
-    *,
-    method: str = "gromos",
-    cutoff_nm: float = 0.15,
-    # --- hierarchical ---
-    linkage_method: str = "average",
-    n_clusters: int | None = None,
-    # --- DBSCAN / HDBSCAN ---
-    min_samples: int = 5,
-    # --- HDBSCAN only ---
-    min_cluster_size: int = 5,
+    labels: NDArray[np.int_],
+    n_clusters: int,
+    medoids: NDArray[np.int_] | None = None,
 ) -> ClusteringResult:
-    """Cluster trajectory frames from a pairwise RMSD matrix.
-
-    Args:
-        rmsd_matrix: Symmetric pairwise RMSD matrix of shape ``(n, n)``
-            in nm.  Accepts any floating dtype -- float32 is preferred
-            at large ``n`` because the matrix itself is already the
-            biggest allocation in the pipeline (57 GB at n=120k).
-        method: Clustering method.
-
-            - ``"gromos"`` -- GROMOS algorithm (largest-cluster-first
-              greedy assignment).  Uses: ``cutoff_nm``.
-            - ``"hierarchical"`` -- scipy agglomerative clustering.
-              Uses: ``cutoff_nm`` (as distance threshold) or
-              ``n_clusters``, ``linkage_method``.
-            - ``"dbscan"`` -- Numba-JIT DBSCAN (O(n) aux memory, no
-              copies).  Uses: ``cutoff_nm`` (as eps), ``min_samples``.
-              Noise frames get label -1.
-            - ``"hdbscan"`` -- scikit-learn HDBSCAN (>= 1.3).  Uses:
-              ``min_cluster_size``, ``min_samples``.  Noise frames get
-              label -1.
-
-        cutoff_nm: RMSD cutoff in nm.  Interpretation depends on the
-            method (GROMOS cutoff, hierarchical distance threshold,
-            or DBSCAN eps).
-        linkage_method: Linkage criterion for hierarchical clustering
-            (e.g. ``"average"``, ``"complete"``, ``"single"``).
-        n_clusters: If set, hierarchical clustering uses a fixed
-            cluster count instead of ``cutoff_nm``.
-        min_samples: Minimum number of samples in a neighbourhood for
-            DBSCAN / HDBSCAN.
-        min_cluster_size: Minimum cluster size for HDBSCAN.
-
-    Returns:
-        ClusteringResult with per-frame labels and medoid frame indices.
-
-    Raises:
-        ValueError: If an unsupported method is specified or invalid
-            parameters are given.
-
-    Memory note:
-        ``"gromos"`` and ``"dbscan"`` use Numba-JIT kernels with only
-        ``O(n)`` auxiliary buffers -- no copies of the RMSD matrix.
-        ``"hierarchical"`` requires an ``O(n^2)`` float64 condensed
-        matrix via scipy and will raise ``MemoryError`` when this
-        exceeds 8 GB (~45k frames).  ``"hdbscan"`` delegates to
-        sklearn which may create internal copies at large ``n``.
-    """
-    if rmsd_matrix.ndim != 2 or rmsd_matrix.shape[0] != rmsd_matrix.shape[1]:
-        raise ValueError(f"rmsd_matrix must be a square 2-D array, got shape {rmsd_matrix.shape}")
-    if rmsd_matrix.size > 0 and not np.isfinite(rmsd_matrix).all():
-        raise ValueError("rmsd_matrix contains NaN or Inf values")
-
-    if method == "gromos":
-        if cutoff_nm <= 0.0:
-            raise ValueError(f"cutoff_nm must be positive, got {cutoff_nm!r}")
-        # ``np.ascontiguousarray`` is a no-op for already-contiguous
-        # inputs and avoids a numba strided-access slow path for views.
-        rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
-        counts = _gromos_initial_counts(rmsd_matrix, cutoff_nm)
-        labels, n_cls, medoids = _gromos_loop(rmsd_matrix, counts, cutoff_nm)
-    elif method == "hierarchical":
-        if n_clusters is None and cutoff_nm <= 0.0:
-            raise ValueError(f"cutoff_nm must be positive, got {cutoff_nm!r}")
-        labels, n_cls = _cluster_hierarchical(
-            rmsd_matrix,
-            cutoff_nm=cutoff_nm,
-            linkage_method=linkage_method,
-            n_clusters=n_clusters,
-        )
-        medoids = _compute_medoids(rmsd_matrix, labels, n_cls)
-    elif method == "dbscan":
-        if cutoff_nm <= 0.0:
-            raise ValueError(f"cutoff_nm must be positive, got {cutoff_nm!r}")
-        rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
-        labels, n_cls = _cluster_dbscan(
-            rmsd_matrix,
-            cutoff_nm=cutoff_nm,
-            min_samples=min_samples,
-        )
-        medoids = (
-            _compute_medoids(rmsd_matrix, labels, n_cls)
-            if n_cls > 0
-            else np.array([], dtype=np.int_)
-        )
-    elif method == "hdbscan":
-        labels, n_cls = _cluster_hdbscan(
-            rmsd_matrix,
-            min_cluster_size=min_cluster_size,
-            min_samples=min_samples,
-        )
-        medoids = (
-            _compute_medoids(rmsd_matrix, labels, n_cls)
-            if n_cls > 0
-            else np.array([], dtype=np.int_)
-        )
-    else:
-        supported = ("gromos", "hierarchical", "dbscan", "hdbscan")
-        raise ValueError(
-            f"Unsupported clustering method: {method!r}. Supported methods: {supported}"
-        )
-
+    """Build a :class:`ClusteringResult`, computing medoids if needed."""
+    if medoids is None:
+        if n_clusters > 0:
+            medoids = _compute_medoids(rmsd_matrix, labels, n_clusters)
+        else:
+            medoids = np.array([], dtype=np.int_)
     return ClusteringResult(
         labels=labels.astype(np.int_, copy=False),
-        n_clusters=int(n_cls),
+        n_clusters=int(n_clusters),
         medoid_frames=medoids.astype(np.int_, copy=False),
     )
 
 
-def cluster_features(
-    features: ArrayLike,
-    *,
-    method: str = "kmeans",
-    n_clusters: int = 10,
-    batch_size: int = 1024,
-    dmin: float = 0.5,
-    dtype: DtypeArg = None,
+def _make_feature_result(
+    feature_matrix: NDArray[np.floating],
+    labels: NDArray[np.int_],
+    centers: NDArray[np.floating],
+    n_clusters: int,
+    inertia: float,
+    resolved: np.dtype[np.floating],
 ) -> FeatureClusteringResult:
-    """Cluster frames from a feature matrix (e.g. PCA/TICA projections).
+    """Build a :class:`FeatureClusteringResult` with medoid computation."""
+    labels = np.asarray(labels)
+    centers = np.asarray(centers)
+    medoids = np.empty(n_clusters, dtype=np.int_)
+    for k in range(n_clusters):
+        members = np.where(labels == k)[0]
+        dists = np.linalg.norm(feature_matrix[members] - centers[k], axis=1)
+        medoids[k] = members[np.argmin(dists)]
+    return FeatureClusteringResult(
+        labels=labels.astype(np.int_, copy=False),
+        n_clusters=int(n_clusters),
+        cluster_centers=centers.astype(resolved, copy=False),
+        medoid_frames=medoids,
+        inertia=float(inertia),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Distance-matrix clustering methods
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Gromos:
+    """GROMOS clustering (Daura et al. 1999).
+
+    Greedy largest-cluster-first assignment via Numba-JIT kernels.
+    O(n) auxiliary memory -- no copies of the RMSD matrix.
 
     Args:
-        features: Feature matrix of shape ``(n_frames, n_features)``,
-            e.g. from ``compute_pca(...).projections`` or
-            ``compute_tica(...).projections``.
-        method: Clustering algorithm.
+        cutoff_nm: Neighbour cutoff in nm.
 
-            - ``"kmeans"`` -- standard k-means (scikit-learn).
-              Uses: ``n_clusters``.
-            - ``"minibatch"`` -- mini-batch k-means (scikit-learn).
-              Uses: ``n_clusters``, ``batch_size``.
-            - ``"regspace"`` -- regular-space clustering (deeptime).
-              Uses: ``dmin``. ``n_clusters`` is ignored.
+    Example::
 
-        n_clusters: Number of clusters for k-means / mini-batch.
-        batch_size: Batch size for mini-batch k-means.
-        dmin: Minimum center-to-center distance for regular-space.
-        dtype: Output float dtype.
-
-    Returns:
-        FeatureClusteringResult with labels, centers, medoids, and
-        inertia.
-
-    Raises:
-        ValueError: If an unsupported method or invalid parameters are
-            given.
+        result = Gromos(cutoff_nm=0.2)(rmsd_matrix)
     """
-    from mdpp._dtype import resolve_dtype
-    from mdpp.analysis.decomposition import _as_feature_matrix
 
-    resolved = resolve_dtype(dtype)
-    feature_matrix = _as_feature_matrix(features)
+    cutoff_nm: float = 0.15
 
-    if method == "kmeans":
-        if n_clusters < 1:
-            raise ValueError(f"n_clusters must be >= 1, got {n_clusters!r}")
-        from sklearn.cluster import KMeans
+    def __call__(self, rmsd_matrix: NDArray[np.floating]) -> ClusteringResult:
+        """Cluster *rmsd_matrix* and return a :class:`ClusteringResult`."""
+        _validate_rmsd_matrix(rmsd_matrix)
+        if self.cutoff_nm <= 0.0:
+            raise ValueError(f"cutoff_nm must be positive, got {self.cutoff_nm!r}")
+        rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
+        counts = _gromos_initial_counts(rmsd_matrix, self.cutoff_nm)
+        labels, n_cls, medoids = _gromos_loop(rmsd_matrix, counts, self.cutoff_nm)
+        return _make_clustering_result(rmsd_matrix, labels, n_cls, medoids)
 
-        km = KMeans(n_clusters=n_clusters, n_init="auto", random_state=42)
+
+@dataclass(frozen=True, slots=True)
+class Hierarchical:
+    """Agglomerative hierarchical clustering (scipy).
+
+    Uses ``distance_threshold`` by default. Set ``n_clusters`` to use a
+    fixed cluster count instead (overrides ``distance_threshold``).
+
+    Note:
+        Scipy builds an ``O(n^2)`` float64 condensed distance matrix
+        internally.  At 120k frames this is ~57 GB.
+
+    Args:
+        linkage_method: ``"average"``, ``"complete"``, or ``"single"``.
+            ``"ward"`` is not valid for RMSD matrices.
+        distance_threshold: Distance cutoff in nm.
+        n_clusters: Fixed cluster count (overrides *distance_threshold*).
+
+    Example::
+
+        result = Hierarchical(linkage_method="average", distance_threshold=0.2)(rmsd_matrix)
+    """
+
+    linkage_method: str = "average"
+    distance_threshold: float = 0.15
+    n_clusters: int | None = None
+
+    def __call__(self, rmsd_matrix: NDArray[np.floating]) -> ClusteringResult:
+        """Cluster *rmsd_matrix* and return a :class:`ClusteringResult`."""
+        _validate_rmsd_matrix(rmsd_matrix)
+        if self.n_clusters is None and self.distance_threshold <= 0.0:
+            raise ValueError(
+                f"distance_threshold must be positive, got {self.distance_threshold!r}"
+            )
+
+        from scipy.cluster.hierarchy import fcluster, linkage
+        from scipy.spatial.distance import squareform
+
+        condensed = squareform(rmsd_matrix, checks=False)
+        z = linkage(condensed, method=self.linkage_method)
+        if self.n_clusters is not None:
+            raw_labels = fcluster(z, t=self.n_clusters, criterion="maxclust")
+        else:
+            raw_labels = fcluster(z, t=self.distance_threshold, criterion="distance")
+        labels = (raw_labels - 1).astype(np.int_)
+        n_cls = int(labels.max()) + 1
+        return _make_clustering_result(rmsd_matrix, labels, n_cls)
+
+
+@dataclass(frozen=True, slots=True)
+class DBSCAN:
+    """DBSCAN density-based clustering.
+
+    Two backends:
+
+    - ``"numba"`` (default) -- custom Numba-JIT kernel.  Reuses the
+      parallel neighbour-count kernel from GROMOS and a sequential BFS
+      for label assignment.  O(n) auxiliary memory, no copies.
+    - ``"sklearn"`` -- official scikit-learn ``DBSCAN`` with
+      ``metric="precomputed"``.
+
+    Noise frames receive label -1.
+
+    Args:
+        eps: Neighbourhood radius in nm.
+        min_samples: Minimum neighbours (including self) for a core point.
+        backend: ``"numba"`` or ``"sklearn"``.
+
+    Example::
+
+        result = DBSCAN(eps=0.15, min_samples=5)(rmsd_matrix)
+        result = DBSCAN(eps=0.15, backend="sklearn")(rmsd_matrix)
+    """
+
+    eps: float = 0.15
+    min_samples: int = 5
+    backend: Literal["numba", "sklearn"] = "numba"
+
+    def __call__(self, rmsd_matrix: NDArray[np.floating]) -> ClusteringResult:
+        """Cluster *rmsd_matrix* and return a :class:`ClusteringResult`."""
+        _validate_rmsd_matrix(rmsd_matrix)
+        if self.eps <= 0.0:
+            raise ValueError(f"eps must be positive, got {self.eps!r}")
+
+        if self.backend == "numba":
+            rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
+            counts = _gromos_initial_counts(rmsd_matrix, self.eps)
+            labels, n_cls = _dbscan_label(rmsd_matrix, counts, self.eps, self.min_samples)
+            labels = labels.astype(np.int_)
+        elif self.backend == "sklearn":
+            from sklearn.cluster import DBSCAN as _SklearnDBSCAN
+
+            db = _SklearnDBSCAN(
+                eps=self.eps,
+                min_samples=self.min_samples,
+                metric="precomputed",
+            )
+            labels = db.fit_predict(rmsd_matrix).astype(np.int_)
+            n_cls = int(labels.max()) + 1 if labels.max() >= 0 else 0
+        else:
+            raise ValueError(f"Unknown DBSCAN backend: {self.backend!r}. Use 'numba' or 'sklearn'.")
+
+        return _make_clustering_result(rmsd_matrix, labels, n_cls)
+
+
+@dataclass(frozen=True, slots=True)
+class HDBSCAN:
+    """HDBSCAN hierarchical density-based clustering (sklearn >= 1.3).
+
+    Noise frames receive label -1.
+
+    Args:
+        min_cluster_size: Minimum number of frames in a cluster.
+        min_samples: Number of neighbours for core-point estimation.
+
+    Example::
+
+        result = HDBSCAN(min_cluster_size=50, min_samples=5)(rmsd_matrix)
+    """
+
+    min_cluster_size: int = 5
+    min_samples: int = 5
+
+    def __call__(self, rmsd_matrix: NDArray[np.floating]) -> ClusteringResult:
+        """Cluster *rmsd_matrix* and return a :class:`ClusteringResult`."""
+        _validate_rmsd_matrix(rmsd_matrix)
+        from sklearn.cluster import HDBSCAN as _SklearnHDBSCAN
+
+        hdb = _SklearnHDBSCAN(
+            min_cluster_size=self.min_cluster_size,
+            min_samples=self.min_samples,
+            metric="precomputed",
+        )
+        labels = hdb.fit_predict(rmsd_matrix).astype(np.int_)
+        n_cls = int(labels.max()) + 1 if labels.max() >= 0 else 0
+        return _make_clustering_result(rmsd_matrix, labels, n_cls)
+
+
+# ---------------------------------------------------------------------------
+# Feature-vector clustering methods
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class KMeans:
+    """K-Means clustering (scikit-learn).
+
+    Args:
+        n_clusters: Number of clusters.
+        dtype: Output float dtype for *cluster_centers*.
+
+    Example::
+
+        result = KMeans(n_clusters=10)(pca.projections)
+    """
+
+    n_clusters: int = 10
+    dtype: DtypeArg = None
+
+    def __call__(self, features: ArrayLike) -> FeatureClusteringResult:
+        """Cluster *features* and return a :class:`FeatureClusteringResult`."""
+        from sklearn.cluster import KMeans as _SklearnKMeans
+
+        from mdpp.analysis.decomposition import _as_feature_matrix
+
+        resolved = resolve_dtype(self.dtype)
+        feature_matrix = _as_feature_matrix(features)
+        if self.n_clusters < 1:
+            raise ValueError(f"n_clusters must be >= 1, got {self.n_clusters!r}")
+
+        km = _SklearnKMeans(n_clusters=self.n_clusters, n_init="auto", random_state=42)
         labels = km.fit_predict(feature_matrix)
         centers = np.asarray(km.cluster_centers_)
         inertia = float(km.inertia_)  # type: ignore[arg-type]  # set after fit
-        n_cls = n_clusters
-    elif method == "minibatch":
-        if n_clusters < 1:
-            raise ValueError(f"n_clusters must be >= 1, got {n_clusters!r}")
-        if batch_size < 1:
-            raise ValueError(f"batch_size must be >= 1, got {batch_size!r}")
-        from sklearn.cluster import MiniBatchKMeans
+        return _make_feature_result(
+            feature_matrix, labels, centers, self.n_clusters, inertia, resolved
+        )
 
-        mbk = MiniBatchKMeans(
-            n_clusters=n_clusters,
-            batch_size=batch_size,
+
+@dataclass(frozen=True, slots=True)
+class MiniBatchKMeans:
+    """Mini-Batch K-Means clustering (scikit-learn).
+
+    Args:
+        n_clusters: Number of clusters.
+        batch_size: Mini-batch size.
+        dtype: Output float dtype for *cluster_centers*.
+
+    Example::
+
+        result = MiniBatchKMeans(n_clusters=10, batch_size=1024)(pca.projections)
+    """
+
+    n_clusters: int = 10
+    batch_size: int = 1024
+    dtype: DtypeArg = None
+
+    def __call__(self, features: ArrayLike) -> FeatureClusteringResult:
+        """Cluster *features* and return a :class:`FeatureClusteringResult`."""
+        from sklearn.cluster import MiniBatchKMeans as _SklearnMBK
+
+        from mdpp.analysis.decomposition import _as_feature_matrix
+
+        resolved = resolve_dtype(self.dtype)
+        feature_matrix = _as_feature_matrix(features)
+        if self.n_clusters < 1:
+            raise ValueError(f"n_clusters must be >= 1, got {self.n_clusters!r}")
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {self.batch_size!r}")
+
+        mbk = _SklearnMBK(
+            n_clusters=self.n_clusters,
+            batch_size=self.batch_size,
             n_init="auto",
             random_state=42,
         )
         labels = mbk.fit_predict(feature_matrix)
         centers = np.asarray(mbk.cluster_centers_)
         inertia = float(mbk.inertia_)  # type: ignore[arg-type]  # set after fit
-        n_cls = n_clusters
-    elif method == "regspace":
-        if dmin <= 0.0:
-            raise ValueError(f"dmin must be positive, got {dmin!r}")
-        from deeptime.clustering import RegularSpace
+        return _make_feature_result(
+            feature_matrix, labels, centers, self.n_clusters, inertia, resolved
+        )
 
-        estimator = RegularSpace(dmin=dmin, max_centers=10000)
+
+@dataclass(frozen=True, slots=True)
+class RegularSpace:
+    """Regular-space clustering (deeptime).
+
+    The number of clusters is determined by ``dmin``, not specified
+    upfront.
+
+    Args:
+        dmin: Minimum distance between cluster centres.
+        dtype: Output float dtype for *cluster_centers*.
+
+    Example::
+
+        result = RegularSpace(dmin=0.5)(pca.projections)
+    """
+
+    dmin: float = 0.5
+    dtype: DtypeArg = None
+
+    def __call__(self, features: ArrayLike) -> FeatureClusteringResult:
+        """Cluster *features* and return a :class:`FeatureClusteringResult`."""
+        from mdpp.analysis.decomposition import _as_feature_matrix
+
+        resolved = resolve_dtype(self.dtype)
+        feature_matrix = _as_feature_matrix(features)
+        if self.dmin <= 0.0:
+            raise ValueError(f"dmin must be positive, got {self.dmin!r}")
+
+        from deeptime.clustering import RegularSpace as _DeeptimeRegSpace
+
+        estimator = _DeeptimeRegSpace(dmin=self.dmin, max_centers=10000)
         model = estimator.fit(feature_matrix).fetch_model()
         centers = np.asarray(model.cluster_centers)
-        labels = model.transform(feature_matrix)
+        labels = np.asarray(model.transform(feature_matrix))
         n_cls = len(centers)
-        # Compute inertia manually: sum of squared distances to nearest
-        # cluster center.
-        dists = np.linalg.norm(
-            feature_matrix[:, None, :] - centers[None, :, :],
-            axis=2,
-        )
+
+        dists = np.linalg.norm(feature_matrix[:, None, :] - centers[None, :, :], axis=2)
         inertia = float(np.sum(np.min(dists, axis=1) ** 2))
-    else:
-        supported = ("kmeans", "minibatch", "regspace")
+        return _make_feature_result(feature_matrix, labels, centers, n_cls, inertia, resolved)
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible convenience functions
+# ---------------------------------------------------------------------------
+
+_DISTANCE_METHODS: dict[str, type] = {
+    "gromos": Gromos,
+    "hierarchical": Hierarchical,
+    "dbscan": DBSCAN,
+    "hdbscan": HDBSCAN,
+}
+
+_FEATURE_METHODS: dict[str, type] = {
+    "kmeans": KMeans,
+    "minibatch": MiniBatchKMeans,
+    "regspace": RegularSpace,
+}
+
+# Legacy parameter name -> class field name, per method.
+_DISTANCE_RENAMES: dict[str, dict[str, str]] = {
+    "hierarchical": {"cutoff_nm": "distance_threshold"},
+    "dbscan": {"cutoff_nm": "eps"},
+}
+
+
+def _make_distance_method(
+    name: str,
+    kwargs: dict[str, Any],
+) -> Gromos | Hierarchical | DBSCAN | HDBSCAN:
+    """Instantiate a distance-matrix method from a string name + kwargs."""
+    if name not in _DISTANCE_METHODS:
         raise ValueError(
-            f"Unsupported feature clustering method: {method!r}. Supported methods: {supported}"
+            f"Unsupported clustering method: {name!r}. "
+            f"Supported methods: {tuple(_DISTANCE_METHODS)}"
         )
+    kw = dict(kwargs)
+    for old, new in _DISTANCE_RENAMES.get(name, {}).items():
+        if old in kw and new not in kw:
+            kw[new] = kw.pop(old)
+    cls = _DISTANCE_METHODS[name]
+    valid = {f.name for f in dataclasses.fields(cls)}
+    return cls(**{k: v for k, v in kw.items() if k in valid})  # type: ignore[return-value]
 
-    labels = np.asarray(labels)
-    centers = np.asarray(centers)
 
-    # Compute medoid frames: for each cluster, the member frame closest
-    # to the cluster centroid in feature space.
-    medoids = np.empty(n_cls, dtype=np.int_)
-    for k in range(n_cls):
-        members = np.where(labels == k)[0]
-        dists_to_center = np.linalg.norm(feature_matrix[members] - centers[k], axis=1)
-        medoids[k] = members[np.argmin(dists_to_center)]
+def cluster_conformations(
+    rmsd_matrix: NDArray[np.floating],
+    *,
+    method: str | Gromos | Hierarchical | DBSCAN | HDBSCAN = "gromos",
+    **kwargs: Any,
+) -> ClusteringResult:
+    """Cluster trajectory frames from a pairwise RMSD matrix.
 
-    return FeatureClusteringResult(
-        labels=labels.astype(np.int_, copy=False),
-        n_clusters=int(n_cls),
-        cluster_centers=np.asarray(centers, dtype=resolved),
-        medoid_frames=medoids,
-        inertia=float(inertia),
-    )
+    Accepts a pre-configured method instance **or** a legacy string
+    name with keyword arguments::
+
+        # New style (preferred):
+        cluster_conformations(rmsd, method=Gromos(cutoff_nm=0.2))
+        cluster_conformations(rmsd, method=DBSCAN(eps=0.15))
+
+        # Legacy style (backward compatible):
+        cluster_conformations(rmsd, method="gromos", cutoff_nm=0.2)
+        cluster_conformations(rmsd, method="dbscan", cutoff_nm=0.15)
+    """
+    if isinstance(method, str):
+        return _make_distance_method(method, kwargs)(rmsd_matrix)
+    if kwargs:
+        raise TypeError(
+            "Extra keyword arguments are not accepted when 'method' is a "
+            "class instance. Pass parameters to the constructor instead."
+        )
+    return method(rmsd_matrix)
+
+
+def _make_feature_method(
+    name: str,
+    kwargs: dict[str, Any],
+) -> KMeans | MiniBatchKMeans | RegularSpace:
+    """Instantiate a feature-vector method from a string name + kwargs."""
+    if name not in _FEATURE_METHODS:
+        raise ValueError(
+            f"Unsupported feature clustering method: {name!r}. "
+            f"Supported methods: {tuple(_FEATURE_METHODS)}"
+        )
+    cls = _FEATURE_METHODS[name]
+    valid = {f.name for f in dataclasses.fields(cls)}
+    return cls(**{k: v for k, v in kwargs.items() if k in valid})  # type: ignore[return-value]
+
+
+def cluster_features(
+    features: ArrayLike,
+    *,
+    method: str | KMeans | MiniBatchKMeans | RegularSpace = "kmeans",
+    **kwargs: Any,
+) -> FeatureClusteringResult:
+    """Cluster frames from a feature matrix (e.g. PCA/TICA projections).
+
+    Accepts a pre-configured method instance **or** a legacy string
+    name with keyword arguments::
+
+        # New style (preferred):
+        cluster_features(proj, method=KMeans(n_clusters=10))
+
+        # Legacy style (backward compatible):
+        cluster_features(proj, method="kmeans", n_clusters=10)
+    """
+    if isinstance(method, str):
+        return _make_feature_method(method, kwargs)(features)
+    if kwargs:
+        raise TypeError(
+            "Extra keyword arguments are not accepted when 'method' is a "
+            "class instance. Pass parameters to the constructor instead."
+        )
+    return method(features)

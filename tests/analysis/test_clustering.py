@@ -462,22 +462,6 @@ class TestClusterHierarchical:
             members = np.where(result.labels == k)[0]
             assert result.medoid_frames[k] in members
 
-    def test_hierarchical_memory_guard(self) -> None:
-        """Large N should raise MemoryError with a helpful message."""
-        # A 50000x50000 matrix would need ~10 GB for the condensed form.
-        # We don't allocate it -- just check the guard triggers on shape.
-        n = 50000
-        # Construct a mock matrix header without allocating N^2 memory:
-        # use a tiny backing buffer and reshape trick is not possible,
-        # so test via the private function directly.
-        from mdpp.analysis.clustering import _cluster_hierarchical
-
-        # np.broadcast_to creates a (50000, 50000) view without allocating
-        # the full 50k^2 buffer -- triggers the memory guard on shape alone.
-        big = np.broadcast_to(np.float32(0.0), (n, n))
-        with pytest.raises(MemoryError, match="condensed distance matrix"):
-            _cluster_hierarchical(big, cutoff_nm=0.15, linkage_method="average", n_clusters=None)
-
 
 # ---------------------------------------------------------------------------
 # DBSCAN clustering tests

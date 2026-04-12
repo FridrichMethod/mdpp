@@ -1,6 +1,13 @@
 """Analysis subpackage for molecular dynamics trajectories."""
 
 from mdpp.analysis.clustering import (
+    DBSCAN,
+    HDBSCAN,
+    Gromos,
+    Hierarchical,
+    KMeans,
+    MiniBatchKMeans,
+    RegularSpace,
     cluster_conformations,
     cluster_features,
     compute_rmsd_matrix,
@@ -31,6 +38,13 @@ from mdpp.analysis.metrics import (
 )
 
 __all__ = [
+    "DBSCAN",
+    "HDBSCAN",
+    "Gromos",
+    "Hierarchical",
+    "KMeans",
+    "MiniBatchKMeans",
+    "RegularSpace",
     "cluster_conformations",
     "cluster_features",
     "compute_contact_frequency",
