@@ -97,9 +97,9 @@ class TestComputeRmsdMatrix:
         np.testing.assert_allclose(np.diag(result.rmsd_matrix_nm), 0.0, atol=1e-6)
 
     def test_matrix_is_symmetric(self, backbone_trajectory: md.Trajectory) -> None:
-        """Pairwise RMSD matrix should be symmetric."""
+        """Pairwise RMSD matrix should be exactly symmetric (bit-identical)."""
         result = compute_rmsd_matrix(backbone_trajectory, atom_selection="all")
-        np.testing.assert_allclose(result.rmsd_matrix_nm, result.rmsd_matrix_nm.T, atol=1e-6)
+        np.testing.assert_array_equal(result.rmsd_matrix_nm, result.rmsd_matrix_nm.T)
 
     def test_values_are_nonnegative(self, backbone_trajectory: md.Trajectory) -> None:
         """All RMSD values should be >= 0."""

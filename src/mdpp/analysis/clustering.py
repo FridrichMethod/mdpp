@@ -121,6 +121,13 @@ def compute_rmsd_matrix(
     compute_fn = rmsd_matrix_backends.get(backend)
     rmsd_matrix = compute_fn(traj, atom_indices)
 
+    # Force exact symmetry: some backends (mdtraj, torch) produce tiny
+    # asymmetry (~1e-7 nm) that causes sklearn HDBSCAN to reject the
+    # matrix.  The Numba kernel averages (i,j) and (j,i) in-place with
+    # zero extra allocation.
+    rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
+    _symmetrize_inplace(rmsd_matrix)
+
     # ``copy=False`` is critical at large N: when the backend's native
     # dtype already matches ``resolved`` we reuse the same buffer
     # instead of allocating a second ~N^2 matrix.
@@ -133,6 +140,29 @@ def compute_rmsd_matrix(
 # ---------------------------------------------------------------------------
 # Numba JIT kernels
 # ---------------------------------------------------------------------------
+
+
+@njit(parallel=True, cache=True)
+def _symmetrize_inplace(
+    matrix: NDArray[np.floating],
+) -> None:  # pragma: no cover - JIT-compiled
+    """Average upper and lower triangles in place (zero allocation).
+
+    RMSD is a true metric so the matrix must be symmetric, but some
+    backends (mdtraj, torch) produce tiny asymmetry (~1e-7 nm) due to
+    floating-point ordering in the superposition loop.  This kernel
+    forces exact symmetry so downstream consumers (e.g. sklearn HDBSCAN)
+    that check ``allclose(X, X.T)`` do not reject the matrix.
+
+    Parallelised over rows; each thread owns a disjoint set of (i, j)
+    pairs so writes are race-free.
+    """
+    n = matrix.shape[0]
+    for i in prange(n):
+        for j in range(i + 1, n):
+            avg = (matrix[i, j] + matrix[j, i]) / 2
+            matrix[i, j] = avg
+            matrix[j, i] = avg
 
 
 @njit(parallel=True, cache=True)
