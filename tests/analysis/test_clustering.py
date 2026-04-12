@@ -318,6 +318,54 @@ class TestClusterConformations:
         assert result.n_clusters == n
         assert len(np.unique(result.labels)) == n
 
+    def test_negative_cutoff_raises(self) -> None:
+        """A negative cutoff must raise ValueError, not hang."""
+        rmsd = np.zeros((3, 3), dtype=np.float32)
+        with pytest.raises(ValueError, match="cutoff_nm must be positive"):
+            cluster_conformations(rmsd, cutoff_nm=-0.1)
+
+    def test_zero_cutoff_raises(self) -> None:
+        """A zero cutoff must raise ValueError."""
+        rmsd = np.zeros((3, 3), dtype=np.float32)
+        with pytest.raises(ValueError, match="cutoff_nm must be positive"):
+            cluster_conformations(rmsd, cutoff_nm=0.0)
+
+    def test_non_square_matrix_raises(self) -> None:
+        """A non-square matrix must raise ValueError."""
+        rmsd = np.zeros((3, 5), dtype=np.float32)
+        with pytest.raises(ValueError, match="square 2-D array"):
+            cluster_conformations(rmsd, cutoff_nm=0.1)
+
+    def test_1d_array_raises(self) -> None:
+        """A 1-D array must raise ValueError."""
+        rmsd = np.zeros(10, dtype=np.float32)
+        with pytest.raises(ValueError, match="square 2-D array"):
+            cluster_conformations(rmsd, cutoff_nm=0.1)
+
+    def test_nan_in_matrix_raises(self) -> None:
+        """NaN values in the RMSD matrix must raise ValueError."""
+        rmsd = np.zeros((4, 4), dtype=np.float32)
+        rmsd[1, 2] = np.nan
+        rmsd[2, 1] = np.nan
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            cluster_conformations(rmsd, cutoff_nm=0.1)
+
+    def test_inf_in_matrix_raises(self) -> None:
+        """Inf values in the RMSD matrix must raise ValueError."""
+        rmsd = np.zeros((4, 4), dtype=np.float32)
+        rmsd[0, 3] = np.inf
+        rmsd[3, 0] = np.inf
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            cluster_conformations(rmsd, cutoff_nm=0.1)
+
+    def test_empty_matrix(self) -> None:
+        """A 0x0 matrix should produce zero clusters."""
+        rmsd = np.zeros((0, 0), dtype=np.float32)
+        result = cluster_conformations(rmsd, cutoff_nm=0.1)
+        assert result.n_clusters == 0
+        assert len(result.labels) == 0
+        assert len(result.medoid_frames) == 0
+
 
 # ---------------------------------------------------------------------------
 # Wrapper dtype / memory tests: verify compute_rmsd_matrix does no redundant copy

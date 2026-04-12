@@ -29,7 +29,13 @@ class RMSDMatrixResult:
 
     @property
     def rmsd_matrix_angstrom(self) -> NDArray[np.floating]:
-        """Return the RMSD matrix in Angstrom."""
+        """Return the RMSD matrix in Angstrom.
+
+        Note:
+            Each access allocates a new ``(n_frames, n_frames)`` array.
+            Cache the result in a local variable if you need it more
+            than once -- at 120k frames this is ~54 GB per call.
+        """
         return self.rmsd_matrix_nm * 10.0
 
 
@@ -148,6 +154,14 @@ def _gromos_loop(
     whole loop runs in ~10 seconds on a modern CPU, versus ~100
     minutes for the original fully-recomputing Python implementation.
 
+    When multiple unassigned frames have the same neighbour count,
+    the one with the smallest frame index is chosen as the cluster
+    centre (deterministic tie-breaking).
+
+    Warning:
+        ``counts`` is **mutated in place** -- the caller must not
+        reuse the array after this function returns.
+
     Returns:
         ``(labels, n_clusters, medoids)`` as three numpy arrays.
     """
@@ -237,6 +251,12 @@ def cluster_conformations(
     """
     if method != "gromos":
         raise ValueError(f"Unsupported clustering method: {method!r}. Use 'gromos'.")
+    if cutoff_nm <= 0.0:
+        raise ValueError(f"cutoff_nm must be positive, got {cutoff_nm!r}")
+    if rmsd_matrix.ndim != 2 or rmsd_matrix.shape[0] != rmsd_matrix.shape[1]:
+        raise ValueError(f"rmsd_matrix must be a square 2-D array, got shape {rmsd_matrix.shape}")
+    if rmsd_matrix.size > 0 and not np.isfinite(rmsd_matrix).all():
+        raise ValueError("rmsd_matrix contains NaN or Inf values")
 
     # ``np.ascontiguousarray`` is a no-op for already-contiguous inputs
     # (which is what ``compute_rmsd_matrix`` returns) and avoids a
