@@ -12,8 +12,10 @@ from numpy.typing import NDArray
 from mdpp.analysis._backends import has_cupy, has_jax, has_torch
 from mdpp.analysis.clustering import (
     ClusteringResult,
+    FeatureClusteringResult,
     RMSDMatrixResult,
     cluster_conformations,
+    cluster_features,
     compute_rmsd_matrix,
 )
 
@@ -56,6 +58,15 @@ def backbone_trajectory() -> md.Trajectory:
     xyz = base + perturbation
     time_ps = np.arange(n_frames, dtype=np.float64) * 10.0
     return md.Trajectory(xyz=xyz, topology=topology, time=time_ps)
+
+
+@pytest.fixture()
+def clustered_features() -> NDArray[np.floating]:
+    """Feature matrix with 3 well-separated clusters of 20 points each."""
+    rng = np.random.RandomState(42)
+    centers = np.array([[0, 0], [5, 5], [10, 0]], dtype=np.float32)
+    points = [c + rng.randn(20, 2).astype(np.float32) * 0.3 for c in centers]
+    return np.vstack(points)
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +376,301 @@ class TestClusterConformations:
         assert result.n_clusters == 0
         assert len(result.labels) == 0
         assert len(result.medoid_frames) == 0
+
+
+# ---------------------------------------------------------------------------
+# Hand-crafted 6x6 matrix reused by several test classes
+# ---------------------------------------------------------------------------
+
+_SMALL_RMSD = np.array(
+    [
+        [0.00, 0.05, 0.07, 0.80, 0.82, 1.50],
+        [0.05, 0.00, 0.06, 0.81, 0.83, 1.51],
+        [0.07, 0.06, 0.00, 0.79, 0.80, 1.49],
+        [0.80, 0.81, 0.79, 0.00, 0.10, 1.00],
+        [0.82, 0.83, 0.80, 0.10, 0.00, 0.99],
+        [1.50, 1.51, 1.49, 1.00, 0.99, 0.00],
+    ],
+    dtype=np.float32,
+)
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical clustering tests
+# ---------------------------------------------------------------------------
+
+
+class TestClusterHierarchical:
+    """Tests for ``cluster_conformations`` with ``method="hierarchical"``."""
+
+    def test_hierarchical_with_cutoff(self) -> None:
+        """Cutoff-based hierarchical clustering should find 3 groups in the 6x6 matrix."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hierarchical",
+            cutoff_nm=0.15,
+            linkage_method="average",
+        )
+        assert isinstance(result, ClusteringResult)
+        assert result.n_clusters == 3
+        assert result.labels.shape == (6,)
+        assert len(result.medoid_frames) == 3
+
+    def test_hierarchical_with_n_clusters(self) -> None:
+        """Fixed n_clusters=2 should produce exactly 2 clusters."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hierarchical",
+            n_clusters=2,
+        )
+        assert result.n_clusters == 2
+        assert len(np.unique(result.labels)) == 2
+
+    def test_hierarchical_all_frames_assigned(self, backbone_trajectory: md.Trajectory) -> None:
+        """All frames should have labels >= 0 (no noise) for hierarchical clustering."""
+        rmsd_result = compute_rmsd_matrix(backbone_trajectory, atom_selection="all")
+        clustering = cluster_conformations(
+            rmsd_result.rmsd_matrix_nm,
+            method="hierarchical",
+            cutoff_nm=0.5,
+        )
+        assert np.all(clustering.labels >= 0)
+        assert clustering.n_clusters == len(np.unique(clustering.labels))
+
+    @pytest.mark.parametrize("linkage_method", ["average", "complete", "single"])
+    def test_hierarchical_linkage_methods(self, linkage_method: str) -> None:
+        """Each linkage method should produce valid results on the 6x6 matrix."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hierarchical",
+            cutoff_nm=0.15,
+            linkage_method=linkage_method,
+        )
+        assert result.n_clusters >= 1
+        assert result.labels.shape == (6,)
+        assert np.all(result.labels >= 0)
+        assert len(result.medoid_frames) == result.n_clusters
+
+    def test_hierarchical_medoids_are_valid(self) -> None:
+        """Medoid frames should be valid frame indices within their clusters."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hierarchical",
+            cutoff_nm=0.15,
+        )
+        for k in range(result.n_clusters):
+            members = np.where(result.labels == k)[0]
+            assert result.medoid_frames[k] in members
+
+
+# ---------------------------------------------------------------------------
+# DBSCAN clustering tests
+# ---------------------------------------------------------------------------
+
+
+class TestClusterDBSCAN:
+    """Tests for ``cluster_conformations`` with ``method="dbscan"``."""
+
+    def test_dbscan_basic(self) -> None:
+        """DBSCAN should find the 3 groups in the 6x6 matrix."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=0.15,
+            min_samples=1,
+        )
+        assert isinstance(result, ClusteringResult)
+        assert result.n_clusters == 3
+
+    def test_dbscan_noise_labels(self) -> None:
+        """An isolated frame should receive the noise label -1."""
+        # Frame 5 is far from everything; with min_samples=2 it cannot
+        # form its own cluster and should be labeled as noise.
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=0.15,
+            min_samples=2,
+        )
+        assert result.labels[5] == -1
+
+    def test_dbscan_n_clusters_excludes_noise(self) -> None:
+        """n_clusters should count only non-noise clusters."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=0.15,
+            min_samples=2,
+        )
+        unique_non_noise = set(result.labels) - {-1}
+        assert result.n_clusters == len(unique_non_noise)
+
+    def test_dbscan_medoids_only_for_clusters(self) -> None:
+        """medoid_frames length should equal n_clusters (no noise medoid)."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=0.15,
+            min_samples=2,
+        )
+        assert len(result.medoid_frames) == result.n_clusters
+
+    def test_dbscan_empty_result(self) -> None:
+        """Very small eps + large min_samples: all frames may be noise."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=0.001,
+            min_samples=10,
+        )
+        assert result.n_clusters == 0
+        assert len(result.medoid_frames) == 0
+        assert np.all(result.labels == -1)
+
+
+# ---------------------------------------------------------------------------
+# HDBSCAN clustering tests
+# ---------------------------------------------------------------------------
+
+
+class TestClusterHDBSCAN:
+    """Tests for ``cluster_conformations`` with ``method="hdbscan"``."""
+
+    def test_hdbscan_basic(self) -> None:
+        """HDBSCAN should find clusters in the 6x6 matrix."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hdbscan",
+            min_cluster_size=2,
+            min_samples=1,
+        )
+        assert isinstance(result, ClusteringResult)
+        assert result.n_clusters >= 1
+
+    def test_hdbscan_noise_handling(self) -> None:
+        """HDBSCAN may produce noise labels (-1) and they should be handled."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hdbscan",
+            min_cluster_size=2,
+            min_samples=1,
+        )
+        # n_clusters should exclude noise even if noise is present
+        unique_non_noise = set(result.labels) - {-1}
+        assert result.n_clusters == len(unique_non_noise)
+        assert len(result.medoid_frames) == result.n_clusters
+
+    def test_hdbscan_result_type(self) -> None:
+        """Result should be ClusteringResult with correct field types."""
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="hdbscan",
+            min_cluster_size=2,
+            min_samples=1,
+        )
+        assert isinstance(result, ClusteringResult)
+        assert isinstance(result.labels, np.ndarray)
+        assert isinstance(result.n_clusters, int)
+        assert isinstance(result.medoid_frames, np.ndarray)
+        assert result.labels.shape == (6,)
+
+
+# ---------------------------------------------------------------------------
+# Feature-vector clustering tests
+# ---------------------------------------------------------------------------
+
+
+class TestClusterFeatures:
+    """Tests for ``cluster_features``."""
+
+    def test_kmeans_basic(self, clustered_features: NDArray[np.floating]) -> None:
+        """KMeans with n_clusters=3 should recover 3 clusters."""
+        result = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        assert isinstance(result, FeatureClusteringResult)
+        assert result.n_clusters == 3
+
+    def test_kmeans_labels_shape(self, clustered_features: NDArray[np.floating]) -> None:
+        """Labels should have shape (60,) with values in {0, 1, 2}."""
+        result = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        assert result.labels.shape == (60,)
+        assert set(result.labels.tolist()).issubset({0, 1, 2})
+
+    def test_kmeans_cluster_centers_shape(self, clustered_features: NDArray[np.floating]) -> None:
+        """Cluster centers should have shape (3, 2)."""
+        result = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        assert result.cluster_centers.shape == (3, 2)
+
+    def test_kmeans_medoid_frames_valid(self, clustered_features: NDArray[np.floating]) -> None:
+        """Each medoid_frames[k] should be a member of cluster k."""
+        result = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        for k in range(result.n_clusters):
+            members = np.where(result.labels == k)[0]
+            assert result.medoid_frames[k] in members
+
+    def test_kmeans_inertia_positive(self, clustered_features: NDArray[np.floating]) -> None:
+        """Inertia should be a positive float."""
+        result = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        assert result.inertia > 0.0
+
+    def test_minibatch_agrees_with_kmeans(self, clustered_features: NDArray[np.floating]) -> None:
+        """MiniBatch KMeans should produce the same number of clusters as KMeans."""
+        result_kmeans = cluster_features(clustered_features, method="kmeans", n_clusters=3)
+        result_mb = cluster_features(clustered_features, method="minibatch", n_clusters=3)
+        assert result_mb.n_clusters == result_kmeans.n_clusters
+
+    def test_minibatch_batch_size(self, clustered_features: NDArray[np.floating]) -> None:
+        """The batch_size parameter should be accepted without error."""
+        result = cluster_features(
+            clustered_features, method="minibatch", n_clusters=3, batch_size=16
+        )
+        assert isinstance(result, FeatureClusteringResult)
+        assert result.n_clusters == 3
+
+    def test_regspace_basic(self, clustered_features: NDArray[np.floating]) -> None:
+        """Regspace with dmin=2.0 should find approximately 3 clusters."""
+        result = cluster_features(clustered_features, method="regspace", dmin=2.0)
+        assert isinstance(result, FeatureClusteringResult)
+        assert result.n_clusters >= 2
+        assert result.cluster_centers.shape[1] == 2
+        assert len(result.medoid_frames) == result.n_clusters
+
+    def test_regspace_n_clusters_determined_by_dmin(
+        self, clustered_features: NDArray[np.floating]
+    ) -> None:
+        """Smaller dmin should produce more clusters."""
+        result_large = cluster_features(clustered_features, method="regspace", dmin=3.0)
+        result_small = cluster_features(clustered_features, method="regspace", dmin=0.5)
+        assert result_small.n_clusters >= result_large.n_clusters
+
+    def test_invalid_feature_method_raises(self, clustered_features: NDArray[np.floating]) -> None:
+        """An unsupported method should raise ValueError."""
+        with pytest.raises(ValueError, match="bogus"):
+            cluster_features(clustered_features, method="bogus", n_clusters=3)
+
+    def test_feature_dtype(self, clustered_features: NDArray[np.floating]) -> None:
+        """The dtype parameter should be respected for cluster_centers."""
+        result = cluster_features(
+            clustered_features, method="kmeans", n_clusters=3, dtype=np.float64
+        )
+        assert result.cluster_centers.dtype == np.float64
+
+
+# ---------------------------------------------------------------------------
+# Method validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestClusterConformationsMethodValidation:
+    """Tests for ``cluster_conformations`` method parameter validation."""
+
+    def test_unsupported_method_lists_options(self) -> None:
+        """Error message for an invalid method should mention valid options."""
+        dummy = np.zeros((3, 3), dtype=np.float32)
+        with pytest.raises(ValueError, match="gromos") as exc_info:
+            cluster_conformations(dummy, method="invalid_method")
+        msg = str(exc_info.value)
+        # The error message should reference valid method names
+        assert "invalid_method" in msg
 
 
 # ---------------------------------------------------------------------------

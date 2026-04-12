@@ -1,6 +1,10 @@
 """Analysis subpackage for molecular dynamics trajectories."""
 
-from mdpp.analysis.clustering import cluster_conformations, compute_rmsd_matrix
+from mdpp.analysis.clustering import (
+    cluster_conformations,
+    cluster_features,
+    compute_rmsd_matrix,
+)
 from mdpp.analysis.contacts import (
     compute_contact_frequency,
     compute_contacts,
@@ -28,6 +32,7 @@ from mdpp.analysis.metrics import (
 
 __all__ = [
     "cluster_conformations",
+    "cluster_features",
     "compute_contact_frequency",
     "compute_contacts",
     "compute_dccm",
