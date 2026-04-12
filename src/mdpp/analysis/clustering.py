@@ -1,22 +1,17 @@
 """Conformational clustering from RMSD matrices.
 
 Each clustering algorithm is a frozen dataclass configured at
-construction time and invoked as a callable on the data matrix::
+construction time and invoked as a callable::
 
     result = Gromos(cutoff_nm=0.2)(rmsd_matrix)
     result = DBSCAN(eps=0.15, min_samples=5)(rmsd_matrix)
     result = KMeans(n_clusters=10)(pca.projections)
-
-The legacy functions :func:`cluster_conformations` and
-:func:`cluster_features` still work for backward compatibility and
-accept either a string method name or a method instance.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import mdtraj as md
 import numpy as np
@@ -661,117 +656,3 @@ class RegularSpace:
         dists = np.linalg.norm(feature_matrix[:, None, :] - centers[None, :, :], axis=2)
         inertia = float(np.sum(np.min(dists, axis=1) ** 2))
         return _make_feature_result(feature_matrix, labels, centers, n_cls, inertia, resolved)
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible convenience functions
-# ---------------------------------------------------------------------------
-
-_DISTANCE_METHODS: dict[str, type] = {
-    "gromos": Gromos,
-    "hierarchical": Hierarchical,
-    "dbscan": DBSCAN,
-    "hdbscan": HDBSCAN,
-}
-
-_FEATURE_METHODS: dict[str, type] = {
-    "kmeans": KMeans,
-    "minibatch": MiniBatchKMeans,
-    "regspace": RegularSpace,
-}
-
-# Legacy parameter name -> class field name, per method.
-_DISTANCE_RENAMES: dict[str, dict[str, str]] = {
-    "hierarchical": {"cutoff_nm": "distance_threshold"},
-    "dbscan": {"cutoff_nm": "eps"},
-}
-
-
-def _make_distance_method(
-    name: str,
-    kwargs: dict[str, Any],
-) -> Gromos | Hierarchical | DBSCAN | HDBSCAN:
-    """Instantiate a distance-matrix method from a string name + kwargs."""
-    if name not in _DISTANCE_METHODS:
-        raise ValueError(
-            f"Unsupported clustering method: {name!r}. "
-            f"Supported methods: {tuple(_DISTANCE_METHODS)}"
-        )
-    kw = dict(kwargs)
-    for old, new in _DISTANCE_RENAMES.get(name, {}).items():
-        if old in kw and new not in kw:
-            kw[new] = kw.pop(old)
-    cls = _DISTANCE_METHODS[name]
-    valid = {f.name for f in dataclasses.fields(cls)}
-    return cls(**{k: v for k, v in kw.items() if k in valid})  # type: ignore[return-value]
-
-
-def cluster_conformations(
-    rmsd_matrix: NDArray[np.floating],
-    *,
-    method: str | Gromos | Hierarchical | DBSCAN | HDBSCAN = "gromos",
-    **kwargs: Any,
-) -> ClusteringResult:
-    """Cluster trajectory frames from a pairwise RMSD matrix.
-
-    Accepts a pre-configured method instance **or** a legacy string
-    name with keyword arguments::
-
-        # New style (preferred):
-        cluster_conformations(rmsd, method=Gromos(cutoff_nm=0.2))
-        cluster_conformations(rmsd, method=DBSCAN(eps=0.15))
-
-        # Legacy style (backward compatible):
-        cluster_conformations(rmsd, method="gromos", cutoff_nm=0.2)
-        cluster_conformations(rmsd, method="dbscan", cutoff_nm=0.15)
-    """
-    if isinstance(method, str):
-        return _make_distance_method(method, kwargs)(rmsd_matrix)
-    if kwargs:
-        raise TypeError(
-            "Extra keyword arguments are not accepted when 'method' is a "
-            "class instance. Pass parameters to the constructor instead."
-        )
-    return method(rmsd_matrix)
-
-
-def _make_feature_method(
-    name: str,
-    kwargs: dict[str, Any],
-) -> KMeans | MiniBatchKMeans | RegularSpace:
-    """Instantiate a feature-vector method from a string name + kwargs."""
-    if name not in _FEATURE_METHODS:
-        raise ValueError(
-            f"Unsupported feature clustering method: {name!r}. "
-            f"Supported methods: {tuple(_FEATURE_METHODS)}"
-        )
-    cls = _FEATURE_METHODS[name]
-    valid = {f.name for f in dataclasses.fields(cls)}
-    return cls(**{k: v for k, v in kwargs.items() if k in valid})  # type: ignore[return-value]
-
-
-def cluster_features(
-    features: ArrayLike,
-    *,
-    method: str | KMeans | MiniBatchKMeans | RegularSpace = "kmeans",
-    **kwargs: Any,
-) -> FeatureClusteringResult:
-    """Cluster frames from a feature matrix (e.g. PCA/TICA projections).
-
-    Accepts a pre-configured method instance **or** a legacy string
-    name with keyword arguments::
-
-        # New style (preferred):
-        cluster_features(proj, method=KMeans(n_clusters=10))
-
-        # Legacy style (backward compatible):
-        cluster_features(proj, method="kmeans", n_clusters=10)
-    """
-    if isinstance(method, str):
-        return _make_feature_method(method, kwargs)(features)
-    if kwargs:
-        raise TypeError(
-            "Extra keyword arguments are not accepted when 'method' is a "
-            "class instance. Pass parameters to the constructor instead."
-        )
-    return method(features)

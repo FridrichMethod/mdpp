@@ -8,8 +8,6 @@ from mdpp.analysis.clustering import (
     KMeans,
     MiniBatchKMeans,
     RegularSpace,
-    cluster_conformations,
-    cluster_features,
     compute_rmsd_matrix,
 )
 from mdpp.analysis.contacts import (
@@ -45,8 +43,6 @@ __all__ = [
     "KMeans",
     "MiniBatchKMeans",
     "RegularSpace",
-    "cluster_conformations",
-    "cluster_features",
     "compute_contact_frequency",
     "compute_contacts",
     "compute_dccm",
