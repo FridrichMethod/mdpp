@@ -462,6 +462,22 @@ class TestClusterHierarchical:
             members = np.where(result.labels == k)[0]
             assert result.medoid_frames[k] in members
 
+    def test_hierarchical_memory_guard(self) -> None:
+        """Large N should raise MemoryError with a helpful message."""
+        # A 50000x50000 matrix would need ~10 GB for the condensed form.
+        # We don't allocate it -- just check the guard triggers on shape.
+        n = 50000
+        # Construct a mock matrix header without allocating N^2 memory:
+        # use a tiny backing buffer and reshape trick is not possible,
+        # so test via the private function directly.
+        from mdpp.analysis.clustering import _cluster_hierarchical
+
+        # np.broadcast_to creates a (50000, 50000) view without allocating
+        # the full 50k^2 buffer -- triggers the memory guard on shape alone.
+        big = np.broadcast_to(np.float32(0.0), (n, n))
+        with pytest.raises(MemoryError, match="condensed distance matrix"):
+            _cluster_hierarchical(big, cutoff_nm=0.15, linkage_method="average", n_clusters=None)
+
 
 # ---------------------------------------------------------------------------
 # DBSCAN clustering tests
@@ -526,6 +542,70 @@ class TestClusterDBSCAN:
         assert result.n_clusters == 0
         assert len(result.medoid_frames) == 0
         assert np.all(result.labels == -1)
+
+    def test_numba_dbscan_matches_sklearn(self) -> None:
+        """Numba DBSCAN kernel should produce the same clusters as sklearn.
+
+        Labels may differ in numbering (both are deterministic but seed
+        from different starting points), so we compare via a canonical
+        partition: two frames share a label iff they are in the same
+        cluster, and noise frames (-1) match exactly.
+        """
+        from sklearn.cluster import DBSCAN as SklearnDBSCAN
+
+        eps, min_samples = 0.15, 2
+        # sklearn reference
+        sk = SklearnDBSCAN(eps=eps, min_samples=min_samples, metric="precomputed")
+        sk_labels = sk.fit_predict(_SMALL_RMSD)
+        # Numba (via cluster_conformations)
+        result = cluster_conformations(
+            _SMALL_RMSD,
+            method="dbscan",
+            cutoff_nm=eps,
+            min_samples=min_samples,
+        )
+        nb_labels = result.labels
+
+        # Noise frames must match exactly.
+        np.testing.assert_array_equal(sk_labels == -1, nb_labels == -1)
+
+        # Non-noise: same partition (co-membership).
+        valid = sk_labels >= 0
+        if valid.any():
+            for i in range(len(sk_labels)):
+                for j in range(i + 1, len(sk_labels)):
+                    if sk_labels[i] >= 0 and sk_labels[j] >= 0:
+                        assert (sk_labels[i] == sk_labels[j]) == (nb_labels[i] == nb_labels[j]), (
+                            f"Partition mismatch at frames ({i}, {j})"
+                        )
+
+    def test_numba_dbscan_matches_sklearn_random(self) -> None:
+        """Numba DBSCAN matches sklearn on a larger random matrix."""
+        rng = np.random.RandomState(123)
+        n = 50
+        coords = rng.randn(n, 3).astype(np.float32)
+        # Euclidean distance matrix as a proxy for RMSD
+        diff = coords[:, None, :] - coords[None, :, :]
+        rmsd = np.sqrt((diff**2).sum(axis=2))
+
+        from sklearn.cluster import DBSCAN as SklearnDBSCAN
+
+        eps, min_samples = 1.5, 3
+        sk_labels = SklearnDBSCAN(
+            eps=eps, min_samples=min_samples, metric="precomputed"
+        ).fit_predict(rmsd)
+        nb_result = cluster_conformations(
+            rmsd,
+            method="dbscan",
+            cutoff_nm=eps,
+            min_samples=min_samples,
+        )
+
+        # Noise agreement
+        np.testing.assert_array_equal(sk_labels == -1, nb_result.labels == -1)
+        # Same number of clusters
+        sk_n = int(sk_labels.max()) + 1 if sk_labels.max() >= 0 else 0
+        assert nb_result.n_clusters == sk_n
 
 
 # ---------------------------------------------------------------------------

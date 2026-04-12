@@ -225,6 +225,80 @@ def _gromos_loop(
     return labels, cluster_id, medoids_buf[:cluster_id].copy()
 
 
+@njit(cache=True)
+def _dbscan_label(
+    rmsd_matrix: NDArray[np.floating],
+    counts: NDArray[np.int64],
+    eps: float,
+    min_samples: int,
+) -> tuple[NDArray[np.int64], int]:  # pragma: no cover - JIT-compiled
+    """Assign DBSCAN cluster labels via BFS from core points.
+
+    Uses only ``O(n)`` auxiliary memory (labels, is_core, stack) and
+    reads the RMSD matrix in place -- no copies.  At 120k frames this
+    avoids the ~57 GB of internal copies that sklearn DBSCAN makes.
+
+    A point ``i`` is a *core* point when ``counts[i] >= min_samples``
+    (neighbour count includes self, matching sklearn convention).  BFS
+    expands from each unvisited core point: neighbours within ``eps``
+    are assigned to the cluster and, if they are also core, pushed onto
+    the stack for further expansion.  Non-core neighbours become border
+    points (assigned but not expanded).  Points never reached stay as
+    label -1 (noise).
+
+    When multiple core points could seed a cluster, the one with the
+    smallest frame index seeds first (deterministic tie-breaking).
+
+    Args:
+        rmsd_matrix: Symmetric ``(n, n)`` pairwise RMSD matrix.
+        counts: Pre-computed neighbour counts from
+            ``_gromos_initial_counts(rmsd_matrix, eps)``.
+        eps: Neighbourhood radius (same as ``cutoff_nm``).
+        min_samples: Minimum neighbours to qualify as a core point.
+
+    Returns:
+        ``(labels, n_clusters)`` -- labels array with -1 for noise,
+        and the number of non-noise clusters found.
+    """
+    n = rmsd_matrix.shape[0]
+    labels = np.full(n, -1, dtype=np.int64)
+
+    # Core-point mask.
+    is_core = np.zeros(n, dtype=np.bool_)
+    for i in range(n):
+        if counts[i] >= min_samples:
+            is_core[i] = True
+
+    # Stack buffer for BFS -- worst case all points in one component.
+    stack = np.empty(n, dtype=np.int64)
+    cluster_id = 0
+
+    for seed in range(n):
+        if labels[seed] != -1 or not is_core[seed]:
+            continue
+
+        # Seed a new cluster from this core point.
+        labels[seed] = cluster_id
+        stack_top = 1
+        stack[0] = seed
+
+        while stack_top > 0:
+            stack_top -= 1
+            p = stack[stack_top]
+
+            # Scan row p for unassigned neighbours within eps.
+            for q in range(n):
+                if rmsd_matrix[p, q] <= eps and labels[q] == -1:
+                    labels[q] = cluster_id
+                    if is_core[q]:
+                        stack[stack_top] = q
+                        stack_top += 1
+
+        cluster_id += 1
+
+    return labels, cluster_id
+
+
 def _compute_medoids(
     rmsd_matrix: NDArray[np.floating],
     labels: NDArray[np.int_],
@@ -250,7 +324,23 @@ def _cluster_hierarchical(
     linkage_method: str,
     n_clusters: int | None,
 ) -> tuple[NDArray[np.int_], int]:
-    """Hierarchical agglomerative clustering via scipy."""
+    """Hierarchical agglomerative clustering via scipy.
+
+    Raises:
+        MemoryError: When the condensed distance matrix would exceed
+            8 GB.  Subsample the RMSD matrix first (e.g.
+            ``rmsd_matrix[::stride, ::stride]``).
+    """
+    n = rmsd_matrix.shape[0]
+    condensed_bytes = n * (n - 1) // 2 * 8  # float64 condensed vector
+    if condensed_bytes > 8 * 1024**3:
+        gb = condensed_bytes / 1024**3
+        raise MemoryError(
+            f"Hierarchical clustering on {n} frames needs ~{gb:.0f} GB for the "
+            f"condensed distance matrix (float64). Subsample first, e.g. "
+            f"rmsd_matrix[::10, ::10]."
+        )
+
     from scipy.cluster.hierarchy import fcluster, linkage
     from scipy.spatial.distance import squareform
 
@@ -272,13 +362,15 @@ def _cluster_dbscan(
     cutoff_nm: float,
     min_samples: int,
 ) -> tuple[NDArray[np.int_], int]:
-    """DBSCAN clustering via scikit-learn."""
-    from sklearn.cluster import DBSCAN
+    """DBSCAN clustering via Numba JIT kernels.
 
-    db = DBSCAN(eps=cutoff_nm, min_samples=min_samples, metric="precomputed")
-    labels = db.fit_predict(rmsd_matrix).astype(np.int_)
-    n = int(labels.max()) + 1 if labels.max() >= 0 else 0
-    return labels, n
+    Reuses ``_gromos_initial_counts`` for the parallel neighbour count
+    and ``_dbscan_label`` for the sequential BFS assignment.  Total
+    auxiliary memory is ``O(n)`` -- no copies of the RMSD matrix.
+    """
+    counts = _gromos_initial_counts(rmsd_matrix, cutoff_nm)
+    labels, n_cls = _dbscan_label(rmsd_matrix, counts, cutoff_nm, min_samples)
+    return labels.astype(np.int_), int(n_cls)
 
 
 def _cluster_hdbscan(
@@ -327,8 +419,9 @@ def cluster_conformations(
             - ``"hierarchical"`` -- scipy agglomerative clustering.
               Uses: ``cutoff_nm`` (as distance threshold) or
               ``n_clusters``, ``linkage_method``.
-            - ``"dbscan"`` -- scikit-learn DBSCAN.  Uses: ``cutoff_nm``
-              (as eps), ``min_samples``.  Noise frames get label -1.
+            - ``"dbscan"`` -- Numba-JIT DBSCAN (O(n) aux memory, no
+              copies).  Uses: ``cutoff_nm`` (as eps), ``min_samples``.
+              Noise frames get label -1.
             - ``"hdbscan"`` -- scikit-learn HDBSCAN (>= 1.3).  Uses:
               ``min_cluster_size``, ``min_samples``.  Noise frames get
               label -1.
@@ -352,9 +445,12 @@ def cluster_conformations(
             parameters are given.
 
     Memory note:
-        The GROMOS method makes no ``(n, n)`` auxiliary allocations --
-        only ``O(n)`` working buffers.  Other methods may allocate
-        additional memory internally (e.g. scipy linkage matrix).
+        ``"gromos"`` and ``"dbscan"`` use Numba-JIT kernels with only
+        ``O(n)`` auxiliary buffers -- no copies of the RMSD matrix.
+        ``"hierarchical"`` requires an ``O(n^2)`` float64 condensed
+        matrix via scipy and will raise ``MemoryError`` when this
+        exceeds 8 GB (~45k frames).  ``"hdbscan"`` delegates to
+        sklearn which may create internal copies at large ``n``.
     """
     if rmsd_matrix.ndim != 2 or rmsd_matrix.shape[0] != rmsd_matrix.shape[1]:
         raise ValueError(f"rmsd_matrix must be a square 2-D array, got shape {rmsd_matrix.shape}")
@@ -382,6 +478,7 @@ def cluster_conformations(
     elif method == "dbscan":
         if cutoff_nm <= 0.0:
             raise ValueError(f"cutoff_nm must be positive, got {cutoff_nm!r}")
+        rmsd_matrix = np.ascontiguousarray(rmsd_matrix)
         labels, n_cls = _cluster_dbscan(
             rmsd_matrix,
             cutoff_nm=cutoff_nm,
