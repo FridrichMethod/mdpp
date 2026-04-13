@@ -1,5 +1,6 @@
 """Plotting helpers for MD post-analysis outputs."""
 
+from mdpp.plots.clustering import plot_cluster_populations, plot_feature_clustering
 from mdpp.plots.contacts import contact_frequency_to_matrix, plot_contact_map
 from mdpp.plots.fes import plot_fes
 from mdpp.plots.matrix import plot_dccm
@@ -31,11 +32,13 @@ __all__ = [
     "draw_mols",
     "get_highlight_bonds",
     "make_atom_labels_3d",
+    "plot_cluster_populations",
     "plot_contact_map",
     "plot_dccm",
     "plot_delta_rmsf",
     "plot_distances",
     "plot_energy",
+    "plot_feature_clustering",
     "plot_fes",
     "plot_hbond_counts",
     "plot_hbond_occupancy",
