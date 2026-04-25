@@ -150,21 +150,32 @@ def compute_native_contacts(
             f"reference_frame must be in [0, {traj.n_frames - 1}], got {reference_frame}."
         )
 
-    distances, pairs = md.compute_contacts(
-        traj,
+    # Two-pass: identify the native-pair list from the reference frame
+    # alone (one O(R^2) call on a single frame), then compute distances
+    # only for those K native pairs across the full trajectory.
+    # The previous one-pass form invoked ``md.compute_contacts`` with
+    # ``contacts="all"`` over every frame, doing O(F * R^2) work to
+    # discard ~K << R^2 pairs.  For a 500-residue protein with K ~ 1k
+    # native contacts this is roughly a 100x speedup at no API cost.
+    ref_distances, all_pairs = md.compute_contacts(
+        traj[reference_frame : reference_frame + 1],
         contacts="all",
         scheme=scheme,
         periodic=periodic,
     )
-    ref_distances = distances[reference_frame]
-    native_mask = ref_distances < cutoff_nm
+    native_mask = ref_distances[0] < cutoff_nm
     if not np.any(native_mask):
         raise ValueError(
             f"No native contacts found at frame {reference_frame} with cutoff {cutoff_nm} nm."
         )
 
-    native_pairs = pairs[native_mask]
-    native_distances = distances[:, native_mask]
+    native_pairs = all_pairs[native_mask]
+    native_distances, _ = md.compute_contacts(
+        traj,
+        contacts=native_pairs,
+        scheme=scheme,
+        periodic=periodic,
+    )
     resolved = resolve_dtype(dtype)
     fraction = np.mean(native_distances < cutoff_nm, axis=1)
 

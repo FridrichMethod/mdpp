@@ -193,10 +193,10 @@ def featurize_ca_distances(
         )
 
     n_atoms = atom_indices.size
-    pairs = np.array(
-        [(i, j) for i in range(n_atoms) for j in range(i + 1, n_atoms)],
-        dtype=np.int_,
-    )
+    # ``np.triu_indices(n, k=1)`` returns the upper-triangular index pairs
+    # in the same row-major order as the previous Python comprehension,
+    # without allocating ``n*(n-1)/2`` Python tuples (~2M entries at n=2000).
+    pairs = np.column_stack(np.triu_indices(n_atoms, k=1)).astype(np.int_, copy=False)
     sliced = traj.atom_slice(atom_indices)
 
     values = _compute_pairwise_distances(
