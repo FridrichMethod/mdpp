@@ -213,7 +213,11 @@ def distances_torch(
     torch = require_torch()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    with torch.no_grad():
+    # ``inference_mode`` is strictly stronger than ``no_grad``: it
+    # also disables view tracking and version counter increments,
+    # which gives a small but real speedup on the fancy-indexing
+    # path used here.  Both rule out grad bookkeeping.
+    with torch.inference_mode():
         xyz_t = torch.as_tensor(np.ascontiguousarray(traj.xyz), device=device)
         pairs_t = torch.as_tensor(pairs.astype(np.int64), device=device)
         diffs = xyz_t[:, pairs_t[:, 0], :] - xyz_t[:, pairs_t[:, 1], :]

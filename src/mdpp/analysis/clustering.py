@@ -366,6 +366,36 @@ def _make_clustering_result(
     )
 
 
+def _pairwise_sq_distances(
+    rows: NDArray[np.floating],
+    centers: NDArray[np.floating],
+) -> NDArray[np.floating]:
+    """Squared Euclidean distances between *rows* and *centers* via BLAS GEMM.
+
+    Uses the cdist identity ``||a - b||^2 = ||a||^2 + ||b||^2 - 2 a . b``
+    so the heavy ``A @ B.T`` step dispatches to a multi-threaded BLAS
+    kernel.  The naive form ``np.linalg.norm(rows[:, None, :] -
+    centers[None, :, :], axis=2)`` materialises an ``(M, N, D)``
+    broadcast intermediate -- 8 GB at ``M=50k, N=200, D=200`` -- and
+    runs single-threaded; this rewrite keeps peak memory at the ``(M, N)``
+    output and parallelises across cores.
+
+    Numerical clipping at zero suppresses tiny negative values that
+    arise from the catastrophic cancellation when ``a == b``.
+
+    Args:
+        rows: Array of shape ``(M, D)``.
+        centers: Array of shape ``(N, D)``.
+
+    Returns:
+        Squared distances of shape ``(M, N)``.
+    """
+    rows_sq = np.einsum("ij,ij->i", rows, rows)[:, np.newaxis]
+    centers_sq = np.einsum("ij,ij->i", centers, centers)[np.newaxis, :]
+    cross = rows @ centers.T
+    return np.maximum(rows_sq + centers_sq - 2.0 * cross, 0.0)
+
+
 def _make_feature_result(
     feature_matrix: NDArray[np.floating],
     labels: NDArray[np.int_],
@@ -378,10 +408,14 @@ def _make_feature_result(
     labels = np.asarray(labels)
     centers = np.asarray(centers)
     medoids = np.empty(n_clusters, dtype=np.int_)
-    for k in range(n_clusters):
-        members = np.where(labels == k)[0]
-        dists = np.linalg.norm(feature_matrix[members] - centers[k], axis=1)
-        medoids[k] = members[np.argmin(dists)]
+    if n_clusters > 0:
+        # Single BLAS GEMM for all (frame, cluster) squared distances;
+        # then read off per-cluster medoids.  Replaces ``n_clusters``
+        # serial ``np.linalg.norm`` passes.
+        sq_dists = _pairwise_sq_distances(feature_matrix, centers)
+        for k in range(n_clusters):
+            members = np.where(labels == k)[0]
+            medoids[k] = members[np.argmin(sq_dists[members, k])]
     return FeatureClusteringResult(
         labels=labels.astype(np.int_, copy=False),
         n_clusters=int(n_clusters),
@@ -683,6 +717,11 @@ class RegularSpace:
         labels = np.asarray(model.transform(feature_matrix))
         n_cls = len(centers)
 
-        dists = np.linalg.norm(feature_matrix[:, None, :] - centers[None, :, :], axis=2)
-        inertia = float(np.sum(np.min(dists, axis=1) ** 2))
+        # ``_pairwise_sq_distances`` returns squared Euclidean distances
+        # via a single BLAS GEMM, so summing the per-row minima directly
+        # gives the inertia without ever materialising the
+        # ``(F, K, D)`` broadcast intermediate the previous
+        # ``np.linalg.norm`` form built.
+        sq_dists = _pairwise_sq_distances(feature_matrix, centers)
+        inertia = float(np.sum(np.min(sq_dists, axis=1)))
         return _make_feature_result(feature_matrix, labels, centers, n_cls, inertia, resolved)

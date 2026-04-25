@@ -700,6 +700,50 @@ class TestRegularSpace:
 
 
 # ---------------------------------------------------------------------------
+# Pairwise-distance helper: BLAS GEMM rewrite of np.linalg.norm broadcast
+# ---------------------------------------------------------------------------
+
+
+class TestPairwiseSqDistances:
+    """Tests for ``_pairwise_sq_distances`` (BLAS GEMM cdist rewrite)."""
+
+    def test_matches_norm_broadcast_reference(self) -> None:
+        """Helper output must match the legacy ``np.linalg.norm`` broadcast form.
+
+        The previous implementations used
+        ``np.linalg.norm(rows[:, None, :] - centers[None, :, :], axis=2)``
+        which materialised an ``(M, N, D)`` intermediate and ran
+        single-threaded.  The new helper uses the cdist identity and
+        a BLAS GEMM; it must produce numerically identical squared
+        distances within float32 noise.
+        """
+        from mdpp.analysis.clustering import _pairwise_sq_distances
+
+        rng = np.random.default_rng(0)
+        rows = rng.normal(size=(40, 8)).astype(np.float32)
+        centers = rng.normal(size=(5, 8)).astype(np.float32)
+
+        expected = np.linalg.norm(rows[:, None, :] - centers[None, :, :], axis=2) ** 2
+        actual = _pairwise_sq_distances(rows, centers)
+
+        np.testing.assert_allclose(actual, expected, atol=1e-4)
+        assert actual.shape == (40, 5)
+
+    def test_zero_distance_clipping(self) -> None:
+        """Self-distance must clip to exactly zero (no negative drift)."""
+        from mdpp.analysis.clustering import _pairwise_sq_distances
+
+        rng = np.random.default_rng(1)
+        rows = rng.normal(size=(8, 4)).astype(np.float32)
+        # Self-pairs would otherwise hit catastrophic cancellation on
+        # the cdist identity; the helper clips at zero so taking
+        # ``np.sqrt`` afterwards stays defined.
+        sq_dists = _pairwise_sq_distances(rows, rows)
+        assert np.all(sq_dists >= 0.0)
+        np.testing.assert_allclose(np.diag(sq_dists), 0.0, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # Wrapper dtype / memory tests: verify compute_rmsd_matrix does no redundant copy
 # ---------------------------------------------------------------------------
 

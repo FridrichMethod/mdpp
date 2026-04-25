@@ -10,12 +10,14 @@ from mdpp.analysis._backends._imports import (
 )
 from mdpp.analysis._backends._registry import (
     BackendRegistry,
+    DCCMBackend,
     DistanceBackend,
     RMSDBackend,
 )
 
 __all__ = [
     "BackendRegistry",
+    "DCCMBackend",
     "DistanceBackend",
     "RMSDBackend",
     "clean_cupy_cache",

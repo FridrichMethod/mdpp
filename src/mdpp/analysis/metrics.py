@@ -10,6 +10,8 @@ from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
+from mdpp.analysis._backends._dccm import dccm_backends
+from mdpp.analysis._backends._registry import DCCMBackend
 from mdpp.core.trajectory import (
     residue_ids_from_indices,
     select_atom_indices,
@@ -210,6 +212,7 @@ def compute_dccm(
     traj: md.Trajectory,
     *,
     atom_selection: str = "name CA",
+    backend: DCCMBackend = "numpy",
     dtype: DtypeArg = None,
 ) -> DCCMResult:
     """Compute dynamic cross-correlation matrix (DCCM).
@@ -217,15 +220,26 @@ def compute_dccm(
     The trajectory should be aligned before calling this function
     (see :func:`~mdpp.core.trajectory.align_trajectory`).
 
-    mdtraj stores coordinates in float32; the covariance einsum and
-    normalisation are performed in the resolved *dtype* (float32 by
-    default).  Float32 precision is sufficient: empirical tests show
-    a maximum correlation error of ~4e-6 relative to float64, well
-    below any physically meaningful threshold.
+    The covariance is dispatched through a pluggable backend registry
+    (see :mod:`mdpp.analysis._backends._dccm`).  The default
+    ``"numpy"`` backend uses BLAS GEMM via reshape + matmul -- this is
+    multi-threaded out of the box, unlike ``np.einsum`` which falls
+    back to a single-threaded contraction loop and becomes the bottleneck
+    for any non-trivial trajectory.  Other backends (``"numba"``,
+    ``"torch"``, ``"jax"``, ``"cupy"``) are available for users who
+    want explicit CPU parallelism or GPU acceleration.
+
+    mdtraj stores coordinates in float32; the covariance kernel runs in
+    the backend's native dtype and the wrapper casts to the resolved
+    *dtype* (float32 by default).  Float32 precision is sufficient:
+    empirical tests show a maximum correlation error of ~4e-6 relative
+    to float64, well below any physically meaningful threshold.
 
     Args:
         traj: Input trajectory (pre-aligned).
         atom_selection: Atoms used in DCCM.
+        backend: Compute backend. One of ``"numpy"`` (default),
+            ``"numba"``, ``"cupy"``, ``"torch"``, or ``"jax"``.
         dtype: Output float dtype. If ``None``, uses the package default
             (see :func:`mdpp.set_default_dtype`).
 
@@ -239,10 +253,10 @@ def compute_dccm(
 
     atom_indices = select_atom_indices(traj.topology, atom_selection)
     positions_nm = np.asarray(traj.xyz[:, atom_indices, :], dtype=resolved)
-    mean_positions_nm = np.mean(positions_nm, axis=0)
-    fluctuation_nm = positions_nm - mean_positions_nm
 
-    covariance = np.einsum("fid,fjd->ij", fluctuation_nm, fluctuation_nm) / float(traj.n_frames)
+    compute_fn = dccm_backends.get(backend)
+    covariance = np.asarray(compute_fn(positions_nm), dtype=resolved)
+
     standard_deviation = np.sqrt(np.clip(np.diag(covariance), a_min=0.0, a_max=None))
     normalization = np.outer(standard_deviation, standard_deviation)
 

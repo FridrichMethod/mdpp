@@ -10,6 +10,14 @@ type DistanceBackend = Literal["mdtraj", "numba", "cupy", "torch", "jax"]
 type RMSDBackend = Literal["mdtraj", "numba", "cupy", "torch", "jax"]
 """Valid backend names for pairwise RMSD matrix computation."""
 
+type DCCMBackend = Literal["numpy", "numba", "cupy", "torch", "jax"]
+"""Valid backend names for DCCM covariance computation.
+
+Default is ``"numpy"`` rather than ``"mdtraj"``: mdtraj has no native
+DCCM kernel, and the numpy backend's BLAS GEMM is multi-threaded so it
+already saturates available cores without optional dependencies.
+"""
+
 
 class BackendRegistry[F]:
     """Map backend name strings to callables of type ``F``.
