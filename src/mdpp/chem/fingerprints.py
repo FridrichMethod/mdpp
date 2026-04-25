@@ -23,15 +23,18 @@ from mdpp.chem.similarity import (
 
 logger = logging.getLogger(__name__)
 
+# RDKit's installed stubs do not expose the modern Get*Generator factories on
+# rdkit.Chem.AllChem (they live there at runtime in RDKit 2022.09+). Suppress
+# attr-defined to keep mypy quiet without pinning a specific stub version.
 FP_GENERATORS: dict[str, Callable[[Chem.rdchem.Mol], FingerPrint]] = {
-    "morgan": AllChem.GetMorganGenerator(radius=2, fpSize=1024).GetFingerprint,
-    "ecfp2": AllChem.GetMorganGenerator(radius=1, fpSize=1024).GetFingerprint,
-    "ecfp4": AllChem.GetMorganGenerator(radius=2, fpSize=1024).GetFingerprint,
-    "ecfp6": AllChem.GetMorganGenerator(radius=3, fpSize=1024).GetFingerprint,
+    "morgan": AllChem.GetMorganGenerator(radius=2, fpSize=1024).GetFingerprint,  # type: ignore[attr-defined]
+    "ecfp2": AllChem.GetMorganGenerator(radius=1, fpSize=1024).GetFingerprint,  # type: ignore[attr-defined]
+    "ecfp4": AllChem.GetMorganGenerator(radius=2, fpSize=1024).GetFingerprint,  # type: ignore[attr-defined]
+    "ecfp6": AllChem.GetMorganGenerator(radius=3, fpSize=1024).GetFingerprint,  # type: ignore[attr-defined]
     "maccs": Chem.rdMolDescriptors.GetMACCSKeysFingerprint,
-    "rdkit": AllChem.GetRDKitFPGenerator().GetFingerprint,
-    "atom_pair": AllChem.GetAtomPairGenerator().GetFingerprint,
-    "topological_torsion": AllChem.GetTopologicalTorsionGenerator().GetFingerprint,
+    "rdkit": AllChem.GetRDKitFPGenerator().GetFingerprint,  # type: ignore[attr-defined]
+    "atom_pair": AllChem.GetAtomPairGenerator().GetFingerprint,  # type: ignore[attr-defined]
+    "topological_torsion": AllChem.GetTopologicalTorsionGenerator().GetFingerprint,  # type: ignore[attr-defined]
 }
 
 _VALID_FP_TYPES = ", ".join(f"'{k}'" for k in FP_GENERATORS)

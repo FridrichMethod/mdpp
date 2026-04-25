@@ -8,8 +8,13 @@ Provides five backends for computing all-vs-all pairwise RMSD matrices:
 - ``jax`` -- Vectorised einsum + QCP Newton-Raphson via JAX.
 - ``cupy`` -- Vectorised einsum + QCP Newton-Raphson via CuPy.
 
-All backends return a symmetric ``(n_frames, n_frames)`` float64 numpy
-array of RMSD values in nm.
+The numba kernel lives in :mod:`._rmsd_matrix_numba` to keep both files
+under the project's 800-line cap; this file owns the GPU streaming
+pipeline plus the shared :func:`_rmsd_qcp_block` helper used by all
+three GPU backends.
+
+All backends return a symmetric ``(n_frames, n_frames)`` floating-point
+numpy array of RMSD values in nm.
 
 Streaming pipeline design (GPU backends)
 ----------------------------------------
@@ -58,7 +63,7 @@ the same stream).  The algorithm is:
     allocator's release of the GPU block until the copy is done.
   * Record a ``torch.cuda.Event`` on ``copy_stream``.
   * Drain the **previous** chunk's pinned buffer into ``result`` --
-    ``prev_event.synchronize()`` then a numpy slice-assign.  This
+    ``prev.event.synchronize()`` then a numpy slice-assign.  This
     happens while the *current* chunk's copy is still running and
     the *next* chunk's compute is already queued.
 - Ping-pong ``buf_idx = 1 - buf_idx`` between the two buffers.
@@ -75,11 +80,11 @@ torch does.
 
 from __future__ import annotations
 
-from typing import Protocol
+from types import ModuleType
+from typing import Any, NamedTuple, Protocol
 
 import mdtraj as md
 import numpy as np
-from numba import njit, prange
 from numpy.typing import NDArray
 
 from mdpp.analysis._backends._imports import (
@@ -91,6 +96,7 @@ from mdpp.analysis._backends._imports import (
     require_torch,
 )
 from mdpp.analysis._backends._registry import BackendRegistry
+from mdpp.analysis._backends._rmsd_matrix_numba import rmsd_numba
 
 
 class RMSDMatrixBackendFn(Protocol):
@@ -116,248 +122,33 @@ class RMSDMatrixBackendFn(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Numba-parallel pairwise RMSD (QCP / Theobald 2005)
+# Shared QCP Newton-Raphson kernel (used by all three GPU backends)
 # ---------------------------------------------------------------------------
 
 
-@njit(cache=True)
-def _center_and_traces(
-    xyz: NDArray[np.floating],
-) -> NDArray[np.floating]:  # pragma: no cover - JIT
-    """Center each frame in-place and return per-frame sum-of-squares.
-
-    ``traces`` is allocated in float64 so the QCP Newton-Raphson
-    subtraction ``G_a + G_b - 2*lambda`` preserves the few extra
-    significant bits that float32 would lose when ``lambda`` is
-    close to ``(G_a + G_b) / 2``.  This buffer is ``O(n_frames)`` so
-    the fp64 cost is negligible even at 120k frames (1 MB).
-    """
-    n_frames = xyz.shape[0]
-    n_atoms = xyz.shape[1]
-    traces = np.empty(n_frames, dtype=np.float64)
-    for f in range(n_frames):
-        cx = cy = cz = 0.0
-        for i in range(n_atoms):
-            cx += xyz[f, i, 0]
-            cy += xyz[f, i, 1]
-            cz += xyz[f, i, 2]
-        cx /= n_atoms
-        cy /= n_atoms
-        cz /= n_atoms
-        t = 0.0
-        for i in range(n_atoms):
-            xyz[f, i, 0] -= cx
-            xyz[f, i, 1] -= cy
-            xyz[f, i, 2] -= cz
-            t += xyz[f, i, 0] ** 2 + xyz[f, i, 1] ** 2 + xyz[f, i, 2] ** 2
-        traces[f] = t
-    return traces
-
-
-@njit(parallel=True, cache=True)
-def _pairwise_rmsd(
-    xyz: NDArray[np.floating],
-    traces: NDArray[np.floating],
-    pair_i: NDArray[np.int64],
-    pair_j: NDArray[np.int64],
-) -> NDArray[np.floating]:  # pragma: no cover - JIT
-    """Compute symmetric pairwise RMSD matrix with QCP superposition.
-
-    Uses the Quaternion Characteristic Polynomial method (Theobald 2005)
-    to find the optimal rotational RMSD for each pair.  The largest
-    eigenvalue of the 4x4 key matrix is found via Newton-Raphson on
-    the characteristic polynomial -- pure scalar arithmetic with no
-    LAPACK calls.
-
-    The kernel iterates over a **flat** list of upper-triangle pair
-    indices (``pair_i[p]``, ``pair_j[p]``) rather than the original
-    nested ``prange(n_frames)`` / ``range(i+1, n_frames)``.  A nested
-    loop is statically load-imbalanced -- thread 0 gets ``i=0``
-    (``n-1`` pairs) while the last thread gets ``i=n-1`` (0 pairs) --
-    and caps CPU utilisation at 60-80%.  A single ``prange`` over the
-    flat pair list gives every thread an equal slab of work, pushing
-    utilisation close to 100%.
-
-    **Dtype policy.**  The accumulators (``Sxx`` etc.) and the QCP
-    Newton-Raphson state are all ``float64`` scalars (numba's
-    ``0.0`` literal maps to a C ``double``), so the quartic solve
-    preserves full double precision regardless of the input dtype.
-    Only the final store ``result[i, j] = val`` truncates to
-    ``float32``, which halves the O(N^2) output-matrix footprint
-    (58 GB saved at n=120k) while keeping the QCP precision that
-    the float64 accumulation provides.  The ``traces`` buffer is
-    also float64 for the same reason -- see
-    :func:`_center_and_traces`.
-    """
-    n_frames = xyz.shape[0]
-    n_atoms = xyz.shape[1]
-    n_pairs = pair_i.shape[0]
-    result = np.zeros((n_frames, n_frames), dtype=np.float32)
-    for p in prange(n_pairs):
-        i = pair_i[p]
-        j = pair_j[p]
-        # Cross-covariance matrix elements
-        Sxx = Sxy = Sxz = 0.0
-        Syx = Syy = Syz = 0.0
-        Szx = Szy = Szz = 0.0
-        for k in range(n_atoms):
-            x1 = xyz[i, k, 0]
-            y1 = xyz[i, k, 1]
-            z1 = xyz[i, k, 2]
-            x2 = xyz[j, k, 0]
-            y2 = xyz[j, k, 1]
-            z2 = xyz[j, k, 2]
-            Sxx += x1 * x2
-            Sxy += x1 * y2
-            Sxz += x1 * z2
-            Syx += y1 * x2
-            Syy += y1 * y2
-            Syz += y1 * z2
-            Szx += z1 * x2
-            Szy += z1 * y2
-            Szz += z1 * z2
-
-        # Characteristic polynomial coefficients (Theobald 2005)
-        # P(lam) = lam^4 + c2*lam^2 + c1*lam + c0
-        c2 = -2.0 * (
-            Sxx * Sxx
-            + Sxy * Sxy
-            + Sxz * Sxz
-            + Syx * Syx
-            + Syy * Syy
-            + Syz * Syz
-            + Szx * Szx
-            + Szy * Szy
-            + Szz * Szz
-        )
-        c1 = -8.0 * (
-            Sxx * (Syy * Szz - Syz * Szy)
-            - Sxy * (Syx * Szz - Syz * Szx)
-            + Sxz * (Syx * Szy - Syy * Szx)
-        )
-
-        # det(K) via cofactor expansion of the 4x4 key matrix
-        ka = Sxx + Syy + Szz
-        kb = Syz - Szy
-        kc = Szx - Sxz
-        kd = Sxy - Syx
-        ke = Sxx - Syy - Szz
-        kf = Sxy + Syx
-        kg = Szx + Sxz
-        kh = -Sxx + Syy - Szz
-        km = Syz + Szy
-        kn = -Sxx - Syy + Szz
-
-        hn_mm = kh * kn - km * km
-        fn_mg = kf * kn - km * kg
-        fm_hg = kf * km - kh * kg
-        cn_md = kc * kn - km * kd
-        cm_hd = kc * km - kh * kd
-        cg_fd = kc * kg - kf * kd
-
-        c0 = (
-            ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-            - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-            + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-            - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-        )
-
-        # Newton-Raphson for the largest eigenvalue
-        lam = (traces[i] + traces[j]) * 0.5
-        for _ in range(50):
-            l2 = lam * lam
-            f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-            fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-            if fp_val == 0.0:
-                break
-            delta = f_val / fp_val
-            lam -= delta
-            if abs(delta) < 1e-11 * abs(lam):
-                break
-
-        rmsd_sq = (traces[i] + traces[j] - 2.0 * lam) / n_atoms
-        val = np.sqrt(max(0.0, rmsd_sq))
-        result[i, j] = val
-        result[j, i] = val
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Backend implementations
-# ---------------------------------------------------------------------------
-
-
-def rmsd_numba(
-    traj: md.Trajectory,
-    atom_indices: NDArray[np.int_],
-) -> NDArray[np.floating]:
-    """Compute pairwise RMSD matrix using the Numba QCP kernel.
-
-    Pre-centers each frame, then dispatches all ``n*(n-1)/2`` upper
-    triangle pair indices to a single ``prange`` so every thread gets
-    an equal share of the work (the nested-loop form would leave
-    high-index threads idle early).
-    """
-    xyz = np.ascontiguousarray(traj.xyz[:, atom_indices, :], dtype=np.float64)
-    traces = _center_and_traces(xyz)
-    n_frames = xyz.shape[0]
-    pair_i, pair_j = np.triu_indices(n_frames, k=1)
-    return _pairwise_rmsd(
-        xyz,
-        traces,
-        np.ascontiguousarray(pair_i, dtype=np.int64),
-        np.ascontiguousarray(pair_j, dtype=np.int64),
-    )
-
-
-def rmsd_mdtraj(
-    traj: md.Trajectory,
-    atom_indices: NDArray[np.int_],
-) -> NDArray[np.floating]:
-    """Compute pairwise RMSD matrix using mdtraj's precentered loop.
-
-    Allocates a ``float32`` result to match mdtraj's native coordinate
-    precision.  For 120k frames this is 57 GB instead of the 115 GB an
-    up-cast to float64 would need; the public wrapper casts with
-    ``copy=False`` so no second allocation happens when the user's
-    resolved dtype is also float32.
-    """
-    subset = traj.atom_slice(atom_indices)
-    subset.center_coordinates()
-    n_frames = subset.n_frames
-    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=np.float32)
-    for i in range(n_frames):
-        rmsd_matrix[i] = md.rmsd(subset, subset, frame=i, precentered=True)
-    return rmsd_matrix
-
-
-def _rmsd_torch_row_chunk(torch_mod, free_bytes: int, n_frames: int) -> int:
-    """Choose row-block size for the torch QCP kernel.
-
-    Each block materialises ``(chunk, N, 3, 3)`` cross-covariance plus
-    ~12 intermediate ``(chunk, N)`` float32 tensors for the QCP
-    polynomial coefficients and Newton-Raphson state.  Peak usage is
-    roughly ``180 * chunk * N`` bytes.  Target 25% of the free pool
-    so there is headroom for ``xyz`` / ``traces`` / transient
-    allocations, capping at ``n_frames`` so small trajectories still
-    run in a single pass.
-    """
-    del torch_mod  # linked via type sig; kept for future expansion
-    # ~180 bytes per pair is an empirical upper bound on peak memory.
-    per_pair_bytes = 180
-    budget = max(free_bytes // 4, 1)
-    chunk = budget // (per_pair_bytes * max(n_frames, 1))
-    return int(max(1, min(chunk, n_frames)))
-
-
-def _rmsd_qcp_torch(
-    torch_mod, H_block, trace_rows, traces_all, n_atoms: int
-):  # pragma: no cover - thin helper
+def _rmsd_qcp_block(
+    xp: ModuleType,
+    H_block: Any,
+    trace_rows: Any,
+    traces_all: Any,
+    n_atoms: int,
+) -> Any:
     """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances.
 
-    ``H_block`` has shape ``(C, N, 3, 3)``.  ``trace_rows`` has shape
-    ``(C,)`` (traces for the current row-block); ``traces_all`` has
-    shape ``(N,)``.  Returns an ``(C, N)`` tensor of RMSD values.
+    Backend-agnostic: ``xp`` may be ``torch``, ``jax.numpy``, or
+    ``cupy``.  All operations used here -- ellipsis indexing,
+    ``reshape``, ``where``, ``abs``, ``zeros_like``, ``sqrt`` -- are
+    present with matching semantics across these libraries, so a single
+    implementation replaces three near-identical copies.
+
+    ``H_block`` has shape ``(C, N, 3, 3)``; ``trace_rows`` has shape
+    ``(C,)``; ``traces_all`` has shape ``(N,)``.  Returns an ``(C, N)``
+    tensor of RMSD values in the same array library as the inputs.
+
+    The return type is ``Any`` because each backend's array type is
+    distinct (``torch.Tensor`` / ``jax.Array`` / ``cupy.ndarray``) and
+    pulling them in here would force a hard import of every optional
+    GPU library at module load.
     """
     Sxx = H_block[..., 0, 0]
     Sxy = H_block[..., 0, 1]
@@ -369,6 +160,8 @@ def _rmsd_qcp_torch(
     Szy = H_block[..., 2, 1]
     Szz = H_block[..., 2, 2]
 
+    # Characteristic polynomial coefficients (Theobald 2005)
+    # P(lam) = lam^4 + c2*lam^2 + c1*lam + c0
     c2 = -2.0 * (
         Sxx * Sxx
         + Sxy * Sxy
@@ -412,28 +205,93 @@ def _rmsd_qcp_torch(
         - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
     )
 
-    trace_i = trace_rows.unsqueeze(1)  # (C, 1)
-    trace_j = traces_all.unsqueeze(0)  # (1, N)
+    trace_i = trace_rows.reshape(-1, 1)  # (C, 1)
+    trace_j = traces_all.reshape(1, -1)  # (1, N)
     lam = (trace_i + trace_j) * 0.5  # (C, N)
     for _ in range(30):
         l2 = lam * lam
         f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
         fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-        delta = torch_mod.where(
-            fp_val.abs() > 0,
+        delta = xp.where(
+            xp.abs(fp_val) > 0,
             f_val / fp_val,
-            torch_mod.zeros_like(fp_val),
+            xp.zeros_like(fp_val),
         )
         lam = lam - delta
 
     rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
-    return torch_mod.sqrt(torch_mod.clamp(rmsd_sq, min=0.0))
+    # ``xp.maximum`` accepts a scalar second arg in jax/cupy but not
+    # uniformly across torch versions, so use ``where`` for portability.
+    return xp.sqrt(xp.where(rmsd_sq > 0, rmsd_sq, xp.zeros_like(rmsd_sq)))
+
+
+# ---------------------------------------------------------------------------
+# mdtraj backend
+# ---------------------------------------------------------------------------
+
+
+def rmsd_mdtraj(
+    traj: md.Trajectory,
+    atom_indices: NDArray[np.int_],
+) -> NDArray[np.floating]:
+    """Compute pairwise RMSD matrix using mdtraj's precentered loop.
+
+    Allocates a ``float32`` result to match mdtraj's native coordinate
+    precision.  For 120k frames this is 57 GB instead of the 115 GB an
+    up-cast to float64 would need; the public wrapper casts with
+    ``copy=False`` so no second allocation happens when the user's
+    resolved dtype is also float32.
+    """
+    subset = traj.atom_slice(atom_indices)
+    subset.center_coordinates()
+    n_frames = subset.n_frames
+    rmsd_matrix = np.zeros((n_frames, n_frames), dtype=np.float32)
+    for i in range(n_frames):
+        rmsd_matrix[i] = md.rmsd(subset, subset, frame=i, precentered=True)
+    return rmsd_matrix
+
+
+# ---------------------------------------------------------------------------
+# Torch backend
+# ---------------------------------------------------------------------------
+
+
+class _PinnedChunk(NamedTuple):
+    """Buffer / range / event triple for the pinned-D2H pipeline.
+
+    Bundling these three together means the loop's ``prev`` state is
+    either ``None`` or fully populated -- the previous code threaded
+    three separate ``Optional`` variables and used ``assert`` to guard
+    the join, which would be stripped under ``python -O``.
+    """
+
+    buf: Any
+    rng: tuple[int, int]
+    event: Any
+
+
+def _rmsd_torch_row_chunk(free_bytes: int, n_frames: int) -> int:
+    """Choose row-block size for the torch QCP kernel.
+
+    Each block materialises ``(chunk, N, 3, 3)`` cross-covariance plus
+    ~12 intermediate ``(chunk, N)`` float32 tensors for the QCP
+    polynomial coefficients and Newton-Raphson state.  Peak usage is
+    roughly ``180 * chunk * N`` bytes.  Target 25% of the free pool
+    so there is headroom for ``xyz`` / ``traces`` / transient
+    allocations, capping at ``n_frames`` so small trajectories still
+    run in a single pass.
+    """
+    # ~180 bytes per pair is an empirical upper bound on peak memory.
+    per_pair_bytes = 180
+    budget = max(free_bytes // 4, 1)
+    chunk = budget // (per_pair_bytes * max(n_frames, 1))
+    return int(max(1, min(chunk, n_frames)))
 
 
 def _rmsd_torch_run_cpu(
-    torch_mod,
-    xyz,
-    traces,
+    torch_mod: ModuleType,
+    xyz: Any,
+    traces: Any,
     n_atoms: int,
     row_chunk: int,
     result: np.ndarray,
@@ -447,35 +305,35 @@ def _rmsd_torch_run_cpu(
     (e.g. ``ulimit -l`` too low).
     """
     n_frames = xyz.shape[0]
-    prev_cpu_tensor = None
+    prev_cpu: Any = None
     prev_range: tuple[int, int] | None = None
 
     for i_start in range(0, n_frames, row_chunk):
         i_end = min(i_start + row_chunk, n_frames)
         xyz_rows = xyz[i_start:i_end]
         H_block = torch_mod.einsum("kam,jan->kjmn", xyz_rows, xyz)
-        rmsd_block = _rmsd_qcp_torch(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
+        rmsd_block = _rmsd_qcp_block(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
-        if prev_cpu_tensor is not None:
-            prev_start, prev_end = prev_range  # type: ignore[misc]
-            result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+        if prev_cpu is not None and prev_range is not None:
+            prev_start, prev_end = prev_range
+            result[prev_start:prev_end] = prev_cpu.numpy()
 
         cpu_tensor = rmsd_block.cpu()
         del rmsd_block
 
-        prev_cpu_tensor = cpu_tensor
+        prev_cpu = cpu_tensor
         prev_range = (i_start, i_end)
 
-    if prev_cpu_tensor is not None:
-        prev_start, prev_end = prev_range  # type: ignore[misc]
-        result[prev_start:prev_end] = prev_cpu_tensor.numpy()
+    if prev_cpu is not None and prev_range is not None:
+        prev_start, prev_end = prev_range
+        result[prev_start:prev_end] = prev_cpu.numpy()
 
 
 def _rmsd_torch_run_gpu(
-    torch_mod,
-    xyz,
-    traces,
+    torch_mod: ModuleType,
+    xyz: Any,
+    traces: Any,
     n_atoms: int,
     row_chunk: int,
     result: np.ndarray,
@@ -517,9 +375,7 @@ def _rmsd_torch_run_gpu(
 
     copy_stream = torch_mod.cuda.Stream(device=device)
 
-    prev_buf = None
-    prev_range: tuple[int, int] | None = None
-    prev_event = None
+    prev: _PinnedChunk | None = None
     buf_idx = 0
 
     for i_start in range(0, n_frames, row_chunk):
@@ -529,7 +385,7 @@ def _rmsd_torch_run_gpu(
 
         # Compute on the current (default) stream.
         H_block = torch_mod.einsum("kam,jan->kjmn", xyz_rows, xyz)
-        rmsd_block = _rmsd_qcp_torch(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
+        rmsd_block = _rmsd_qcp_block(torch_mod, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
         # Queue the async D2H on copy_stream, ordered after the
@@ -550,25 +406,21 @@ def _rmsd_torch_run_gpu(
         # While the copy runs (and the next einsum will be queued
         # just after this Python continues), drain the previous
         # chunk from its pinned buffer into ``result``.
-        if prev_buf is not None:
-            assert prev_event is not None and prev_range is not None
-            prev_event.synchronize()
-            prev_start, prev_end = prev_range
+        if prev is not None:
+            prev.event.synchronize()
+            prev_start, prev_end = prev.rng
             prev_len = prev_end - prev_start
-            result[prev_start:prev_end] = prev_buf[:prev_len].numpy()
+            result[prev_start:prev_end] = prev.buf[:prev_len].numpy()
 
-        prev_buf = cur_buf
-        prev_range = (i_start, i_end)
-        prev_event = cur_event
+        prev = _PinnedChunk(buf=cur_buf, rng=(i_start, i_end), event=cur_event)
         buf_idx = 1 - buf_idx
 
     # Flush the final chunk.
-    if prev_buf is not None:
-        assert prev_event is not None and prev_range is not None
-        prev_event.synchronize()
-        prev_start, prev_end = prev_range
+    if prev is not None:
+        prev.event.synchronize()
+        prev_start, prev_end = prev.rng
         prev_len = prev_end - prev_start
-        result[prev_start:prev_end] = prev_buf[:prev_len].numpy()
+        result[prev_start:prev_end] = prev.buf[:prev_len].numpy()
 
 
 @clean_torch_cache
@@ -651,7 +503,7 @@ def rmsd_torch(
             free_bytes, _total = torch.cuda.mem_get_info(device)
         else:
             free_bytes = 1 << 33  # 8 GiB host budget default
-        row_chunk = _rmsd_torch_row_chunk(torch, int(free_bytes), n_frames)
+        row_chunk = _rmsd_torch_row_chunk(int(free_bytes), n_frames)
 
         # Result matrix lives on CPU to avoid pinning ~N^2 floats on GPU.
         result = np.zeros((n_frames, n_frames), dtype=np.float32)
@@ -673,79 +525,9 @@ def rmsd_torch(
     return result
 
 
-def _rmsd_qcp_jax(
-    jnp, H_block, trace_rows, traces_all, n_atoms: int
-):  # pragma: no cover - thin helper
-    """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances (JAX)."""
-    Sxx = H_block[..., 0, 0]
-    Sxy = H_block[..., 0, 1]
-    Sxz = H_block[..., 0, 2]
-    Syx = H_block[..., 1, 0]
-    Syy = H_block[..., 1, 1]
-    Syz = H_block[..., 1, 2]
-    Szx = H_block[..., 2, 0]
-    Szy = H_block[..., 2, 1]
-    Szz = H_block[..., 2, 2]
-
-    c2 = -2.0 * (
-        Sxx * Sxx
-        + Sxy * Sxy
-        + Sxz * Sxz
-        + Syx * Syx
-        + Syy * Syy
-        + Syz * Syz
-        + Szx * Szx
-        + Szy * Szy
-        + Szz * Szz
-    )
-    c1 = -8.0 * (
-        Sxx * (Syy * Szz - Syz * Szy)
-        - Sxy * (Syx * Szz - Syz * Szx)
-        + Sxz * (Syx * Szy - Syy * Szx)
-    )
-
-    ka = Sxx + Syy + Szz
-    kb = Syz - Szy
-    kc = Szx - Sxz
-    kd = Sxy - Syx
-    ke = Sxx - Syy - Szz
-    kf = Sxy + Syx
-    kg = Szx + Sxz
-    kh = -Sxx + Syy - Szz
-    km = Syz + Szy
-    kn = -Sxx - Syy + Szz
-    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
-
-    hn_mm = kh * kn - km * km
-    fn_mg = kf * kn - km * kg
-    fm_hg = kf * km - kh * kg
-    cn_md = kc * kn - km * kd
-    cm_hd = kc * km - kh * kd
-    cg_fd = kc * kg - kf * kd
-
-    c0 = (
-        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-    )
-
-    trace_i = trace_rows.reshape(-1, 1)
-    trace_j = traces_all.reshape(1, -1)
-    lam = (trace_i + trace_j) * 0.5
-    for _ in range(30):
-        l2 = lam * lam
-        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-        delta = jnp.where(
-            jnp.abs(fp_val) > 0,
-            f_val / fp_val,
-            jnp.zeros_like(fp_val),
-        )
-        lam = lam - delta
-
-    rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
-    return jnp.sqrt(jnp.maximum(0.0, rmsd_sq))
+# ---------------------------------------------------------------------------
+# JAX backend
+# ---------------------------------------------------------------------------
 
 
 def _rmsd_jax_row_chunk(n_frames: int) -> int:
@@ -811,11 +593,11 @@ def rmsd_jax(
         i_end = min(i_start + row_chunk, n_frames)
         xyz_rows = xyz[i_start:i_end]
         H_block = jnp.einsum("kam,jan->kjmn", xyz_rows, xyz, precision=precision)
-        rmsd_block = _rmsd_qcp_jax(jnp, H_block, traces[i_start:i_end], traces, n_atoms)
+        rmsd_block = _rmsd_qcp_block(jnp, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
-        if prev_cpu is not None:
-            prev_start, prev_end = prev_range  # type: ignore[misc]
+        if prev_cpu is not None and prev_range is not None:
+            prev_start, prev_end = prev_range
             result[prev_start:prev_end] = prev_cpu
 
         cpu_array = np.asarray(rmsd_block)
@@ -823,8 +605,8 @@ def rmsd_jax(
         prev_cpu = cpu_array
         prev_range = (i_start, i_end)
 
-    if prev_cpu is not None:
-        prev_start, prev_end = prev_range  # type: ignore[misc]
+    if prev_cpu is not None and prev_range is not None:
+        prev_start, prev_end = prev_range
         result[prev_start:prev_end] = prev_cpu
 
     np.fill_diagonal(result, 0.0)
@@ -832,84 +614,9 @@ def rmsd_jax(
     return result
 
 
-def _rmsd_qcp_cupy(
-    cp, H_block, trace_rows, traces_all, n_atoms: int
-):  # pragma: no cover - thin helper
-    """Vectorised QCP Newton-Raphson on a block of 3x3 cross-covariances.
-
-    Same algorithm as :func:`_rmsd_qcp_torch` but expressed with CuPy
-    ops.  ``H_block`` has shape ``(C, N, 3, 3)``; ``trace_rows`` has
-    shape ``(C,)``; ``traces_all`` has shape ``(N,)``.
-    """
-    Sxx = H_block[..., 0, 0]
-    Sxy = H_block[..., 0, 1]
-    Sxz = H_block[..., 0, 2]
-    Syx = H_block[..., 1, 0]
-    Syy = H_block[..., 1, 1]
-    Syz = H_block[..., 1, 2]
-    Szx = H_block[..., 2, 0]
-    Szy = H_block[..., 2, 1]
-    Szz = H_block[..., 2, 2]
-
-    c2 = -2.0 * (
-        Sxx * Sxx
-        + Sxy * Sxy
-        + Sxz * Sxz
-        + Syx * Syx
-        + Syy * Syy
-        + Syz * Syz
-        + Szx * Szx
-        + Szy * Szy
-        + Szz * Szz
-    )
-    c1 = -8.0 * (
-        Sxx * (Syy * Szz - Syz * Szy)
-        - Sxy * (Syx * Szz - Syz * Szx)
-        + Sxz * (Syx * Szy - Syy * Szx)
-    )
-
-    ka = Sxx + Syy + Szz
-    kb = Syz - Szy
-    kc = Szx - Sxz
-    kd = Sxy - Syx
-    ke = Sxx - Syy - Szz
-    kf = Sxy + Syx
-    kg = Szx + Sxz
-    kh = -Sxx + Syy - Szz
-    km = Syz + Szy
-    kn = -Sxx - Syy + Szz
-    del Sxx, Sxy, Sxz, Syx, Syy, Syz, Szx, Szy, Szz
-
-    hn_mm = kh * kn - km * km
-    fn_mg = kf * kn - km * kg
-    fm_hg = kf * km - kh * kg
-    cn_md = kc * kn - km * kd
-    cm_hd = kc * km - kh * kd
-    cg_fd = kc * kg - kf * kd
-
-    c0 = (
-        ka * (ke * hn_mm - kf * fn_mg + kg * fm_hg)
-        - kb * (kb * hn_mm - kf * cn_md + kg * cm_hd)
-        + kc * (kb * fn_mg - ke * cn_md + kg * cg_fd)
-        - kd * (kb * fm_hg - ke * cm_hd + kf * cg_fd)
-    )
-
-    trace_i = trace_rows.reshape(-1, 1)  # (C, 1)
-    trace_j = traces_all.reshape(1, -1)  # (1, N)
-    lam = (trace_i + trace_j) * 0.5
-    for _ in range(30):
-        l2 = lam * lam
-        f_val = l2 * l2 + c2 * l2 + c1 * lam + c0
-        fp_val = 4.0 * l2 * lam + 2.0 * c2 * lam + c1
-        delta = cp.where(
-            cp.abs(fp_val) > 0,
-            f_val / fp_val,
-            cp.zeros_like(fp_val),
-        )
-        lam = lam - delta
-
-    rmsd_sq = (trace_i + trace_j - 2.0 * lam) / n_atoms
-    return cp.sqrt(cp.maximum(0.0, rmsd_sq))
+# ---------------------------------------------------------------------------
+# CuPy backend
+# ---------------------------------------------------------------------------
 
 
 def _rmsd_cupy_row_chunk(free_bytes: int, n_frames: int) -> int:
@@ -957,11 +664,11 @@ def rmsd_cupy(
         i_end = min(i_start + row_chunk, n_frames)
         xyz_rows = xyz[i_start:i_end]
         H_block = cp.einsum("kam,jan->kjmn", xyz_rows, xyz)
-        rmsd_block = _rmsd_qcp_cupy(cp, H_block, traces[i_start:i_end], traces, n_atoms)
+        rmsd_block = _rmsd_qcp_block(cp, H_block, traces[i_start:i_end], traces, n_atoms)
         del H_block
 
-        if prev_cpu is not None:
-            prev_start, prev_end = prev_range  # type: ignore[misc]
+        if prev_cpu is not None and prev_range is not None:
+            prev_start, prev_end = prev_range
             result[prev_start:prev_end] = prev_cpu
 
         cpu_array = cp.asnumpy(rmsd_block)
@@ -969,8 +676,8 @@ def rmsd_cupy(
         prev_cpu = cpu_array
         prev_range = (i_start, i_end)
 
-    if prev_cpu is not None:
-        prev_start, prev_end = prev_range  # type: ignore[misc]
+    if prev_cpu is not None and prev_range is not None:
+        prev_start, prev_end = prev_range
         result[prev_start:prev_end] = prev_cpu
 
     np.fill_diagonal(result, 0.0)

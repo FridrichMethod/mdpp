@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 from collections.abc import Sequence
 
 import mdtraj as md
@@ -248,7 +249,7 @@ def load_trajectories(
     if max_workers is None:
         return [_load_trajectory_worker(a) for a in args_list]
 
-    ctx = __import__("multiprocessing").get_context("spawn")
+    ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(processes=max_workers) as pool:
         return pool.map(_load_trajectory_worker, args_list)
 

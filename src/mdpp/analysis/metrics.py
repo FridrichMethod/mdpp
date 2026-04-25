@@ -351,7 +351,7 @@ def compute_radius_of_gyration(
     )
 
 
-def _average_rmsf_with_sem(
+def average_rmsf_with_sem(
     results: list[RMSFResult],
     *,
     dtype: DtypeArg = None,
@@ -453,8 +453,8 @@ def compute_delta_rmsf(
     _validate_rmsf_replicas(results_a, "results_a")
     _validate_rmsf_replicas(results_b, "results_b")
 
-    avg_a, sem_a = _average_rmsf_with_sem(results_a, dtype=resolved)
-    avg_b, sem_b = _average_rmsf_with_sem(results_b, dtype=resolved)
+    avg_a, sem_a = average_rmsf_with_sem(results_a, dtype=resolved)
+    avg_b, sem_b = average_rmsf_with_sem(results_b, dtype=resolved)
 
     if indices_a is not None and indices_b is not None:
         if indices_a.shape[0] != indices_b.shape[0]:

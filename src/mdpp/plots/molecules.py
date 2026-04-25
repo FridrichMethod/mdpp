@@ -20,7 +20,9 @@ def build_draw_options() -> rdMolDraw2D.MolDrawOptions:
     options = rdMolDraw2D.MolDrawOptions()
     rdMolDraw2D.SetACS1996Mode(options, 1.5)
     options.useBWAtomPalette()
-    options.bondLineWidth = 1.2
+    # RDKit stubs misdescribe bondLineWidth as the MolDrawOptions type rather
+    # than a numeric attribute; assignment is correct at runtime.
+    options.bondLineWidth = 1.2  # type: ignore[assignment]
 
     return options
 
@@ -70,16 +72,16 @@ def draw_mol(
         A PIL image.
     """
     drawable_mol = Chem.Mol(mol)
-    AllChem.Compute2DCoords(drawable_mol)
+    AllChem.Compute2DCoords(drawable_mol)  # type: ignore[attr-defined]
 
     highlight_atoms: list[int] = []
     highlight_bonds: list[int] = []
 
     if pattern is not None:
         drawable_pattern = Chem.Mol(pattern)
-        AllChem.Compute2DCoords(drawable_pattern)
+        AllChem.Compute2DCoords(drawable_pattern)  # type: ignore[attr-defined]
         if drawable_mol.HasSubstructMatch(drawable_pattern):
-            AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)
+            AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)  # type: ignore[attr-defined]
             highlight_atoms = list(drawable_mol.GetSubstructMatch(drawable_pattern))
             highlight_bonds = get_highlight_bonds(
                 drawable_mol,
@@ -129,19 +131,19 @@ def draw_mols(
     """
     drawable_mols = [Chem.Mol(mol) for mol in mols]
     for drawable_mol in drawable_mols:
-        AllChem.Compute2DCoords(drawable_mol)
+        AllChem.Compute2DCoords(drawable_mol)  # type: ignore[attr-defined]
 
     highlight_atom_lists: list[list[int]] | None = None
     highlight_bond_lists: list[list[int]] | None = None
 
     if pattern is not None:
         drawable_pattern = Chem.Mol(pattern)
-        AllChem.Compute2DCoords(drawable_pattern)
+        AllChem.Compute2DCoords(drawable_pattern)  # type: ignore[attr-defined]
         highlight_atom_lists = []
         highlight_bond_lists = []
         for drawable_mol in drawable_mols:
             if drawable_mol.HasSubstructMatch(drawable_pattern):
-                AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)
+                AllChem.GenerateDepictionMatching2DStructure(drawable_mol, drawable_pattern)  # type: ignore[attr-defined]
                 atoms = list(drawable_mol.GetSubstructMatch(drawable_pattern))
                 highlight_atom_lists.append(atoms)
                 highlight_bond_lists.append(

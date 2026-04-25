@@ -13,6 +13,8 @@
 #SBATCH --mem-per-gpu=8G
 #SBATCH --time=2-00:00:00
 
+set -euo pipefail
+
 ml gcc/12.4.0
 ml cmake/3.31.4
 ml make/4.4

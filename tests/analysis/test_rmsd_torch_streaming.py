@@ -94,7 +94,7 @@ def _force_row_chunk(
     monkeypatch.setattr(
         _rmsd_matrix,
         "_rmsd_torch_row_chunk",
-        lambda torch_mod, free_bytes, n_frames: row_chunk,  # noqa: ARG005
+        lambda free_bytes, n_frames: row_chunk,  # noqa: ARG005
     )
 
 
@@ -115,19 +115,19 @@ class TestRowChunkHeuristic:
 
     def test_chunk_capped_by_n_frames(self) -> None:
         """When free memory is huge, chunk must still be <= n_frames."""
-        chunk = _rmsd_matrix._rmsd_torch_row_chunk(None, 1 << 40, n_frames=32)
+        chunk = _rmsd_matrix._rmsd_torch_row_chunk(1 << 40, n_frames=32)
         assert 1 <= chunk <= 32
 
     def test_chunk_minimum_is_one(self) -> None:
         """Even with a tiny budget, chunk must be at least 1 (to make progress)."""
-        chunk = _rmsd_matrix._rmsd_torch_row_chunk(None, 0, n_frames=1000)
+        chunk = _rmsd_matrix._rmsd_torch_row_chunk(0, n_frames=1000)
         assert chunk == 1
 
     @pytest.mark.parametrize("free_bytes", [1 << 20, 1 << 25, 1 << 30, 1 << 35])
     def test_chunk_scales_with_free_memory(self, free_bytes: int) -> None:
         """Bigger free budgets must not decrease the chunk size."""
-        chunk_small = _rmsd_matrix._rmsd_torch_row_chunk(None, free_bytes, n_frames=10_000)
-        chunk_large = _rmsd_matrix._rmsd_torch_row_chunk(None, free_bytes * 16, n_frames=10_000)
+        chunk_small = _rmsd_matrix._rmsd_torch_row_chunk(free_bytes, n_frames=10_000)
+        chunk_large = _rmsd_matrix._rmsd_torch_row_chunk(free_bytes * 16, n_frames=10_000)
         assert chunk_large >= chunk_small
         assert chunk_small >= 1
 
@@ -394,12 +394,8 @@ class TestRmsdTorchSimulatedVram:
 
         original = _rmsd_matrix._rmsd_torch_row_chunk
 
-        def fake_chunk(
-            torch_mod: object,
-            _free_bytes: int,
-            n_frames: int,
-        ) -> int:
-            return original(torch_mod, free_bytes, n_frames)
+        def fake_chunk(_free_bytes: int, n_frames: int) -> int:
+            return original(free_bytes, n_frames)
 
         monkeypatch.setattr(_rmsd_matrix, "_rmsd_torch_row_chunk", fake_chunk)
 

@@ -27,6 +27,7 @@ from mdpp.analysis.dssp import compute_dssp
 from mdpp.analysis.fes import compute_fes_2d, compute_fes_from_projection
 from mdpp.analysis.hbond import compute_hbonds, format_hbond_triplets
 from mdpp.analysis.metrics import (
+    average_rmsf_with_sem,
     compute_dccm,
     compute_delta_rmsf,
     compute_radius_of_gyration,
@@ -43,6 +44,7 @@ __all__ = [
     "KMeans",
     "MiniBatchKMeans",
     "RegularSpace",
+    "average_rmsf_with_sem",
     "compute_contact_frequency",
     "compute_contacts",
     "compute_dccm",

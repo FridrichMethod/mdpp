@@ -16,7 +16,7 @@ from mdpp.analysis.metrics import (
     RMSDResult,
     RMSFResult,
     SASAResult,
-    _average_rmsf_with_sem,
+    average_rmsf_with_sem,
 )
 from mdpp.plots.utils import get_axis
 
@@ -70,7 +70,7 @@ def plot_rmsd(
             label=label,
         )
     axis.set_xlabel("Time (ns)")
-    axis.set_ylabel("RMSD (Å)")
+    axis.set_ylabel(r"RMSD ($\mathrm{\AA}$)")
     if label is not None:
         axis.legend()
     return axis
@@ -109,7 +109,7 @@ def plot_rmsf(
         x_values, result.rmsf_angstrom, label=label, linewidth=linewidth, alpha=alpha, color=color
     )
     axis.set_xlabel("Residue ID")
-    axis.set_ylabel("RMSF (Å)")
+    axis.set_ylabel(r"RMSF ($\mathrm{\AA}$)")
     if label is not None:
         axis.legend()
     return axis
@@ -161,7 +161,7 @@ def plot_rmsf_average(
     if len(sizes) > 1:
         raise ValueError(f"All RMSFResult arrays must have the same length, got sizes {sizes}.")
 
-    avg_rmsf_nm, sem_rmsf_nm = _average_rmsf_with_sem(results)
+    avg_rmsf_nm, sem_rmsf_nm = average_rmsf_with_sem(results)
     avg_rmsf_angstrom = avg_rmsf_nm * 10.0
 
     axis = get_axis(ax)
@@ -182,7 +182,7 @@ def plot_rmsf_average(
             color=line.get_color(),
         )
     axis.set_xlabel("Residue ID")
-    axis.set_ylabel("RMSF (Å)")
+    axis.set_ylabel(r"RMSF ($\mathrm{\AA}$)")
     if label is not None:
         axis.legend()
     return axis
@@ -218,11 +218,11 @@ def plot_sasa(
     if aggregate == "sum":
         y_values = np.sum(result.values_nm2, axis=1)
         axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth, color=color)
-        axis.set_ylabel("SASA (nm²)")
+        axis.set_ylabel(r"SASA (nm$^2$)")
     elif aggregate == "mean":
         y_values = np.mean(result.values_nm2, axis=1)
         axis.plot(result.time_ns, y_values, label=label, linewidth=linewidth, color=color)
-        axis.set_ylabel("Mean SASA (nm²)")
+        axis.set_ylabel(r"Mean SASA (nm$^2$)")
     elif aggregate == "none":
         for index in range(result.values_nm2.shape[1]):
             axis.plot(
@@ -231,7 +231,7 @@ def plot_sasa(
                 linewidth=linewidth,
                 alpha=0.6,
             )
-        axis.set_ylabel("SASA (nm²)")
+        axis.set_ylabel(r"SASA (nm$^2$)")
     else:
         raise ValueError("aggregate must be one of {'sum', 'mean', 'none'}.")
 
@@ -342,7 +342,7 @@ def plot_radius_of_gyration(
         color=color,
     )
     axis.set_xlabel("Time (ns)")
-    axis.set_ylabel("Radius of Gyration (Å)")
+    axis.set_ylabel(r"Radius of Gyration ($\mathrm{\AA}$)")
     if label is not None:
         axis.legend()
     return axis
@@ -373,7 +373,7 @@ def plot_distances(
         label = pair_labels[i] if pair_labels and i < len(pair_labels) else None
         axis.plot(result.time_ns, result.distances_angstrom[:, i], label=label, linewidth=linewidth)
     axis.set_xlabel("Time (ns)")
-    axis.set_ylabel("Distance (Å)")
+    axis.set_ylabel(r"Distance ($\mathrm{\AA}$)")
     if pair_labels:
         axis.legend()
     return axis
@@ -538,6 +538,6 @@ def plot_delta_rmsf(
 
     axis.axhline(0, color="black", linewidth=0.8, linestyle="--")
     axis.set_xlabel("Residue ID")
-    axis.set_ylabel(r"$\Delta$RMSF (Å)")
+    axis.set_ylabel(r"$\Delta$RMSF ($\mathrm{\AA}$)")
     axis.legend()
     return axis

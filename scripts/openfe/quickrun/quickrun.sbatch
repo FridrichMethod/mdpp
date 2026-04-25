@@ -19,7 +19,9 @@
 
 set -euo pipefail
 
-OPENFE_CONTAINER=/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif
+# Override OPENFE_CONTAINER (apptainer .sif) via the environment for non-Sherlock
+# or non-ayting-group deployments; the default below is the Sherlock ayting path.
+OPENFE_CONTAINER="${OPENFE_CONTAINER:-/scratch/groups/ayting/containers/openfe/openfe_latest-apptainer.sif}"
 
 usage() {
     cat >&2 <<EOF

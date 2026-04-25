@@ -57,8 +57,8 @@ def test_plot_helpers_return_axes(
     axis_fes = plot_fes(fes_result, ax=axes[1, 1], add_colorbar=False)
     axis_hbond_occ = plot_hbond_occupancy(hbond_result, ax=axes[1, 2])
 
-    assert axis_rmsd.get_ylabel() == "RMSD (Å)"
-    assert axis_rmsf.get_ylabel() == "RMSF (Å)"
+    assert axis_rmsd.get_ylabel() == r"RMSD ($\mathrm{\AA}$)"
+    assert axis_rmsf.get_ylabel() == r"RMSF ($\mathrm{\AA}$)"
     assert axis_dccm.get_xlabel() == "Residue ID"
     assert axis_hbond_counts.get_ylabel() == "Hydrogen Bond Count"
     assert axis_sasa.get_xlabel() == "Time (ns)"

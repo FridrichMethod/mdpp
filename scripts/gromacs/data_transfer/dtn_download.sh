@@ -17,12 +17,14 @@ EOF
     exit 1
 }
 
-LOGIN_HOST="sherlock-plain"
-DTN_HOST="sherlock-dtn"
+# Override LOGIN_HOST / DTN_HOST in the environment for non-Sherlock deployments.
+# Defaults match the Sherlock cluster SSH aliases used by this group.
+LOGIN_HOST="${LOGIN_HOST:-sherlock-plain}"
+DTN_HOST="${DTN_HOST:-sherlock-dtn}"
 JOBS=0
 DRY_RUN=""
 
-SSH_OPTS="ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInterval=60"
+SSH_OPTS=(ssh -T -c aes128-gcm@openssh.com -o Compression=no -o ServerAliveInterval=60)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -71,6 +73,16 @@ mapfile -t SUBDIRS < <(
     exit 1
 }
 
+# Validate remote-supplied subdirectory names: a compromised or malformed remote
+# could return entries with shell metacharacters or leading dashes that would be
+# misread as rsync flags by GNU parallel's command construction.
+for subdir in "${SUBDIRS[@]}"; do
+    if [[ ! "$subdir" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ ]]; then
+        echo "Error: refusing unsafe subdirectory name from remote: $subdir" >&2
+        exit 1
+    fi
+done
+
 # Default to one job per subdirectory if -j was not specified.
 [[ "$JOBS" -eq 0 ]] && JOBS=${#SUBDIRS[@]}
 
@@ -84,8 +96,8 @@ RSYNC_OPTS=(-ahP --append-verify)
 
 parallel -j "$JOBS" --bar --joblog "$LOGDIR/joblog.tsv" \
     rsync "${RSYNC_OPTS[@]}" \
-    -e "'$SSH_OPTS'" \
-    --log-file="'$LOGDIR/{}.log'" \
+    -e "${SSH_OPTS[*]}" \
+    --log-file="$LOGDIR/{}.log" \
     "$DTN_HOST:$REMOTE_DIR/{}/" \
     "$LOCAL_DIR/{}/" \
     ::: "${SUBDIRS[@]}"

@@ -63,12 +63,14 @@ class MolSupplier:
                     **kwargs,
                 )
             case ".sdfgz", False:
-                self.mol_supplier = Chem.SDMolSupplier(
+                # RDKit stubs only document the str overload; the supplier
+                # accepts a file-like object at runtime.
+                self.mol_supplier = Chem.SDMolSupplier(  # type: ignore[call-overload]
                     gzip.open(file),  # noqa: SIM115
                     **kwargs,
                 )
             case ".sdfgz", True:
-                self.mol_supplier = Chem.MultithreadedSDMolSupplier(
+                self.mol_supplier = Chem.MultithreadedSDMolSupplier(  # type: ignore[call-overload]
                     gzip.open(file),  # noqa: SIM115
                     numWriterThreads=self._THREAD_NUM,
                     sizeInputQueue=self._QUEUE_SIZE,
@@ -99,7 +101,9 @@ class MolSupplier:
                 )
             case ".smr", False:
                 self._smr_fh = open(file, encoding="utf-8")  # noqa: SIM115
-                self.mol_supplier = (
+                # The supplier attribute is duck-typed across RDKit suppliers
+                # and a generator; mypy infers the first branch's type only.
+                self.mol_supplier = (  # type: ignore[assignment]
                     Chem.MolFromSmarts(line.strip(), **kwargs) for line in self._smr_fh
                 )
             case _:
@@ -116,4 +120,7 @@ class MolSupplier:
         while True:
             if (mol := next(self.mol_supplier)) is not None:
                 return mol
-            logger.warning("Empty molecule is skipped.")
+            # RDKit stubs claim next() returns a non-None Mol, but at runtime
+            # MolSupplier yields None for unparseable entries; the warning
+            # branch is reachable.
+            logger.warning("Empty molecule is skipped.")  # type: ignore[unreachable]

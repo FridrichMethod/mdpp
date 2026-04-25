@@ -49,7 +49,7 @@ class TestPlotDeltaRMSFBasic:
         result = _make_result([0.01, -0.02])
         ax = plot_delta_rmsf(result)
         assert ax is not None
-        assert ax.get_ylabel() == r"$\Delta$RMSF (Å)"
+        assert ax.get_ylabel() == r"$\Delta$RMSF ($\mathrm{\AA}$)"
         assert ax.get_xlabel() == "Residue ID"
         fig = ax.get_figure()
         assert fig is not None
@@ -59,7 +59,7 @@ class TestPlotDeltaRMSFBasic:
         result = _make_result([0.01, -0.02], residue_ids=[10, 20])
         fig, ax = plt.subplots()
         plot_delta_rmsf(result, ax=ax)
-        assert ax.get_ylabel() == r"$\Delta$RMSF (Å)"
+        assert ax.get_ylabel() == r"$\Delta$RMSF ($\mathrm{\AA}$)"
         assert ax.get_xlabel() == "Residue ID"
         plt.close(fig)
 
