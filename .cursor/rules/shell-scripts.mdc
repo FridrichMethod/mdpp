@@ -6,14 +6,32 @@ alwaysApply: false
 
 # Shell Script Conventions
 
-- All scripts start with `#!/bin/bash` and `set -euo pipefail`.
+- Shebang: **always `#!/usr/bin/env bash`** (never `#!/bin/bash`).
+- Executable bit: every `.sh` and `.sbatch` file must be `chmod +x`.
+- First lines after the shebang: `set -euo pipefail`.
 - Indent with 4 spaces (enforced by shfmt via pre-commit).
 - Pass shellcheck at error severity.
+- ASCII only -- no Unicode arrows, ligatures, emoji, or non-ASCII punctuation.
 - Organize under `scripts/<engine>/<category>/`:
-  - `scripts/gromacs/mdrun/` — production run scripts and MDP files
-  - `scripts/gromacs/analysis/` — gmx analysis commands
-  - `scripts/amber/` — AMBER/AmberTools workflows
-  - `scripts/openfe/` — OpenFE RBFE workflows (quickrun.sh, quickrun.sbatch, runtime/check_status.sh)
-- SLURM batch scripts (`.sbatch`) live alongside `.sh` scripts in the same category directory.
-- OpenFE scripts require >= 1.10.0 for `--resume` checkpoint support.
-- `quickrun.sbatch` starts CUDA MPS for Sherlock's `Exclusive_Process` GPU mode — do not remove the MPS setup block.
+  - `scripts/gromacs/mdrun/` -- production run scripts
+  - `scripts/gromacs/mdps/<ff>/` -- force-field-specific MDP templates
+  - `scripts/gromacs/analysis/` -- gmx analysis commands
+  - `scripts/gromacs/compilation/` -- GROMACS build helpers
+  - `scripts/gromacs/runtime/` -- status / restart / extend / export
+  - `scripts/openfe/quickrun/` -- RBFE SLURM submission
+  - `scripts/openfe/runtime/` -- status + monitor scripts
+- SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in the same category directory.
+- OpenFE scripts require **OpenFE >= 1.10.0** for `--resume` checkpoint support.
+- `quickrun.sbatch` starts CUDA MPS for Sherlock's `Exclusive_Process` GPU mode -- do not remove the MPS setup block.
+
+## Argument Parsing
+
+Scripts that accept flags/options must:
+
+- Use manual `while [[ $# -gt 0 ]]; do case "$1" in ...` loops (not `getopts`) to support both short and long flags.
+- Define a `usage()` function that documents every argument.
+- Always support `-h` / `--help`.
+- Provide short and long forms for every flag (e.g. `-j` / `--jobs`, `-n` / `--dry-run`).
+- Validate required arguments and print clear error messages on invalid input.
+
+Scripts that only accept simple positional arguments (e.g. a single `$1`) do not need this treatment.

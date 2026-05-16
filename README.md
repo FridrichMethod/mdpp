@@ -27,8 +27,8 @@
 
 - **Trajectory analysis** — RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration, hydrogen bonds, native contacts, pairwise distances, DSSP secondary structure
 - **Dimensionality reduction** — PCA (with projection), TICA, backbone torsion featurization, free energy surfaces
-- **Conformational clustering** — RMSD distance matrix, GROMOS algorithm
-- **Pluggable compute backends** — pairwise distances and RMSD matrix ship with `mdtraj` / `numba` / `torch` / `jax` / `cupy` backends; all functions default to `mdtraj` for API consistency and correctness (only mdtraj supports PBC), opt in to `numba` for 50x+ CPU speedup or the GPU backends for very large trajectories
+- **Conformational clustering** — seven sklearn-style callable classes: `Gromos`, `Hierarchical`, `DBSCAN`, `HDBSCAN`, `KMeans`, `MiniBatchKMeans`, `RegularSpace`; RMSD distance matrix shipped with multi-backend support
+- **Pluggable compute backends** — pairwise distances, RMSD matrix, and DCCM ship with `mdtraj` / `numba` / `torch` / `jax` / `cupy` backends; distance and RMSD default to `mdtraj` (only PBC-capable backend), DCCM defaults to `numpy` (BLAS GEMM, multi-threaded). Opt in to `numba` for 50x+ CPU speedup or the GPU backends for very large trajectories
 - **Cheminformatics** — molecular descriptors, PAINS filters, fingerprints (Morgan/ECFP), Tanimoto similarity, Butina clustering
 - **Publication-ready plots** — one-liner matplotlib figures with proper axis labels and units
 - **2D/3D visualization** — molecule structure drawings (RDKit), interactive 3D views (py3Dmol, nglview)
@@ -64,9 +64,10 @@ pip install -e ".[gpu]"
 ```
 
 Enables the `backend="cupy"`, `backend="torch"`, and `backend="jax"` options
-on `compute_rmsd_matrix`, `compute_distances`, and `featurize_ca_distances`.
-These libraries are optional -- the `numba` and `mdtraj` backends work
-without any GPU dependencies.
+on `compute_rmsd_matrix`, `compute_distances`, `compute_minimum_distance`,
+`featurize_ca_distances`, and `compute_dccm`. These libraries are optional
+-- the `numba`, `numpy`, and `mdtraj` backends work without any GPU
+dependencies.
 
 </details>
 
@@ -97,6 +98,23 @@ plot_rmsf(rmsf_result, ax=axes[0, 1])
 plot_dccm(dccm_result, ax=axes[1, 0])
 plot_fes(fes_result, ax=axes[1, 1])
 fig.tight_layout()
+```
+
+### Cluster conformations
+
+```python
+from mdpp.analysis import compute_rmsd_matrix, Gromos, KMeans
+from mdpp.analysis.decomposition import featurize_backbone_torsions, compute_pca
+
+# Distance-matrix clustering on backbone RMSD (Numba-parallel QCP backend)
+rmsd_mat = compute_rmsd_matrix(traj, atom_selection="backbone", backend="numba")
+clusters = Gromos(cutoff_nm=0.15)(rmsd_mat.rmsd_matrix_nm)
+print(clusters.n_clusters, clusters.medoid_frames)
+
+# Feature-vector clustering on PCA projections
+torsions = featurize_backbone_torsions(traj, atom_selection="protein")
+pca = compute_pca(torsions.values, n_components=10)
+clusters = KMeans(n_clusters=10)(pca.projections)
 ```
 
 ### Parse GROMACS output

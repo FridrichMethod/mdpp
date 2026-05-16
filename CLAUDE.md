@@ -19,18 +19,21 @@ src/mdpp/
 │   └── parsers.py       # read_xvg, read_edr (thin wrappers around panedr/numpy)
 ├── analysis/        # compute_* functions returning frozen dataclass results
 │   ├── _backends/       # private subpackage: pluggable compute backends
-│   │   ├── _registry.py     # BackendRegistry[F] + DistanceBackend/RMSDBackend Literals
-│   │   ├── _imports.py      # lazy require_torch/jax/cupy + has_* flags
-│   │   ├── _distances.py    # 5 pairwise-distance backends (mdtraj/numba/torch/jax/cupy)
-│   │   └── _rmsd_matrix.py  # 5 RMSD matrix backends (same set, QCP kernel for numba)
-│   ├── metrics.py       # RMSD, RMSF, delta-RMSF, DCCM, SASA, radius of gyration
+│   │   ├── _registry.py        # BackendRegistry[F] + DistanceBackend/RMSDBackend/DCCMBackend Literals
+│   │   ├── _imports.py         # lazy require_torch/jax/cupy + has_* flags + clean_*_cache decorators
+│   │   ├── _distances.py       # 5 pairwise-distance backends (mdtraj/numba/torch/jax/cupy)
+│   │   ├── _rmsd_matrix.py     # 5 RMSD matrix backends (mdtraj/numba/torch/jax/cupy, QCP kernel for numba)
+│   │   ├── _rmsd_matrix_numba.py # Numba-parallel QCP reference kernel
+│   │   └── _dccm.py            # 5 DCCM covariance backends (numpy/numba/torch/jax/cupy; numpy default uses BLAS GEMM)
+│   ├── metrics.py       # RMSD, RMSF, delta-RMSF (with SEM), DCCM (multi-backend), SASA, radius of gyration
 │   ├── hbond.py         # hydrogen bond detection
-│   ├── contacts.py      # inter-residue contacts, native contacts Q(t)
-│   ├── distance.py      # pairwise distances, minimum distance (thin wrapper)
+│   ├── contacts.py      # inter-residue contacts, contact frequency, native contacts Q(t)
+│   ├── distance.py      # pairwise distances, minimum distance (multi-backend)
 │   ├── dssp.py          # secondary structure (DSSP)
-│   ├── decomposition.py # PCA (with projection), TICA, backbone torsion featurization
-│   ├── fes.py           # 2D free energy surfaces
-│   └── clustering.py    # RMSD matrix, clustering methods (Gromos/DBSCAN/HDBSCAN/Hierarchical/KMeans/MiniBatchKMeans/RegularSpace)
+│   ├── decomposition.py # PCA (with projection), TICA, backbone torsion + CA distance featurization
+│   ├── fes.py           # 2D free energy surfaces (compute_fes_2d, compute_fes_from_projection)
+│   └── clustering.py    # RMSD matrix + 7 sklearn-style callable classes:
+│                         # Gromos, Hierarchical, DBSCAN, HDBSCAN, KMeans, MiniBatchKMeans, RegularSpace
 ├── chem/            # small-molecule cheminformatics (RDKit-based)
 │   ├── descriptors.py   # molecular descriptor calculation and filtering
 │   ├── filters.py       # Murcko scaffold extraction, PAINS filters
@@ -255,7 +258,7 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **scikit-learn** — PCA, clustering
 - **deeptime** — TICA
 - **rdkit** — cheminformatics: ligand topology, descriptors, fingerprints, similarity
-- **numba** — parallel CPU kernels: pairwise distances and RMSD matrix (`analysis/_backends/`), similarity (`chem/similarity.py`)
+- **numba** — parallel CPU kernels: pairwise distances, RMSD matrix (QCP), DCCM covariance (`analysis/_backends/`), GROMOS / DBSCAN cluster assignment (`analysis/clustering.py`), similarity (`chem/similarity.py`)
 - **biopython** — PDB chain extraction (`Bio.PDB.Select`)
 - **biotite** — structural bioinformatics utilities
 - **propka** — pKa prediction (`prep/protein.py`)
@@ -272,7 +275,7 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 - **Pillow** — image handling for molecule drawings
 - **numpy / scipy / pandas / polars** — numerical and data handling
 - **tqdm** — progress bars
-- **cupy / torch / jax** — optional GPU backends for pairwise distances (`pip install mdpp[gpu]`)
+- **cupy / torch / jax** — optional GPU backends for pairwise distances, RMSD matrix, and DCCM covariance (`pip install mdpp[gpu]`)
 
 ## Adding New Features
 
@@ -289,18 +292,23 @@ Core dependencies are in `pyproject.toml` `[project.dependencies]`. Key librarie
 ### Compute backend conventions
 
 **Default backend rule**: every public compute function that accepts a
-`backend=` argument MUST default to `"mdtraj"`. Other backends exist
-for performance (`"numba"` for CPU-parallel, `"torch"`/`"jax"`/`"cupy"`
-for GPU) and MUST be opted into explicitly by the caller.
+`backend=` argument MUST default to `"mdtraj"` **when mdtraj provides a
+native kernel for that computation**. Other backends exist for
+performance (`"numba"` for CPU-parallel, `"torch"`/`"jax"`/`"cupy"` for
+GPU) and MUST be opted into explicitly by the caller. The only current
+exception is `compute_dccm`, which defaults to `"numpy"` because mdtraj
+has no native covariance kernel — `numpy`'s BLAS GEMM is multi-threaded
+out of the box and serves as the no-optional-dependency default.
 
 Rationale:
 
 - **Correctness first**: only `mdtraj` supports periodic boundary
   conditions. Defaulting to anything else would silently drop PBC for
   users who rely on unit cells without reading the backend parameter.
-- **API consistency**: all analysis functions share the same default so
-  switching between `compute_distances`, `compute_rmsd_matrix`,
-  `featurize_ca_distances`, etc. doesn't silently change semantics.
+- **API consistency**: all PBC-relevant analysis functions share the
+  same default so switching between `compute_distances`,
+  `compute_rmsd_matrix`, `featurize_ca_distances`, etc. doesn't
+  silently change semantics.
 - **No hidden GPU dependency**: defaulting to `numba`/`torch`/`jax`/`cupy`
   would require heavy optional dependencies for the common path.
 
@@ -407,7 +415,7 @@ To add a new backend (e.g. `cupy`) for an existing compute function like the RMS
 To introduce a registry for a new multi-backend compute function:
 
 1. Create `src/mdpp/analysis/_backends/_<kind>.py` with a `Protocol` class defining the shared call signature.
-1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` -- always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
+1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` (use the no-optional-dependency default that already exists for that kernel -- e.g. `_dccm.py` uses `default="numpy"` because mdtraj has no DCCM kernel). Always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
 1. Add a `Literal` alias to `_backends/_registry.py` (`type <Kind>Backend = Literal["mdtraj", "numba", ...]`) and re-export it from `_backends/__init__.py`.
 1. The public wrapper in `src/mdpp/analysis/<kind>.py` should import the registry and delegate via `compute_fn = <kind>_backends.get(backend)`, letting mypy infer the Protocol type.
 

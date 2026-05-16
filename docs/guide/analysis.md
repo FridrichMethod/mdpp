@@ -56,15 +56,34 @@ result = compute_rmsf(traj, atom_selection="name CA")
 
 ## Delta-RMSF
 
-Compare flexibility between two systems (e.g. apo vs holo):
+Compare flexibility between two systems (e.g. apo vs holo). The RMSF for
+each system is averaged across replicas in MSF space (`sqrt(mean(RMSF^2))`)
+and the SEM is propagated through the sqrt transform before being combined
+in quadrature for the delta:
 
 ```python
 from mdpp.analysis.metrics import compute_rmsf, compute_delta_rmsf
 
 rmsf_apo = [compute_rmsf(traj) for traj in apo_replicas]
 rmsf_holo = [compute_rmsf(traj) for traj in holo_replicas]
-delta = compute_delta_rmsf(rmsf_holo, rmsf_apo, compute_sem=True, name_a="holo", name_b="apo")
-# delta.delta_rmsf_angstrom: per-residue flexibility change
+
+# Element-wise comparison (requires identical residue counts)
+delta = compute_delta_rmsf(rmsf_apo, rmsf_holo)
+# delta.delta_rmsf_angstrom: per-residue flexibility change (B - A)
+# delta.sem_angstrom: SEM, or None if either system has fewer than 2 replicas
+```
+
+For systems with different sequences, pass aligned index arrays so each
+position matches structurally (e.g. derived from a multiple sequence
+alignment):
+
+```python
+delta = compute_delta_rmsf(
+    rmsf_apo,
+    rmsf_holo,
+    indices_a=apo_aligned_indices,
+    indices_b=holo_aligned_indices,
+)
 ```
 
 ## Dynamic Cross-Correlation Matrix (DCCM)
@@ -74,6 +93,35 @@ from mdpp.analysis.metrics import compute_dccm
 
 result = compute_dccm(traj, atom_selection="name CA")
 # result.correlation: (n_atoms, n_atoms) correlation matrix
+```
+
+### DCCM backend selection
+
+`compute_dccm` dispatches the covariance computation through a pluggable
+backend registry. Five backends are available:
+
+| Backend | Device | Notes |
+| ---------- | --------------- | ----------------------------------- |
+| `"numpy"` | CPU (BLAS GEMM) | default; multi-threaded via BLAS |
+| `"numba"` | CPU (all cores) | explicit Numba parallel kernel |
+| `"cupy"` | NVIDIA GPU | requires `[gpu]` extra |
+| `"torch"` | CUDA GPU / CPU | requires `[gpu]` extra |
+| `"jax"` | GPU / TPU / CPU | requires `[gpu]` extra |
+
+The default `"numpy"` backend uses BLAS GEMM via reshape + matmul, which
+is multi-threaded out of the box and already saturates available cores
+without optional dependencies. Note that the DCCM default differs from
+distances and RMSD matrix because mdtraj has no native DCCM kernel.
+
+```python
+# Default -- numpy + BLAS
+result = compute_dccm(traj, atom_selection="name CA")
+
+# Numba: explicit CPU parallelism
+result = compute_dccm(traj, atom_selection="name CA", backend="numba")
+
+# GPU backend for very large selections
+result = compute_dccm(traj, atom_selection="name CA", backend="torch")
 ```
 
 ## Solvent-Accessible Surface Area (SASA)

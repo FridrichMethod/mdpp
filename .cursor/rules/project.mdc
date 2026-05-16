@@ -9,10 +9,15 @@ alwaysApply: true
 
 ```
 src/mdpp/
+├── _types.py    # shared type aliases (StrPath, PathLike, DtypeArg)
+├── _dtype.py    # float dtype config (get/set_default_dtype, resolve_dtype)
 ├── constants.py # physical constants (GAS_CONSTANT_KJ_MOL_K, DEFAULT_TEMPERATURE_K)
 ├── core/        # trajectory I/O (load_trajectory, align), file parsers (read_xvg, read_edr)
 ├── analysis/    # compute_* functions returning frozen dataclass results
-├── plots/       # plot_* functions returning matplotlib Axes
+│   └── _backends/   # private subpackage: mdtraj/numba/cupy/torch/jax kernels for
+│                     # distances, RMSD matrix, DCCM; BackendRegistry[F] + Literals
+├── chem/        # RDKit-based cheminformatics (descriptors, fingerprints, similarity, filters)
+├── plots/       # plot_* / draw_* / view_* functions returning matplotlib Axes / 3D widgets
 └── prep/        # system preparation (protein fixing, ligand topology, trajectory manipulation)
 ```
 
@@ -40,7 +45,7 @@ Every `compute_*` function follows this contract:
 
 ## Compute Backend Default Rule
 
-Every public analysis function that accepts a `backend=` argument MUST default to `"mdtraj"`. Other backends (`numba`, `torch`, `jax`, `cupy`) exist for performance (50-200x CPU speedup or GPU acceleration) and MUST be opted into explicitly by the caller.
+Every public analysis function that accepts a `backend=` argument MUST default to `"mdtraj"` **when mdtraj provides a native kernel for that computation**. Other backends (`numba`, `torch`, `jax`, `cupy`) exist for performance (50-200x CPU speedup or GPU acceleration) and MUST be opted into explicitly by the caller. The only current exception is `compute_dccm`, which defaults to `"numpy"` because mdtraj has no covariance kernel -- `numpy`'s BLAS GEMM is multi-threaded and ships with the base install.
 
 Why:
 
@@ -48,7 +53,11 @@ Why:
 - Consistent defaults across all analysis functions avoid surprising behavior when users switch between them.
 - The GPU backends (`[gpu]` extra) must never be required for the common path.
 
-**Never change a public function's default backend away from `"mdtraj"`.** Add performance notes in the docstring pointing users to `backend="numba"` or a GPU backend when they need speed.
+**Never silently change a public function's default backend away from its current value** (`"mdtraj"`, or `"numpy"` for DCCM). Add performance notes in the docstring pointing users to `backend="numba"` or a GPU backend when they need speed.
+
+## Float Dtype Rule
+
+mdpp uses **float32 by default**, matching mdtraj's coordinate precision. Never force float64 for "numerical stability". Every `compute_*` function takes `dtype: DtypeArg = None` as the final keyword argument, calls `resolved = resolve_dtype(dtype)` at the top, and casts outputs with `astype(resolved, copy=False)` (zero-copy when the backend's native dtype already matches). Import `DtypeArg` from `mdpp._types`; never inline the union type.
 
 ## Backend Registry Typing Rule
 
@@ -62,10 +71,12 @@ class RMSDMatrixBackendFn(Protocol):
         self,
         traj: md.Trajectory,
         atom_indices: NDArray[np.int_],
-    ) -> NDArray[np.float64]: ...
+    ) -> NDArray[np.floating]: ...
 
 rmsd_matrix_backends: BackendRegistry[RMSDMatrixBackendFn] = BackendRegistry(default="mdtraj")
 ```
+
+Protocols return `NDArray[np.floating]` (not `NDArray[np.float64]`) so each backend can return its native dtype -- float32 for mdtraj / torch / jax / cupy, float64 for numba. The public `compute_*` wrapper casts with `astype(resolved, copy=False)` so when the backend's native dtype already matches the resolved dtype, no second buffer is allocated. Never add an unconditional `.astype(np.float64)` at a backend boundary -- on an N^2 matrix at N=120k that is 115 GB of pointless copying.
 
 **Never** declare a bare `BackendRegistry` without a type parameter -- `registry.get(backend)` would return an unbound `F`, and callers like `compute_fn = rmsd_matrix_backends.get(backend)` would lose type information. The Protocol lives next to the backends it describes (not in the shared `_registry.py`) so the registry module stays decoupled.
 

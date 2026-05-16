@@ -70,7 +70,7 @@ Source is under `src/mdpp/` using the src-layout convention:
 | `core/` | Trajectory I/O, file parsers | `load_trajectory`, `load_trajectories`, `read_xvg`, `read_edr` |
 | `constants.py` | Physical constants | `GAS_CONSTANT_KJ_MOL_K`, `DEFAULT_TEMPERATURE_K` |
 | `analysis/` | Compute functions | `compute_*(traj, *, ...) -> FrozenDataclass` |
-| `analysis/_backends/` | Private backend subpackage | `BackendRegistry[F]`, `require_torch/jax/cupy`, `DistanceBackend`/`RMSDBackend` Literals |
+| `analysis/_backends/` | Private backend subpackage | `BackendRegistry[F]`, `require_torch/jax/cupy`, `DistanceBackend`/`RMSDBackend`/`DCCMBackend` Literals, `clean_torch_cache`/`clean_cupy_cache` decorators |
 | `chem/` | Small-molecule cheminformatics | `MolSupplier`, `calc_descs`, `gen_fp`, `calc_sim`, `is_pains` |
 | `plots/` | Visualization (2D, 3D, molecules) | `plot_*(result, *, ax=None) -> Axes`, `draw_mol`, `view_mol_3d` |
 | `prep/` | System preparation | `fix_pdb`, `strip_solvent`, `run_propka`, ligand tools |
@@ -119,6 +119,29 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 - Shell scripts (not packaged): `scripts/<engine>/<category>/<script>.sh`
 - SLURM scripts: `scripts/<engine>/<category>/<script>.sbatch`
 
+## Clustering API
+
+`mdpp.analysis.clustering` exposes seven sklearn-style callable classes:
+
+| Class | Input | Backend / notes |
+|---|---|---|
+| `Gromos` | RMSD matrix | Numba JIT (greedy largest-first, Daura 1999) |
+| `Hierarchical` | RMSD matrix | scipy linkage + fcluster |
+| `DBSCAN` | RMSD matrix | Numba JIT (default) or sklearn `metric="precomputed"` |
+| `HDBSCAN` | RMSD matrix | sklearn `metric="precomputed"` |
+| `KMeans` | Feature matrix | scikit-learn |
+| `MiniBatchKMeans` | Feature matrix | scikit-learn |
+| `RegularSpace` | Feature matrix | deeptime |
+
+Each class is `@dataclass(frozen=True, slots=True)` with parameters at construction and a `__call__(data) -> ClusteringResult | FeatureClusteringResult` invocation.
+
+```python
+result = Gromos(cutoff_nm=0.15)(rmsd_matrix.rmsd_matrix_nm)
+result = KMeans(n_clusters=10)(pca.projections)
+```
+
+Do **not** add the old function-form wrappers (`compute_gromos_clusters`, etc.) -- they were removed and there is no backward-compat shim.
+
 ## Adding a New Analysis
 
 1. Create/extend a file in `src/mdpp/analysis/`.
@@ -130,15 +153,15 @@ Tests live in `tests/analysis/`, `tests/plots/`, and `tests/chem/`, mirroring th
 
 ## Compute Backend Conventions
 
-**Default backend rule**: every public compute function that accepts a `backend=` argument MUST default to `"mdtraj"`. Other backends (`numba`, `torch`, `jax`, `cupy`) are performance options that callers must opt into explicitly.
+**Default backend rule**: every public compute function that accepts a `backend=` argument MUST default to `"mdtraj"` **when mdtraj provides a native kernel for that computation**. Other backends (`numba`, `torch`, `jax`, `cupy`) are performance options that callers must opt into explicitly. The only current exception is `compute_dccm`, which defaults to `"numpy"` because mdtraj has no native covariance kernel -- `numpy`'s BLAS GEMM is multi-threaded and works without any optional dependency.
 
 Reasons:
 
 - Only `mdtraj` supports periodic boundary conditions -- defaulting to anything else would silently drop PBC for users who don't read the backend parameter.
-- All analysis functions sharing the same default keeps API behavior consistent across `compute_distances`, `compute_rmsd_matrix`, `featurize_ca_distances`, etc.
+- All PBC-relevant analysis functions sharing the same default keeps API behavior consistent across `compute_distances`, `compute_rmsd_matrix`, `featurize_ca_distances`, etc.
 - The optional GPU backends (`[gpu]` extra) must never be required for the common path.
 
-When reviewing or writing code, never change a public function's default backend away from `"mdtraj"`.
+When reviewing or writing code, never silently change a public function's default backend away from its current value (`"mdtraj"`, or `"numpy"` for DCCM).
 
 **Uniform signature rule**: every backend registered in a given `BackendRegistry` MUST accept the exact same call signature as the Protocol type parameter on that registry. If one backend needs an extra keyword argument (e.g. `periodic` on mdtraj), every other backend in the same registry MUST also accept that keyword, silently ignoring it if unused (mark `# noqa: ARG001` and document as "accepted for Protocol uniformity, ignored"). This keeps the dispatcher free of per-backend branching and preserves type inference for callers.
 
@@ -182,16 +205,16 @@ For existing multi-backend functions (e.g. `compute_rmsd_matrix`, pairwise dista
 1. Decorate torch/cupy GPU kernels with `@clean_torch_cache` / `@clean_cupy_cache` from `_backends/_imports.py` so pooled memory is released in a `finally` block after the kernel runs. Do **not** apply any cleanup decorator to JAX kernels -- `jax.clear_caches()` trashes JIT compilation caches and forces slow recompiles.
 1. If you introduce a new keyword argument, also retrofit every existing backend in the same registry to accept it (silently ignoring when unused, marked `# noqa: ARG001`).
 1. Register in the module's `BackendRegistry` at the bottom of the file.
-1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend`) in `_backends/_registry.py`.
+1. Add the backend name to the corresponding `Literal` alias (`DistanceBackend` / `RMSDBackend` / `DCCMBackend`) in `_backends/_registry.py`.
 1. Add agreement tests in `tests/analysis/test_<kind>.py` guarded by the relevant `requires_*` skip marker and `@pytest.mark.gpu` (if GPU-only).
-1. **Do not change the public function's default backend** -- keep it at `"mdtraj"`.
+1. **Do not change the public function's default backend** -- keep `compute_distances` / `compute_rmsd_matrix` / `featurize_ca_distances` defaulting to `"mdtraj"` and `compute_dccm` defaulting to `"numpy"`.
 
 ## Adding a New Backend Registry
 
 To introduce a registry for a new multi-backend compute function:
 
 1. Create `src/mdpp/analysis/_backends/_<kind>.py` with a `Protocol` class defining the shared call signature.
-1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` -- always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
+1. Declare the registry as `<kind>_backends: BackendRegistry[<Kind>BackendFn] = BackendRegistry(default="mdtraj")` (or another sensible no-optional-dep default if mdtraj has no kernel for that computation -- e.g. `_dccm.py` uses `default="numpy"`). Always parameterise with the Protocol so callers get typed `compute_fn` from `registry.get()`.
 1. Add a `Literal` alias to `_backends/_registry.py` (`type <Kind>Backend = Literal["mdtraj", "numba", ...]`) and re-export it from `_backends/__init__.py`.
 1. The public wrapper in `src/mdpp/analysis/<kind>.py` imports the registry and delegates via `compute_fn = <kind>_backends.get(backend)`, letting mypy infer the Protocol type at the call site.
 

@@ -1,5 +1,5 @@
 ---
-description: Patterns for analysis modules — dataclass results, compute functions
+description: Patterns for analysis modules — dataclass results, compute functions, dtype handling
 globs: src/mdpp/analysis/*.py
 alwaysApply: false
 ---
@@ -12,27 +12,36 @@ alwaysApply: false
 @dataclass(frozen=True, slots=True)
 class ExampleResult:
     """One-line summary."""
-    time_ps: NDArray[np.float64]
-    values_nm: NDArray[np.float64]
+    time_ps: NDArray[np.floating]
+    values_nm: NDArray[np.floating]
     atom_indices: NDArray[np.int_]
 
     @property
-    def time_ns(self) -> NDArray[np.float64]:
+    def time_ns(self) -> NDArray[np.floating]:
+        """Return frame times in nanoseconds."""
         return self.time_ps / 1000.0
 
     @property
-    def values_angstrom(self) -> NDArray[np.float64]:
+    def values_angstrom(self) -> NDArray[np.floating]:
+        """Return values in Angstrom."""
         return self.values_nm * 10.0
 ```
+
+Use `NDArray[np.floating]` (not `np.float64`) in result fields so the dataclass reflects the actual stored dtype, which defaults to float32.
 
 ## Compute Functions
 
 ```python
+from mdpp._dtype import resolve_dtype
+from mdpp._types import DtypeArg
+from mdpp.core.trajectory import select_atom_indices, trajectory_time_ps
+
 def compute_example(
     traj: md.Trajectory,
     *,
     atom_selection: str = "backbone",
     timestep_ps: float | None = None,
+    dtype: DtypeArg = None,
 ) -> ExampleResult:
     """Compute X from a trajectory.
 
@@ -40,12 +49,30 @@ def compute_example(
         traj: Input trajectory.
         atom_selection: MDTraj selection string.
         timestep_ps: Optional timestep override in ps.
+        dtype: Output float dtype. If ``None``, uses the package default
+            (see :func:`mdpp.set_default_dtype`).
 
     Returns:
         ExampleResult with per-frame values.
     """
+    resolved = resolve_dtype(dtype)
+    atom_indices = select_atom_indices(traj.topology, atom_selection)
+    # ... compute values_nm here ...
+    return ExampleResult(
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
+        values_nm=np.asarray(values_nm, dtype=resolved),
+        atom_indices=atom_indices,
+    )
 ```
 
+- First positional arg is `traj: md.Trajectory` (or a feature matrix).
+- All remaining args are keyword-only.
+- `dtype: DtypeArg = None` is the **last** keyword argument.
+- Call `resolve_dtype(dtype)` once at the top, then thread `resolved` through every cast.
 - Import trajectory helpers from `mdpp.core.trajectory`, never from `mdpp.analysis.trajectory`.
 - Validate inputs early (raise `ValueError` with descriptive messages).
-- Cast outputs to explicit dtypes: `np.asarray(..., dtype=np.float64)`.
+- Cast with `np.asarray(value, dtype=resolved)` or `.astype(resolved, copy=False)` -- both are no-copy when the source dtype already matches.
+
+## Multi-Backend Compute Functions
+
+If the function dispatches through a `BackendRegistry`, add `backend: <Kind>Backend = "mdtraj"` (or `"numpy"` if mdtraj has no kernel) and resolve via `compute_fn = <kind>_backends.get(backend)`. Every backend must accept the same call signature; extra kwargs on one backend (e.g. `periodic` on mdtraj) must be silently accepted by all others.
