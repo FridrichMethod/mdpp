@@ -46,7 +46,14 @@ pytest -m "benchmark and not slow"      # fast benchmarks only
 pytest -m "not gpu"                     # CPU-only run
 pytest -m "benchmark and gpu"           # all GPU-exercising benchmarks
 pytest -m "not (slow or benchmark)"     # minimum fast CI subset
+pytest -m "gpu and not slow" -n 0       # GPU agreement (serial -- see note)
 ```
+
+> **Always pass `-n 0` to GPU-marked runs.** The default 24-worker
+> pytest-xdist parallelism opens 24 simultaneous CUDA contexts on the
+> single visible GPU and triggers spurious `CUBLAS_STATUS_ALLOC_FAILED`
+> / `OutOfMemoryError` failures even on 96 GB cards. The same suite
+> passes cleanly under `-n 0` (or `-n 1`).
 
 Register any new markers in `pyproject.toml` `[tool.pytest.ini_options].markers`.
 

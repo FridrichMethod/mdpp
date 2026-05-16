@@ -108,6 +108,13 @@ pytest -m benchmark
 # Skip slow + benchmark tests
 pytest -m "not (slow or benchmark)"
 
+# GPU backend agreement (cupy / torch / jax vs mdtraj / numba).
+# Always pass `-n 0` -- the default 24-worker pytest-xdist parallelism
+# opens 24 CUDA contexts on a single GPU and produces spurious
+# CUBLAS_STATUS_ALLOC_FAILED / OutOfMemoryError failures even on
+# 96 GB cards.  Serial runs are clean.
+pytest -m "gpu and not slow" -n 0
+
 # Lint and format
 ruff check src/ tests/ --fix
 ruff format src/ tests/

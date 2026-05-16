@@ -242,12 +242,19 @@ pytest                               # full suite
 pytest -m "not benchmark"            # skip perf benchmarks
 pytest -m "not gpu"                  # skip GPU backend tests (CPU-only)
 pytest -m "benchmark and not slow"   # fast performance checks
+pytest -m "gpu and not slow" -n 0    # GPU backend agreement (serial, see note)
 
 # Full pre-commit suite
 pre-commit run --all-files
 ```
 
 Custom pytest markers: `benchmark` (timing), `slow` (>10s), `gpu` (cupy/torch/jax).
+
+> **GPU test note:** Always run GPU-marked tests with `-n 0` (one worker).
+> The default 24-worker pytest-xdist parallelism opens 24 simultaneous CUDA
+> contexts on the single visible GPU and triggers spurious
+> `CUBLAS_STATUS_ALLOC_FAILED` / `OutOfMemoryError` failures even on a
+> 96 GB card. Serial runs are clean.
 
 ## License
 

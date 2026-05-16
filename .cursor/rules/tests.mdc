@@ -31,3 +31,6 @@ Users run:
 - `pytest -m "not gpu"` -- CPU-only environments
 - `pytest -m "not benchmark"` -- fast CI (correctness only)
 - `pytest -m "benchmark and not slow"` -- fast perf checks
+- `pytest -m "gpu and not slow" -n 0` -- GPU agreement (serial)
+
+**GPU runs must use `-n 0`** (single worker). The 24-worker pytest-xdist default opens 24 CUDA contexts on the single visible GPU and triggers spurious `CUBLAS_STATUS_ALLOC_FAILED` / `OutOfMemoryError` failures. The same suite passes cleanly when serialised.
