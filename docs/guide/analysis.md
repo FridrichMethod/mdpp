@@ -356,6 +356,10 @@ result = KMeans(n_clusters=10)(pca.projections)
 result = MiniBatchKMeans(n_clusters=10, batch_size=1024)(pca.projections)
 result = RegularSpace(dmin=0.5)(pca.projections)
 
+# Seed is configurable -- defaults to 42 for reproducible runs.  Pass
+# random_state=None to let scikit-learn pick a non-deterministic seed.
+result = KMeans(n_clusters=10, random_state=2024)(pca.projections)
+
 # result.labels, result.n_clusters, result.cluster_centers,
 # result.medoid_frames, result.inertia
 ```

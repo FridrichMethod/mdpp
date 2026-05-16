@@ -637,6 +637,33 @@ class TestKMeans:
         with pytest.raises(ValueError, match="n_clusters must be >= 1"):
             KMeans(n_clusters=0)(clustered_features)
 
+    def test_random_state_default_is_reproducible(
+        self, clustered_features: NDArray[np.floating]
+    ) -> None:
+        """Two runs with the default random_state must produce identical labels."""
+        a = KMeans(n_clusters=3)(clustered_features)
+        b = KMeans(n_clusters=3)(clustered_features)
+        np.testing.assert_array_equal(a.labels, b.labels)
+
+    def test_random_state_explicit_seed_is_reproducible(
+        self, clustered_features: NDArray[np.floating]
+    ) -> None:
+        """The same explicit seed must produce identical cluster assignments."""
+        # Labels and centers must match exactly; inertia is allowed to drift
+        # by a few ULPs because BLAS reduction order varies across runs even
+        # at fixed input + seed in float32.
+        a = KMeans(n_clusters=3, random_state=7)(clustered_features)
+        b = KMeans(n_clusters=3, random_state=7)(clustered_features)
+        np.testing.assert_array_equal(a.labels, b.labels)
+        np.testing.assert_array_equal(a.cluster_centers, b.cluster_centers)
+        assert a.inertia == pytest.approx(b.inertia, rel=1e-5)
+
+    def test_random_state_none_runs(self, clustered_features: NDArray[np.floating]) -> None:
+        """random_state=None must not raise and must still recover all clusters."""
+        result = KMeans(n_clusters=3, random_state=None)(clustered_features)
+        assert isinstance(result, FeatureClusteringResult)
+        assert result.n_clusters == 3
+
 
 # ---------------------------------------------------------------------------
 # Feature-vector clustering tests: MiniBatchKMeans
@@ -667,6 +694,25 @@ class TestMiniBatchKMeans:
         """batch_size=0 must raise ValueError."""
         with pytest.raises(ValueError, match="batch_size must be >= 1"):
             MiniBatchKMeans(batch_size=0)(clustered_features)
+
+    def test_random_state_explicit_seed_is_reproducible(
+        self, clustered_features: NDArray[np.floating]
+    ) -> None:
+        """The same explicit seed must produce identical cluster assignments."""
+        # Labels and centers must match exactly; inertia is allowed to drift
+        # by a few ULPs because BLAS reduction order varies across runs even
+        # at fixed input + seed in float32.
+        a = MiniBatchKMeans(n_clusters=3, batch_size=16, random_state=11)(clustered_features)
+        b = MiniBatchKMeans(n_clusters=3, batch_size=16, random_state=11)(clustered_features)
+        np.testing.assert_array_equal(a.labels, b.labels)
+        np.testing.assert_array_equal(a.cluster_centers, b.cluster_centers)
+        assert a.inertia == pytest.approx(b.inertia, rel=1e-5)
+
+    def test_random_state_none_runs(self, clustered_features: NDArray[np.floating]) -> None:
+        """random_state=None must not raise and must still recover all clusters."""
+        result = MiniBatchKMeans(n_clusters=3, random_state=None)(clustered_features)
+        assert isinstance(result, FeatureClusteringResult)
+        assert result.n_clusters == 3
 
 
 # ---------------------------------------------------------------------------

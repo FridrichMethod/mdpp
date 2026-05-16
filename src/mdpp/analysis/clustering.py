@@ -606,14 +606,19 @@ class KMeans:
 
     Args:
         n_clusters: Number of clusters.
+        random_state: Seed for centroid initialisation. Defaults to 42 for
+            reproducible runs across sessions. Pass ``None`` to let
+            scikit-learn pick a non-deterministic seed.
         dtype: Output float dtype for *cluster_centers*.
 
     Example::
 
         result = KMeans(n_clusters=10)(pca.projections)
+        result = KMeans(n_clusters=10, random_state=None)(pca.projections)
     """
 
     n_clusters: int = 10
+    random_state: int | None = 42
     dtype: DtypeArg = None
 
     def __call__(self, features: ArrayLike) -> FeatureClusteringResult:
@@ -627,7 +632,11 @@ class KMeans:
         if self.n_clusters < 1:
             raise ValueError(f"n_clusters must be >= 1, got {self.n_clusters!r}")
 
-        km = _SklearnKMeans(n_clusters=self.n_clusters, n_init="auto", random_state=42)
+        km = _SklearnKMeans(
+            n_clusters=self.n_clusters,
+            n_init="auto",
+            random_state=self.random_state,
+        )
         labels = km.fit_predict(feature_matrix)
         centers = np.asarray(km.cluster_centers_)
         inertia = float(km.inertia_)  # type: ignore[arg-type]  # set after fit
@@ -643,15 +652,21 @@ class MiniBatchKMeans:
     Args:
         n_clusters: Number of clusters.
         batch_size: Mini-batch size.
+        random_state: Seed for centroid initialisation and mini-batch
+            sampling. Defaults to 42 for reproducible runs across
+            sessions. Pass ``None`` to let scikit-learn pick a
+            non-deterministic seed.
         dtype: Output float dtype for *cluster_centers*.
 
     Example::
 
         result = MiniBatchKMeans(n_clusters=10, batch_size=1024)(pca.projections)
+        result = MiniBatchKMeans(n_clusters=10, random_state=None)(pca.projections)
     """
 
     n_clusters: int = 10
     batch_size: int = 1024
+    random_state: int | None = 42
     dtype: DtypeArg = None
 
     def __call__(self, features: ArrayLike) -> FeatureClusteringResult:
@@ -671,7 +686,7 @@ class MiniBatchKMeans:
             n_clusters=self.n_clusters,
             batch_size=self.batch_size,
             n_init="auto",
-            random_state=42,
+            random_state=self.random_state,
         )
         labels = mbk.fit_predict(feature_matrix)
         centers = np.asarray(mbk.cluster_centers_)
