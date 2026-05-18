@@ -1,0 +1,18 @@
+# Visualize the full complex APBS map in ChimeraX.
+#
+# Run from this directory:
+#   chimerax viz_complex_apbs.cxc
+
+open tmp/complex/ambertools/complex.pqr
+open tmp/complex/apbs/complex.dx
+
+cartoon #1
+style #1 stick
+surface #1
+
+color sample #1 map #2 palette red:white:blue range -5,5
+
+volume #2 style mesh level 1 color blue
+volume #2 style mesh level -1 color red
+
+view #1

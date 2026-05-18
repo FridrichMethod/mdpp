@@ -1,23 +1,14 @@
 #!/usr/bin/env bash
-# run_ambertools.sh - AMBER/GAFF2 parameterization for BrownDye/APBS inputs.
-#
-# Prerequisite: run complex_pqr.ipynb first to produce protein_fixed.pdb and ligand.sdf
-# in WORKDIR.
-#
-# Pipeline:
-#   1. pdb4amber   - dry/fix protein PDB for tleap while preserving hydrogens
-#   2. antechamber - assign GAFF2 atom types and AM1-BCC charges to ligand
-#   3. tleap       - write separate protein/ligand and optional complex topologies
-#   4. ParmEd      - convert prmtop/rst7 to PQR (charges + mbondi3 radii)
-#
-# Usage:
-#   conda activate ambertools
-#   cd examples/browndye && bash run_ambertools.sh
+# Prepare the complex body with AmberTools/GAFF2.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="${WORKDIR:-$SCRIPT_DIR/tmp}"
+EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TMP_ROOT="${TMP_ROOT:-$EXAMPLE_DIR/tmp}"
+INPUT_DIR="${INPUT_DIR:-$TMP_ROOT/complex/prep}"
+STEP_DIR="${AMBERTOOLS_DIR:-$TMP_ROOT/complex/ambertools}"
+INTERMEDIATE_DIR="${INTERMEDIATE_DIR:-$STEP_DIR/intermediate}"
 PROTEIN_FF="${PROTEIN_FF:-leaprc.protein.ff19SB}"
 LIGAND_FF="${LIGAND_FF:-leaprc.gaff2}"
 PB_RADII="${PB_RADII:-mbondi3}"
@@ -47,21 +38,28 @@ require_cmd() {
     fi
 }
 
-LIG_RESNAME="${LIG_RESNAME:-$(read_optional_file "$WORKDIR/ligand_resname.txt")}"
+LIG_RESNAME="${LIG_RESNAME:-$(read_optional_file "$INPUT_DIR/ligand_resname.txt")}"
 LIG_RESNAME="${LIG_RESNAME:-LIG}"
-NET_CHARGE="${NET_CHARGE:-$(read_optional_file "$WORKDIR/ligand_charge.txt")}"
+NET_CHARGE="${NET_CHARGE:-$(read_optional_file "$INPUT_DIR/ligand_charge.txt")}"
 NET_CHARGE="${NET_CHARGE:--1}"
 
-require_file "$WORKDIR/protein_fixed.pdb"
-require_file "$WORKDIR/ligand.sdf"
+require_file "$INPUT_DIR/protein_fixed.pdb"
+require_file "$INPUT_DIR/ligand.sdf"
 require_cmd pdb4amber
 require_cmd obabel
 require_cmd antechamber
 require_cmd parmchk2
 require_cmd tleap
 require_cmd python3
+python3 -c "import parmed" 2>/dev/null || {
+    printf 'Missing Python package: parmed\n' >&2
+    exit 1
+}
 
-cd "$WORKDIR"
+mkdir -p "$STEP_DIR" "$INTERMEDIATE_DIR"
+cp "$INPUT_DIR/protein_fixed.pdb" "$INTERMEDIATE_DIR/protein_fixed.pdb"
+cp "$INPUT_DIR/ligand.sdf" "$INTERMEDIATE_DIR/ligand.sdf"
+cd "$INTERMEDIATE_DIR"
 
 echo "=== 1. pdb4amber ==="
 pdb4amber_args=(-i protein_fixed.pdb -o protein_amber.pdb -d --no-conect)
@@ -81,6 +79,8 @@ path = Path("ligand_seed.mol2")
 text = path.read_text()
 for old in ("UNL1", "UNL", "UNK"):
     text = text.replace(old, resname)
+if resname not in text:
+    raise SystemExit(f"Residue name {resname!r} not found in {path} after replacement")
 path.write_text(text)
 PY
 
@@ -118,5 +118,11 @@ for stem in ('protein', 'ligand', 'complex'):
     parm.save(f'{stem}.pqr', overwrite=True)
 "
 
+for stem in protein ligand complex; do
+    cp "$stem.prmtop" "$STEP_DIR/$stem.prmtop"
+    cp "$stem.rst7" "$STEP_DIR/$stem.rst7"
+    cp "$stem.pqr" "$STEP_DIR/$stem.pqr"
+done
+
 echo "=== Done ==="
-ls -lh protein.pqr ligand.pqr complex.pqr
+ls -lh "$STEP_DIR"/complex.pqr "$STEP_DIR"/protein.pqr "$STEP_DIR"/ligand.pqr

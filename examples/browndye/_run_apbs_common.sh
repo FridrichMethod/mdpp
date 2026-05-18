@@ -1,30 +1,20 @@
 #!/usr/bin/env bash
-# run_apbs.sh - generate APBS potential maps for BrownDye rigid bodies.
-#
-# Prerequisite:
-#   bash run_ambertools.sh
-#
-# Usage:
-#   conda activate ambertools
-#   cd examples/browndye && bash run_apbs.sh
-#
-# By default this writes protein.in/protein.dx and ligand.in/ligand.dx. BrownDye
-# expects one electrostatic map per independently moving rigid body, not a single
-# map for the bound complex.
+# _run_apbs_common.sh - shared APBS map generation helper.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="${WORKDIR:-$SCRIPT_DIR/tmp}"
+INPUT_DIR="${INPUT_DIR:?Set INPUT_DIR to the folder containing PQR inputs.}"
+STEP_DIR="${APBS_DIR:?Set APBS_DIR to the APBS output folder.}"
+INTERMEDIATE_DIR="${INTERMEDIATE_DIR:-$STEP_DIR/intermediate}"
 IONIC_STRENGTH="${IONIC_STRENGTH:-0.150}"
-PQR_STEMS="${PQR_STEMS:-protein ligand}"
+PQR_STEMS="${PQR_STEMS:?Set PQR_STEMS to one or more PQR stems.}"
 SOLUTE_DIELECTRIC="${SOLUTE_DIELECTRIC:-2.0}"
 SOLVENT_DIELECTRIC="${SOLVENT_DIELECTRIC:-78.54}"
 SOLVENT_RADIUS="${SOLVENT_RADIUS:-1.4}"
 TEMPERATURE="${TEMPERATURE:-298.15}"
-FINE_SPACING="${FINE_SPACING:-0.5}"
-FINE_PADDING="${FINE_PADDING:-20.0}"
-COARSE_PADDING="${COARSE_PADDING:-40.0}"
+FINE_SPACING="${FINE_SPACING:-0.75}"
+FINE_PADDING="${FINE_PADDING:-60.0}"
+COARSE_PADDING="${COARSE_PADDING:-100.0}"
 
 require_file() {
     local path="$1"
@@ -149,27 +139,34 @@ PY
 run_apbs() {
     local stem="$1"
     echo "=== APBS: $stem ==="
-    write_apbs_input "$stem"
-    apbs "$stem.in" 2>&1 | tee "$stem.apbs.log"
+    cp "$INPUT_DIR/$stem.pqr" "$INTERMEDIATE_DIR/$stem.pqr"
+    (
+        cd "$INTERMEDIATE_DIR"
+        write_apbs_input "$stem"
+        apbs "$stem.in" 2>&1 | tee "$stem.apbs.log"
 
-    if [[ -s "$stem-PE0.dx" ]]; then
-        mv "$stem-PE0.dx" "$stem.dx"
-    elif [[ -s "$stem.pqr.dx" ]]; then
-        mv "$stem.pqr.dx" "$stem.dx"
-    fi
+        if [[ -s "$stem-PE0.dx" ]]; then
+            mv "$stem-PE0.dx" "$stem.dx"
+        elif [[ -s "$stem.pqr.dx" ]]; then
+            mv "$stem.pqr.dx" "$stem.dx"
+        fi
 
-    require_file "$stem.dx"
+        require_file "$stem.dx"
+        cp "$stem.in" "$STEP_DIR/$stem.in"
+        cp "$stem.apbs.log" "$STEP_DIR/$stem.apbs.log"
+        cp "$stem.dx" "$STEP_DIR/$stem.dx"
+    )
 }
 
 require_cmd python3
 require_cmd apbs
 
-cd "$WORKDIR"
+mkdir -p "$STEP_DIR" "$INTERMEDIATE_DIR"
 read -r -a stems <<<"$PQR_STEMS"
 for stem in "${stems[@]}"; do
-    require_file "$stem.pqr"
+    require_file "$INPUT_DIR/$stem.pqr"
     run_apbs "$stem"
 done
 
 echo "=== Done ==="
-ls -lh ./*.dx
+ls -lh "$STEP_DIR"/*.dx

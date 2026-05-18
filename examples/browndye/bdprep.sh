@@ -4,27 +4,34 @@
 # Prerequisites:
 #   conda activate ambertools
 #   cd examples/browndye
-#   bash run_ambertools.sh
-#   bash run_apbs.sh
+#   bash complex/prep.sh
+#   bash complex/run_apbs.sh
+#   bash substrate/prep.sh
+#   bash substrate/run_apbs.sh
 #
-# This script creates:
-#   protein_atoms.xml, ligand_atoms.xml
-#   contact_types.xml, reaction_pairs.xml, reactions.xml
-#   input.xml
-#   protein_ligand_simulation.xml (via bd_top)
+# Layout:
+#   tmp/bdprep/              main BrownDye setup outputs
+#   tmp/bdprep/intermediate/ transient BrownDye setup working files
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="${WORKDIR:-$SCRIPT_DIR/tmp}"
+TMP_ROOT="${TMP_ROOT:-$SCRIPT_DIR/tmp}"
+COMPLEX_PQR_DIR="${COMPLEX_PQR_DIR:-$TMP_ROOT/complex/ambertools}"
+COMPLEX_APBS_DIR="${COMPLEX_APBS_DIR:-$TMP_ROOT/complex/apbs}"
+SUBSTRATE_PQR_DIR="${SUBSTRATE_PQR_DIR:-$TMP_ROOT/substrate/pdb2pqr}"
+SUBSTRATE_APBS_DIR="${SUBSTRATE_APBS_DIR:-$TMP_ROOT/substrate/apbs}"
+STEP_DIR="${BDPREP_DIR:-$TMP_ROOT/bdprep}"
+INTERMEDIATE_DIR="${INTERMEDIATE_DIR:-$STEP_DIR/intermediate}"
 BD_HOME="${BD_HOME:-/apps/browndye2}"
 BD_BIN="${BD_BIN:-$BD_HOME/bin}"
 BD_AUX="${BD_AUX:-$BD_HOME/aux}"
+export PATH="$BD_BIN:$BD_AUX:$PATH"
 
-CORE0="${CORE0:-protein}"
-CORE1="${CORE1:-ligand}"
+CORE0="${CORE0:-complex}"
+CORE1="${CORE1:-substrate}"
 CORE0_IS_PROTEIN="${CORE0_IS_PROTEIN:-true}"
-CORE1_IS_PROTEIN="${CORE1_IS_PROTEIN:-false}"
+CORE1_IS_PROTEIN="${CORE1_IS_PROTEIN:-true}"
 CORE0_DIELECTRIC="${CORE0_DIELECTRIC:-4.0}"
 CORE1_DIELECTRIC="${CORE1_DIELECTRIC:-4.0}"
 
@@ -76,7 +83,7 @@ resolve_tool() {
 }
 
 infer_debye_length() {
-    python3 - "$CORE0.apbs.log" "$CORE1.apbs.log" <<'PY'
+    python3 - "$COMPLEX_APBS_DIR/$CORE0.apbs.log" "$SUBSTRATE_APBS_DIR/$CORE1.apbs.log" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -199,16 +206,21 @@ write_input_xml() {
 EOF
 }
 
-require_file "$WORKDIR/$CORE0.pqr"
-require_file "$WORKDIR/$CORE1.pqr"
-require_file "$WORKDIR/$CORE0.dx"
-require_file "$WORKDIR/$CORE1.dx"
+require_file "$COMPLEX_PQR_DIR/$CORE0.pqr"
+require_file "$SUBSTRATE_PQR_DIR/$CORE1.pqr"
+require_file "$COMPLEX_APBS_DIR/$CORE0.dx"
+require_file "$SUBSTRATE_APBS_DIR/$CORE1.dx"
 PQR2XML="$(resolve_tool pqr2xml)"
 MAKE_RXN_PAIRS="$(resolve_tool make_rxn_pairs)"
 MAKE_RXN_FILE="$(resolve_tool make_rxn_file)"
 BD_TOP="$(resolve_tool bd_top)"
 
-cd "$WORKDIR"
+mkdir -p "$STEP_DIR" "$INTERMEDIATE_DIR"
+cp "$COMPLEX_PQR_DIR/$CORE0.pqr" "$INTERMEDIATE_DIR/$CORE0.pqr"
+cp "$SUBSTRATE_PQR_DIR/$CORE1.pqr" "$INTERMEDIATE_DIR/$CORE1.pqr"
+cp "$COMPLEX_APBS_DIR/$CORE0.dx" "$INTERMEDIATE_DIR/$CORE0.dx"
+cp "$SUBSTRATE_APBS_DIR/$CORE1.dx" "$INTERMEDIATE_DIR/$CORE1.dx"
+cd "$INTERMEDIATE_DIR"
 
 if [[ -z "$DEBYE_LENGTH" ]]; then
     if ! DEBYE_LENGTH="$(infer_debye_length)"; then
@@ -242,5 +254,16 @@ echo "=== 3. BrownDye top-level input ==="
 write_input_xml
 "$BD_TOP" input.xml
 
+for file in \
+    "${CORE0}_atoms.xml" \
+    "${CORE1}_atoms.xml" \
+    contact_types.xml \
+    reaction_pairs.xml \
+    reactions.xml \
+    input.xml \
+    "${CORE0}_${CORE1}_simulation.xml"; do
+    cp "$file" "$STEP_DIR/$file"
+done
+
 echo "=== Done ==="
-echo "Simulation XML should be ${CORE0}_${CORE1}_simulation.xml"
+echo "Simulation XML: $STEP_DIR/${CORE0}_${CORE1}_simulation.xml"
