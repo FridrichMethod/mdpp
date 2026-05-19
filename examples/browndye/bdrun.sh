@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # bdrun.sh - run BrownDye and compute association-rate estimates.
 #
-# Prerequisite:
-#   cd examples/browndye
-#   bash bdprep.sh
+# Prerequisite: run all cells of complex_pqr.ipynb (which writes
+# tmp/bdprep/intermediate/${CORE0}_${CORE1}_simulation.xml).
 #
 # Layout:
 #   tmp/bdrun/              main BrownDye simulation outputs
