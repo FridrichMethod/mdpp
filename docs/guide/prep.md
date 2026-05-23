@@ -104,3 +104,86 @@ sliced = slice_trajectory(traj, start=100, stop=500, stride=2)
 # Evenly subsample to 200 frames
 subsampled = subsample_trajectory(traj, n_frames=200)
 ```
+
+## APBS input generation
+
+Generate an APBS multigrid input file from an existing PQR. Grid dimensions
+are derived from the radius-inflated atom bounding box; `dime` is rounded up
+to the nearest `c * 2**n + 1` value APBS multigrid requires. Physics defaults
+mirror `pdb2pqr --apbs-input` with explicit Na+/Cl- ion lines (so the Debye
+length is finite, required by downstream BrownDye simulations).
+
+```python
+from mdpp.prep import write_apbs_input
+
+# Writes work_dir/complex.in for work_dir/complex.pqr.
+write_apbs_input("complex", work_dir)
+
+# Override physics defaults per call:
+write_apbs_input(
+    "complex",
+    work_dir,
+    ionic_strength_m=0.050,
+    solute_dielectric=4.0,
+    fine_spacing_a=0.5,
+)
+```
+
+After running APBS itself (`apbs complex.in`), parse the Debye length out of
+the log for use in any downstream tool that needs it:
+
+```python
+from mdpp.prep import infer_debye_length
+
+debye = infer_debye_length(work_dir / "complex.apbs.log")
+```
+
+## BrownDye2 XML generation
+
+Build the two XML inputs consumed by BrownDye2 from Python. These helpers
+produce text files only; run BrownDye's own CLI tools (`pqr2xml`,
+`make_rxn_pairs`, `make_rxn_file`, `bd_top`, `nam_simulation`) separately.
+
+### Contact types
+
+`contact_types.xml` lists every unique heavy-atom `(atom_name, residue_name)`
+pair per body, consumed by `make_rxn_pairs`:
+
+```python
+from mdpp.prep import write_contact_types
+
+write_contact_types(
+    "complex.pqr",
+    "substrate.pqr",
+    "contact_types.xml",
+)
+```
+
+### Top-level input.xml
+
+`input.xml` is the top-level BrownDye configuration consumed by `bd_top`.
+Configure two bodies plus a shared solvent block and pass the rest as
+keyword arguments:
+
+```python
+from mdpp.prep import (
+    BrownDyeBody,
+    BrownDyeSolvent,
+    infer_debye_length,
+    write_input_xml,
+)
+
+debye = infer_debye_length("complex.apbs.log", "substrate.apbs.log")
+
+write_input_xml(
+    "input.xml",
+    BrownDyeBody(name="complex", atoms_xml="complex_atoms.xml", grid_dx="complex.dx"),
+    BrownDyeBody(name="substrate", atoms_xml="substrate_atoms.xml", grid_dx="substrate.dx"),
+    solvent=BrownDyeSolvent(debye_length_a=debye),
+    n_trajectories=100_000,
+    seed=11111111,
+)
+```
+
+See `examples/browndye/complex_pqr.ipynb` for a full pipeline that
+chains APBS, AmberTools, PDB2PQR, and BrownDye2.
