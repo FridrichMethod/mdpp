@@ -233,6 +233,7 @@ __marimo__/
 *.xtc
 *.xvg
 \#*\#
+io.mc
 
 # Intermediate folders
 .claude/
