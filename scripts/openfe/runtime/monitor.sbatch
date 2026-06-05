@@ -184,15 +184,29 @@ split_output() {
 # completed replica for termination purposes but surfaced separately so the
 # user is alerted.
 count_statuses() {
-    COMPLETED=0 ACTIVE=0 FAILED=0 ABANDONED=0 ERROR=0 TOTAL=0
+    COMPLETED=0 ACTIVE=0 RUNNING=0 PENDING=0 FAILED=0 ABANDONED=0 ERROR=0 TOTAL=0
     ERROR_LINES=""
-    local directory status replica info tname
+    local directory status replica info tname state
     while IFS=$'\t' read -r directory status replica info; do
         [[ "$status" == "status" || -z "$status" ]] && continue
         TOTAL=$((TOTAL + 1))
         case "$status" in
             completed) COMPLETED=$((COMPLETED + 1)) ;;
-            active) ACTIVE=$((ACTIVE + 1)) ;;
+            active)
+                ACTIVE=$((ACTIVE + 1))
+                # check_status.sh ends an active replica's info field with the
+                # matching Slurm job state, e.g. "25% | 12345(12300_3):RUNNING".
+                # Split off that trailing state so the report distinguishes
+                # replicas actually running on a node from those still queued
+                # (PENDING / REQUEUING / CONFIGURING / ...).  Any non-RUNNING
+                # active state counts as pending.
+                state="${info##*:}"
+                if [[ "$state" == "RUNNING" ]]; then
+                    RUNNING=$((RUNNING + 1))
+                else
+                    PENDING=$((PENDING + 1))
+                fi
+                ;;
             failed) FAILED=$((FAILED + 1)) ;;
             abandoned) ABANDONED=$((ABANDONED + 1)) ;;
             error)
@@ -241,7 +255,8 @@ echo ""
 
 # ---- Process each directory ----
 
-GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_FAILED=0 GRAND_ABANDONED=0 GRAND_ERROR=0
+GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_RUNNING=0 GRAND_PENDING=0
+GRAND_FAILED=0 GRAND_ABANDONED=0 GRAND_ERROR=0
 GRAND_TOTAL=0 GRAND_RESTARTS=0 GRAND_SKIPPED=0
 # A dir is "complete" only if it has work AND all of it completed.  Any dir that
 # is not complete -- including one with 0 enumerable work so far -- keeps
@@ -283,6 +298,8 @@ for DIR in "${DIRS[@]}"; do
     # Accumulate totals.
     GRAND_COMPLETED=$((GRAND_COMPLETED + COMPLETED))
     GRAND_ACTIVE=$((GRAND_ACTIVE + ACTIVE))
+    GRAND_RUNNING=$((GRAND_RUNNING + RUNNING))
+    GRAND_PENDING=$((GRAND_PENDING + PENDING))
     GRAND_FAILED=$((GRAND_FAILED + FAILED))
     GRAND_ABANDONED=$((GRAND_ABANDONED + ABANDONED))
     GRAND_ERROR=$((GRAND_ERROR + ERROR))
@@ -298,7 +315,7 @@ for DIR in "${DIRS[@]}"; do
     fi
 
     # Build per-directory report.
-    R="[${DIR_NAME}] ${COMPLETED}/${TOTAL} completed, ${ACTIVE} active, ${FAILED} failed, ${ABANDONED} abandoned, ${ERROR} error"$'\n'
+    R="[${DIR_NAME}] ${COMPLETED}/${TOTAL} completed, ${ACTIVE} active (${RUNNING} running, ${PENDING} pending), ${FAILED} failed, ${ABANDONED} abandoned, ${ERROR} error"$'\n'
     [[ -n "$RESTART_LINES" ]] && R+="${RESTART_LINES}"
     [[ -n "$ERROR_LINES" ]] && R+="${ERROR_LINES}"
     REPORT+="${R}"$'\n'
@@ -314,7 +331,7 @@ fi
 
 # ---- Email ----
 
-SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active, ${GRAND_FAILED} failed, ${GRAND_ABANDONED} abandoned, ${GRAND_ERROR} error, ${GRAND_RESTARTS} restarted"
+SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active (${GRAND_RUNNING} running, ${GRAND_PENDING} pending), ${GRAND_FAILED} failed, ${GRAND_ABANDONED} abandoned, ${GRAND_ERROR} error, ${GRAND_RESTARTS} restarted"
 
 if [[ "$ALL_DONE" == true ]]; then
     if ((GRAND_ABANDONED > 0)); then

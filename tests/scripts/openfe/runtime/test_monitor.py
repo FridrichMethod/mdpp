@@ -102,6 +102,18 @@ _STATUS_WITH_UNEXPECTED = textwrap.dedent(
     """
 )
 
+# A mix of active replicas in different Slurm states. The RUNNING line carries
+# an ETA with internal colons to confirm the state parse takes the LAST colon.
+_STATUS_RUNNING_AND_PENDING = textwrap.dedent(
+    """\
+    directory\tstatus\treplica\tinfo
+    /res/rbfe_A_B/replica_0\tactive\treplica_0\t25% (ETA: 1:00:00) | 123(100_0):RUNNING
+    /res/rbfe_A_B/replica_1\tactive\treplica_1\t0% | 124(100_1):PENDING
+    /res/rbfe_A_B/replica_2\tactive\treplica_2\t0% | 125(100_2):REQUEUING
+    /res/rbfe_A_B/replica_3\tcompleted\treplica_3\tddG = 1.4 +/- 0.1 kcal/mol
+    """
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -262,6 +274,30 @@ class TestStatusCounts:
         result = _run(monitor_env, dirs=[monitor_env["project"], project2])
         out = _strip_ansi(result.stdout)
         assert out.count("1/4 completed") == 2
+
+
+class TestActiveRunningPendingBreakdown:
+    """Active replicas are split into running vs queued (pending) in the report."""
+
+    def test_running_vs_pending_counts(self, monitor_env: dict[str, Path]) -> None:
+        monitor_env["cs_response"].write_text(_STATUS_RUNNING_AND_PENDING)
+        result = _run(monitor_env, dry_run=True)
+        out = _strip_ansi(result.stdout)
+        # 3 active: 1 RUNNING, plus PENDING + REQUEUING counted as queued.
+        assert "3 active (1 running, 2 pending)" in out
+
+    def test_all_running(self, monitor_env: dict[str, Path]) -> None:
+        monitor_env["cs_response"].write_text(_STATUS_WITH_FAILED)
+        result = _run(monitor_env, dry_run=True)
+        out = _strip_ansi(result.stdout)
+        # The single active replica in _STATUS_WITH_FAILED is RUNNING.
+        assert "1 active (1 running, 0 pending)" in out
+
+    def test_summary_breakdown_in_email(self, monitor_env: dict[str, Path]) -> None:
+        monitor_env["cs_response"].write_text(_STATUS_RUNNING_AND_PENDING)
+        _run(monitor_env)
+        mail = monitor_env["mail_log"].read_text()
+        assert "active (1 running, 2 pending)" in mail
 
 
 class TestRestartReport:
@@ -433,10 +469,11 @@ class TestSlurmSpoolResolution:
         result = subprocess.run(
             cmd, capture_output=True, text=True, env=run_env, cwd=str(scripts_dir), check=False
         )
-        # SCRIPTS_DIR resolves to spool, check_status.sh is not there — warning emitted
-        assert "check_status.sh failed" in result.stdout + result.stderr
-        # Status counts should be empty (nothing processed)
-        assert "0/0 completed" in _strip_ansi(result.stdout)
+        # SCRIPTS_DIR resolves to spool where check_status.sh is absent, so the
+        # monitor fails fast with an actionable message and a non-zero exit
+        # instead of silently skipping every directory.
+        assert result.returncode == 1
+        assert "cannot find check_status.sh" in result.stdout + result.stderr
 
 
 class TestCLI:
