@@ -8,6 +8,7 @@ import pytest
 from mdpp.analysis.metrics import (
     DeltaRMSFResult,
     RMSFResult,
+    average_rmsf_with_sem,
     compute_delta_rmsf,
 )
 
@@ -246,3 +247,26 @@ class TestComputeDeltaRMSFErrors:
         b = _make_rmsf([0.1, 0.2])
         with pytest.raises(ValueError, match="both be provided or both be None"):
             compute_delta_rmsf([a], [b], indices_b=np.array([0, 1], dtype=np.int_))
+
+
+class TestAverageRmsfWithSem:
+    def test_empty_results_raises(self) -> None:
+        with pytest.raises(ValueError, match="results must not be empty"):
+            average_rmsf_with_sem([])
+
+    def test_inconsistent_sizes_raises(self) -> None:
+        r1 = _make_rmsf([0.1, 0.2])
+        r2 = _make_rmsf([0.1, 0.2, 0.3])
+        with pytest.raises(ValueError, match="results replicas have inconsistent sizes"):
+            average_rmsf_with_sem([r1, r2])
+
+    def test_single_replica_sem_none(self) -> None:
+        avg, sem = average_rmsf_with_sem([_make_rmsf([0.1, 0.2])])
+        assert sem is None
+        np.testing.assert_allclose(avg, [0.1, 0.2], rtol=1e-6)
+
+    def test_multi_replica_sem_finite(self) -> None:
+        avg, sem = average_rmsf_with_sem([_make_rmsf([0.1, 0.2]), _make_rmsf([0.3, 0.4])])
+        assert np.all(np.isfinite(avg))
+        assert sem is not None
+        assert np.all(np.isfinite(sem))

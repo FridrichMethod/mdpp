@@ -385,6 +385,7 @@ def average_rmsf_with_sem(
     ``sem_rmsf = sem_msf / (2 * avg_rmsf)``.
     """
     resolved = resolve_dtype(dtype)
+    _validate_rmsf_replicas(results, "results")
 
     msf_stack = np.stack([np.asarray(r.rmsf_nm, dtype=resolved) ** 2 for r in results])
     avg_msf = np.mean(msf_stack, axis=0)
@@ -395,7 +396,10 @@ def average_rmsf_with_sem(
 
     n_replicas = len(results)
     sem_msf = np.std(msf_stack, axis=0, ddof=1) / np.sqrt(n_replicas)
-    sem_rmsf = np.where(avg_rmsf > 0, sem_msf / (2.0 * avg_rmsf), 0.0).astype(resolved)
+    # np.where still selects 0.0 wherever avg_rmsf <= 0; errstate only
+    # silences the spurious divide/invalid warning from the masked-off branch.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sem_rmsf = np.where(avg_rmsf > 0, sem_msf / (2.0 * avg_rmsf), 0.0).astype(resolved)
     return avg_rmsf, sem_rmsf
 
 
