@@ -104,8 +104,8 @@ def plot_ramachandran(
     psi = torsions.values[:, psi_cols].ravel()
 
     axis.scatter(np.degrees(phi), np.degrees(psi), s=s, alpha=alpha, color=color, edgecolors="none")
-    axis.set_xlabel("φ (degrees)")
-    axis.set_ylabel("ψ (degrees)")
+    axis.set_xlabel(r"$\phi$ (degrees)")
+    axis.set_ylabel(r"$\psi$ (degrees)")
     axis.set_xlim(-180, 180)
     axis.set_ylim(-180, 180)
     axis.axhline(0, color="gray", linewidth=0.5, linestyle="--")

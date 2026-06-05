@@ -65,5 +65,5 @@ def plot_fes(
     axis.set_xlabel("CV 1")
     axis.set_ylabel("CV 2")
     if add_colorbar:
-        axis.figure.colorbar(image, ax=axis, label="ΔG (kJ/mol)")
+        axis.figure.colorbar(image, ax=axis, label=r"$\Delta G$ (kJ/mol)")
     return axis

@@ -40,7 +40,13 @@ def plot_contact_map(
     if residue_ids is not None and residue_ids.size > 0:
         r_start = float(residue_ids[0])
         r_end = float(residue_ids[-1])
-        extent = (r_start, r_end, r_start, r_end)
+        # imshow's extent specifies the OUTER edges of the image, so pad by
+        # half a cell; using the cell-center IDs directly would shift every
+        # residue by ~half a cell. Derive the half-cell from the matrix
+        # dimension (uniform spacing), guarding the single-residue case.
+        n = frequency.shape[0]
+        half = (r_end - r_start) / (n - 1) / 2 if n > 1 else 0.5
+        extent = (r_start - half, r_end + half, r_start - half, r_end + half)
 
     image = axis.imshow(
         frequency,

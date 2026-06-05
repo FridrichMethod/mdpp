@@ -35,7 +35,18 @@ def plot_dccm(
     if result.residue_ids is not None and result.residue_ids.size > 0:
         residue_start = float(result.residue_ids[0])
         residue_end = float(result.residue_ids[-1])
-        extent = (residue_start, residue_end, residue_start, residue_end)
+        # imshow's extent specifies the OUTER edges of the image, so pad by
+        # half a cell; using the cell-center IDs directly would shift every
+        # residue by ~half a cell. Derive the half-cell from the matrix
+        # dimension (uniform spacing), guarding the single-residue case.
+        n = result.correlation.shape[0]
+        half = (residue_end - residue_start) / (n - 1) / 2 if n > 1 else 0.5
+        extent = (
+            residue_start - half,
+            residue_end + half,
+            residue_start - half,
+            residue_end + half,
+        )
 
     image = axis.imshow(
         result.correlation,

@@ -12,6 +12,7 @@ import numpy as np
 from mdpp.analysis.fes import compute_fes_2d
 from mdpp.analysis.hbond import compute_hbonds
 from mdpp.analysis.metrics import (
+    RMSDResult,
     compute_dccm,
     compute_rmsd,
     compute_rmsf,
@@ -64,4 +65,35 @@ def test_plot_helpers_return_axes(
     assert axis_sasa.get_xlabel() == "Time (ns)"
     assert axis_fes.get_ylabel() == "CV 2"
     assert axis_hbond_occ.get_ylabel() == "Occupancy (%)"
+    plt.close(figure)
+
+
+def test_plot_rmsd_moving_average_not_edge_biased() -> None:
+    """A constant RMSD trace must stay flat under the moving-average overlay.
+
+    The previous ``np.convolve(mode="same")`` box kernel zero-padded the edges
+    and pulled the smoothed line toward zero; count-normalization keeps it flat.
+    """
+    rmsd_nm = np.full(50, 0.3, dtype=np.float64)  # constant 3.0 Angstrom
+    result = RMSDResult(
+        time_ps=np.arange(50.0) * 10.0,
+        rmsd_nm=rmsd_nm,
+        atom_indices=np.array([0], dtype=np.int_),
+    )
+    figure, axis = plt.subplots()
+    plot_rmsd(result, ax=axis, moving_average=11)
+    # Line 0 is the raw trace; line 1 is the moving-average overlay.
+    smoothed = np.asarray(axis.lines[1].get_ydata(), dtype=float)
+    np.testing.assert_allclose(smoothed, 3.0, atol=1e-6)
+    plt.close(figure)
+
+
+def test_plot_dccm_extent_padded_to_cell_edges(correlated_ca_trajectory) -> None:
+    """Imshow extent must sit on outer cell edges, not residue-id cell centers."""
+    dccm_result = compute_dccm(correlated_ca_trajectory, atom_selection="name CA")
+    figure, axis = plt.subplots()
+    plot_dccm(dccm_result, ax=axis, add_colorbar=False)
+    # residue_ids = [1, 2, 3], n = 3 -> half-cell = 0.5 -> edges at 0.5 and 3.5
+    # (cell centers, the old buggy behavior, would be (1, 3, 1, 3)).
+    assert tuple(axis.images[0].get_extent()) == (0.5, 3.5, 0.5, 3.5)
     plt.close(figure)

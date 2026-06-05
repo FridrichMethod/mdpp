@@ -60,8 +60,14 @@ def plot_rmsd(
         color=color,
     )
     if use_ma and moving_average is not None:
-        kernel = np.ones(moving_average) / moving_average
-        smoothed = np.convolve(result.rmsd_angstrom, kernel, mode="same")
+        # Normalize each output point by the count of real samples inside the
+        # window (not the full window width) so the centered ``mode="same"``
+        # convolution is not biased toward zero at the trace edges, where the
+        # window would otherwise average against out-of-bounds zero padding.
+        window = np.ones(moving_average)
+        rmsd = result.rmsd_angstrom
+        counts = np.convolve(np.ones_like(rmsd), window, mode="same")
+        smoothed = np.convolve(rmsd, window, mode="same") / counts
         axis.plot(
             result.time_ns,
             smoothed,
