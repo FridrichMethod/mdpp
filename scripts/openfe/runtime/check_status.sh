@@ -31,9 +31,11 @@ RESTART=false
 # check_status runs during that window it would misclassify the replica as
 # "failed" and (with -R) resubmit a duplicate.  To avoid this, we query sacct
 # for jobs preempted within this grace period and treat them as still active.
-# Set to roughly half the monitor check interval; 10 min is generous since the
-# actual SLURM requeue transition typically completes in seconds.
-PREEMPT_GRACE_MINUTES=10
+# Set to roughly half the monitor check interval.  Override via the
+# OPENFE_PREEMPT_GRACE_MINUTES environment variable; the 20 min default is
+# generous for busy "owners" nodes where the requeue can lag behind the
+# PREEMPTED event by several minutes.
+PREEMPT_GRACE_MINUTES="${OPENFE_PREEMPT_GRACE_MINUTES:-20}"
 
 usage() {
     cat <<'EOF'
@@ -85,12 +87,14 @@ done
 
 # ---- Validate dependencies ----
 
-for cmd in parallel squeue scontrol; do
+for cmd in parallel squeue scontrol jq realpath; do
     command -v "$cmd" >/dev/null 2>&1 || {
         echo "Error: ${cmd} not found in PATH" >&2
         exit 1
     }
 done
+# sacct (preemption grace) and flock (restart serialization) are optional and
+# guarded at their call sites, so they are not required here.
 
 # ---- Setup ----
 
@@ -182,18 +186,32 @@ build_active_jobs() {
         done <"$sacct_raw" >>"$raw"
     fi
 
-    # Map each ArrayJobId -> transformation name via SubmitLine.
+    # Map each ArrayJobId -> transformation name via SubmitLine.  Try every
+    # distinct jobid for the array (not just the first): when a whole array is
+    # mid-requeue after preemption the first/synthetic id can be unresolvable
+    # while another element still resolves.  If none resolve, label the array
+    # "__UNKNOWN__" so its rows never masquerade as (or get matched to) a real
+    # transformation -- and so the restart path can detect unattributable jobs.
     : >"$tmap"
-    awk -F'\t' '!seen[$1]++ { print $1 "\t" $3 }' "$raw" |
-        while IFS=$'\t' read -r ajid sample_jobid; do
+    awk -F'\t' '{ ids[$1] = (ids[$1] ? ids[$1] " " : "") $3 }
+                END { for (a in ids) print a "\t" ids[a] }' "$raw" |
+        while IFS=$'\t' read -r ajid jobids; do
             [[ -z "$ajid" ]] && continue
-            submit_line="$(scontrol show job "$sample_jobid" 2>/dev/null |
-                sed -n 's/^[[:space:]]*SubmitLine=//p' | head -1)"
             tname=""
-            if [[ "$submit_line" =~ ([^[:space:]]+\.json) ]]; then
-                tname="$(basename "${BASH_REMATCH[1]}" .json)"
-            fi
-            printf '%s\t%s\n' "$ajid" "$tname"
+            read -r -a jid_arr <<<"$jobids"
+            for jid in "${jid_arr[@]}"; do
+                # `|| true`: scontrol on an unresolvable jobid (e.g. a job that
+                # just left the queue, or a synthetic requeue id) exits non-zero,
+                # which under `set -e`+pipefail would otherwise abort the whole
+                # script here.  Tolerate it and fall through to __UNKNOWN__.
+                submit_line="$(scontrol show job "$jid" 2>/dev/null |
+                    sed -n 's/^[[:space:]]*SubmitLine=//p' | head -1 || true)"
+                if [[ "$submit_line" =~ ([^[:space:]]+\.json) ]]; then
+                    tname="$(basename "${BASH_REMATCH[1]}" .json)"
+                    break
+                fi
+            done
+            printf '%s\t%s\n' "$ajid" "${tname:-__UNKNOWN__}"
         done >"$tmap"
 
     # Join raw queue data with transformation names.
@@ -206,11 +224,12 @@ build_active_jobs() {
 # ---- Functions: work enumeration ----
 
 # List all (transform_name, replica_id) pairs that need checking.
-# Replica count is auto-detected per transformation by taking the maximum
-# replica ID from two sources:
+# The replica set is auto-detected per transformation from the UNION of:
 #   1. Existing replica_* directories under results/<tname>/
 #   2. Active SLURM array task IDs for that transformation in squeue
-# The final count is max_id + 1, checking replica_0 through replica_{max_id}.
+# Only ids that actually appear in one of those sources are enumerated (NOT
+# 0..max_id), so a sparse or offset replica set left by a prior run cannot
+# fabricate phantom "failed" replicas that -R would resubmit as new jobs.
 enumerate_work() {
     local transforms_dir="$1" results_dir="$2" active_tsv="$3"
 
@@ -218,27 +237,29 @@ enumerate_work() {
         while IFS= read -r tfile; do
             tname="$(basename "$tfile" .json)"
 
-            max_id=-1
+            ids=""
 
             # Source 1: replica directories on disk.
             if [[ -d "${results_dir}/${tname}" ]]; then
                 for rdir in "${results_dir}/${tname}"/replica_*; do
                     [[ -d "$rdir" ]] || continue
                     rid="${rdir##*replica_}"
-                    [[ "$rid" =~ ^[0-9]+$ ]] && ((rid > max_id)) && max_id=$rid
+                    # 10# forces base-10 so a zero-padded id (e.g. 08) is not
+                    # misparsed as octal by bash arithmetic.
+                    [[ "$rid" =~ ^[0-9]+$ ]] && ids+="$((10#$rid))"$'\n'
                 done
             fi
 
             # Source 2: active SLURM array task IDs.
             while IFS=$'\t' read -r tn tid _ _; do
-                [[ "$tn" == "$tname" && "$tid" =~ ^[0-9]+$ ]] && ((tid > max_id)) && max_id=$tid
+                [[ "$tn" == "$tname" && "$tid" =~ ^[0-9]+$ ]] && ids+="$((10#$tid))"$'\n'
             done <"$active_tsv"
 
-            count=$((max_id + 1))
-
-            for ((i = 0; i < count; i++)); do
-                printf '%s\t%s\n' "$tname" "$i"
-            done
+            [[ -z "$ids" ]] && continue
+            printf '%s' "$ids" | sort -n -u |
+                while IFS= read -r rid; do
+                    printf '%s\t%s\n' "$tname" "$rid"
+                done
         done
 }
 
@@ -301,22 +322,23 @@ process_one() {
     local replica_dir="${results_dir}/${tname}/replica_${replica_id}"
     local result_json="${replica_dir}/${tname}.json"
 
-    # 1. Completed: valid result JSON with non-null estimates.
+    # 1. Completed: result JSON that parses and carries non-null estimates.
+    #    jq is the source of truth (robust to JSON whitespace), and a
+    #    truncated/mid-write file (jq parse error -> no output -> read fails)
+    #    falls through to the queue check below instead of being reported as
+    #    "completed ddG = ?".  A null/empty estimate likewise falls through:
+    #    if a job is still active it is mid-write (-> active), and only a
+    #    missing/incomplete result with no active job is classified failed.
     if [[ -s "$result_json" ]]; then
-        if grep -q '"estimate": null' "$result_json" ||
-            grep -q '"uncertainty": null' "$result_json"; then
-            local progress
-            progress="$(get_progress "$replica_dir")"
-            emit_status "$replica_dir" "$c_red" "failed" "$c_reset" "$replica_id" \
-                "${progress} | result JSON has null estimate/uncertainty"
-            mark_restart "$tname" "$replica_id"
+        local est unc
+        if read -r est unc < <(
+            jq -er '[.estimate.magnitude, .uncertainty.magnitude] | @tsv' \
+                "$result_json" 2>/dev/null
+        ) && [[ -n "$est" && "$est" != "null" && -n "$unc" && "$unc" != "null" ]]; then
+            emit_status "$replica_dir" "$c_green" "completed" "$c_reset" "$replica_id" \
+                "ddG = ${est} +/- ${unc} kcal/mol"
             return
         fi
-        local est unc
-        read -r est unc < <(jq -r '[.estimate.magnitude, .uncertainty.magnitude] | @tsv' "$result_json")
-        emit_status "$replica_dir" "$c_green" "completed" "$c_reset" "$replica_id" \
-            "ddG = ${est:-?} +/- ${unc:-?} kcal/mol"
-        return
     fi
 
     # 2. Check Slurm queue for matching jobs.
@@ -338,25 +360,56 @@ process_one() {
         return
     fi
 
-    # 3. Failed: no result, no active job.
+    # 3. No active job.  If this replica has exhausted its restart attempts AND
+    #    has actually written a (failed) result, mark it "abandoned" (terminal)
+    #    and do NOT queue another restart -- this stops both endless resubmission
+    #    and an endless monitor loop.  Requiring a result file is important: a
+    #    preempted/requeuing job is only transiently invisible and has no result
+    #    (quickrun.sbatch removes it at each start and writes it only on
+    #    conclusion), so it must NOT be abandoned -- it falls through to "failed"
+    #    and is retried.  The cap check mirrors restart_failed exactly.
+    local attempts_file max_attempts attempts
+    attempts_file="$(dirname "$results_dir")/.openfe_restart_attempts.tsv"
+    max_attempts="${OPENFE_MAX_RESTART_ATTEMPTS:-5}"
+    attempts=0
+    if [[ -f "$attempts_file" ]]; then
+        attempts="$(awk -F'\t' -v t="$tname" -v r="$replica_id" \
+            '$1 == t && $2 == r { c = $3 } END { print c + 0 }' "$attempts_file")"
+    fi
+    if ((max_attempts > 0 && attempts >= max_attempts)) && [[ -s "$result_json" ]]; then
+        emit_status "$replica_dir" "$c_red" "abandoned" "$c_reset" "$replica_id" \
+            "${progress} | gave up after ${attempts} failed attempts (cap ${max_attempts})"
+        return
+    fi
     emit_status "$replica_dir" "$c_red" "failed" "$c_reset" "$replica_id" \
         "${progress} | incomplete and no matching active job"
     mark_restart "$tname" "$replica_id"
 }
 
 export -f get_progress match_active_jobs emit_status mark_restart process_one
+# Export the cap too, so process_one (run by GNU parallel in a child shell) and
+# restart_failed agree on which replicas are "abandoned" vs still restartable.
+export OPENFE_MAX_RESTART_ATTEMPTS="${OPENFE_MAX_RESTART_ATTEMPTS:-5}"
 
 # ---- Functions: restart ----
 
 # Resubmit failed replicas grouped by transformation.
+#
+# A per-replica attempt cap stops a permanently-failing replica from being
+# resubmitted forever.  Counts persist in a state file under the project root
+# (append-only; the latest line per replica wins).  Override the cap via
+# OPENFE_MAX_RESTART_ATTEMPTS (default 5; set 0 to disable the cap).
 restart_failed() {
     local restart_file="$1" transforms_dir="$2" root_abs="$3"
     local sbatch_script="${SCRIPTS_DIR}/../quickrun/quickrun.sbatch"
+    local max_attempts="${OPENFE_MAX_RESTART_ATTEMPTS:-5}"
+    local attempts_file="${root_abs}/.openfe_restart_attempts.tsv"
 
     if [[ ! -f "$sbatch_script" ]]; then
         echo "Error: quickrun.sbatch not found at ${sbatch_script}" >&2
         exit 1
     fi
+    [[ -f "$attempts_file" ]] || : >"$attempts_file"
 
     echo ""
     awk -F'\t' '
@@ -364,9 +417,40 @@ restart_failed() {
         END { for (t in replicas) print t "\t" replicas[t] }
     ' "$restart_file" | sort |
         while IFS=$'\t' read -r tname replica_ids; do
-            echo "Resubmitting ${tname} replicas [${replica_ids}]"
-            sbatch --chdir "$root_abs" --array="${replica_ids}" \
-                "$sbatch_script" "${transforms_dir}/${tname}.json" -o "${root_abs}/results"
+            # Drop replicas that have already hit the attempt cap so a
+            # permanently-failing replica is not resubmitted forever.
+            keep=""
+            IFS=',' read -r -a rid_arr <<<"$replica_ids"
+            for rid in "${rid_arr[@]}"; do
+                attempts="$(awk -F'\t' -v t="$tname" -v r="$rid" \
+                    '$1 == t && $2 == r { c = $3 } END { print c + 0 }' "$attempts_file")"
+                if ((max_attempts > 0 && attempts >= max_attempts)); then
+                    echo "Giving up on ${tname} replica ${rid} after ${attempts}" \
+                        "restart attempts (cap ${max_attempts}); not resubmitting" >&2
+                    continue
+                fi
+                keep="${keep:+${keep},}${rid}"
+            done
+            [[ -z "$keep" ]] && continue
+
+            echo "Resubmitting ${tname} replicas [${keep}]"
+            # Do not let one sbatch failure (e.g. hitting a QOS submit cap)
+            # abort the loop under set -e; report it and keep going so the
+            # remaining transformations are still resubmitted.  Only record an
+            # attempt when the submission actually succeeded.
+            if ! sbatch --chdir "$root_abs" --array="${keep}" \
+                "$sbatch_script" "${transforms_dir}/${tname}.json" -o "${root_abs}/results"; then
+                echo "Warning: sbatch failed for ${tname} replicas [${keep}]" \
+                    "(e.g. QOS submit cap); will retry next cycle" >&2
+                continue
+            fi
+
+            IFS=',' read -r -a kept_arr <<<"$keep"
+            for rid in "${kept_arr[@]}"; do
+                attempts="$(awk -F'\t' -v t="$tname" -v r="$rid" \
+                    '$1 == t && $2 == r { c = $3 } END { print c + 0 }' "$attempts_file")"
+                printf '%s\t%s\t%s\n' "$tname" "$rid" "$((attempts + 1))" >>"$attempts_file"
+            done
         done
 }
 
@@ -398,5 +482,40 @@ fi
 
 # Restart if requested.
 if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
-    restart_failed "$RESTART_FILE" "$TRANSFORMS_DIR" "$ROOT_ABS"
+    # Validate the resubmission script up front, at top level, so a missing
+    # quickrun.sbatch fails loudly here instead of being swallowed (as a fake
+    # "lock unavailable") by the restart subshell below.
+    if [[ ! -f "${SCRIPTS_DIR}/../quickrun/quickrun.sbatch" ]]; then
+        echo "Error: quickrun.sbatch not found at" \
+            "${SCRIPTS_DIR}/../quickrun/quickrun.sbatch; cannot restart." >&2
+        exit 1
+    fi
+    # Safety 1: if any active job could not be attributed to a transformation
+    # (e.g. an entire array is mid-requeue after preemption), skip restarts
+    # this cycle rather than risk duplicate submissions.  The next pass retries
+    # once the queue settles.
+    unknown_active="$(awk -F'\t' '$1 == "__UNKNOWN__"' "$ACTIVE_FILE" | wc -l)"
+    if ((unknown_active > 0)); then
+        echo "Skipping restarts this cycle: ${unknown_active} active job(s) could not be" \
+            "attributed to a transformation (likely mid-requeue after preemption)." >&2
+    elif command -v flock >/dev/null 2>&1; then
+        # Safety 2: serialize restarts via a per-user lock so a concurrent
+        # check_status -R (manual run or another monitor pass) cannot submit
+        # duplicate restarts for the same replicas.  The lock file is per-user
+        # (the realistic overlap is one user's monitor vs. a manual run) so a
+        # group-mate's lock file in this shared dir can't block us.  The fd is
+        # opened by a SUBSHELL redirection, not `exec`, so a failure to open the
+        # lock (or a busy lock) degrades gracefully instead of killing the
+        # script the way a special-builtin `exec` redirection error would.
+        lockfile="${ROOT_ABS}/.openfe_restart.${USER:-$(id -un)}.lock"
+        if ! (
+            flock -n 9 || exit 3
+            restart_failed "$RESTART_FILE" "$TRANSFORMS_DIR" "$ROOT_ABS"
+        ) 9>"$lockfile"; then
+            echo "Restart skipped for ${ROOT_ABS}: another restart is in progress" \
+                "or the lock could not be acquired; will retry next cycle." >&2
+        fi
+    else
+        restart_failed "$RESTART_FILE" "$TRANSFORMS_DIR" "$ROOT_ABS"
+    fi
 fi

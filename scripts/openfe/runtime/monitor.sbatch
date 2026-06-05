@@ -7,7 +7,11 @@
 #SBATCH --mem=4G
 #SBATCH --time=00:30:00
 #SBATCH --mail-type=FAIL
-#SBATCH --mail-user=${USER}@stanford.edu
+# NOTE: SLURM does not expand shell variables in #SBATCH directives, so
+# --mail-user cannot be set from ${USER} here.  FAIL alerts for the FIRST
+# submission therefore use the cluster default address; each self-resubmission
+# passes --mail-user on the sbatch command line (bash-expanded $EMAIL).  The
+# script also emails a per-cycle report itself via send_email.
 #SBATCH --output=logs/monitor_%j.out
 #SBATCH --error=logs/monitor_%j.err
 
@@ -20,10 +24,13 @@ mkdir -p logs
 # Self-resubmits via SLURM until all jobs complete.
 #
 # Can be run directly (bash monitor.sbatch ...) or submitted (sbatch monitor.sbatch ...).
-# When submitting via sbatch for the first time, run from this directory or use --chdir:
+# When submitting via sbatch for the first time, run from this directory (which
+# already contains a logs/ dir) or use --chdir.  SLURM opens the relative
+# --output=logs/... path at launch, BEFORE this script's `mkdir -p logs` runs,
+# so logs/ must exist in the working dir for the very first submission:
 #   cd scripts/openfe/runtime && sbatch monitor.sbatch -d /path/to/project
 #   sbatch --chdir scripts/openfe/runtime scripts/openfe/runtime/monitor.sbatch -d /path/to/project
-# Self-resubmission handles --chdir automatically.
+# Self-resubmission handles --chdir and logs/ creation automatically.
 #
 # Options:
 #   -d, --dirs DIR [DIR ...]  Project directories to monitor (required)
@@ -125,6 +132,16 @@ for i in "${!DIRS[@]}"; do
     fi
 done
 
+# Fail fast with an actionable message if check_status.sh cannot be found (e.g.
+# submitted without --chdir pointing at this runtime directory).  This avoids
+# silently skipping every directory and then dying on the resubmit.
+if [[ ! -f "$CHECK_STATUS" ]]; then
+    echo "Error: cannot find check_status.sh at '${CHECK_STATUS}'." >&2
+    echo "Submit the monitor from the runtime/ directory (or with --chdir pointing" >&2
+    echo "at it), e.g.:  cd scripts/openfe/runtime && sbatch monitor.sbatch -d DIR" >&2
+    exit 1
+fi
+
 # ---- Helpers ----
 
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
@@ -161,10 +178,13 @@ split_output() {
     done <<<"$clean"
 }
 
-# Count statuses from TSV. Sets COMPLETED, ACTIVE, FAILED, ERROR, TOTAL,
-# and ERROR_LINES in the caller's scope.
+# Count statuses from TSV. Sets COMPLETED, ACTIVE, FAILED, ABANDONED, ERROR,
+# TOTAL, and ERROR_LINES in the caller's scope.  "abandoned" is a terminal
+# state (a replica that exhausted its restart attempts); it is counted like a
+# completed replica for termination purposes but surfaced separately so the
+# user is alerted.
 count_statuses() {
-    COMPLETED=0 ACTIVE=0 FAILED=0 ERROR=0 TOTAL=0
+    COMPLETED=0 ACTIVE=0 FAILED=0 ABANDONED=0 ERROR=0 TOTAL=0
     ERROR_LINES=""
     local directory status replica info tname
     while IFS=$'\t' read -r directory status replica info; do
@@ -174,6 +194,7 @@ count_statuses() {
             completed) COMPLETED=$((COMPLETED + 1)) ;;
             active) ACTIVE=$((ACTIVE + 1)) ;;
             failed) FAILED=$((FAILED + 1)) ;;
+            abandoned) ABANDONED=$((ABANDONED + 1)) ;;
             error)
                 ERROR=$((ERROR + 1))
                 tname="$(basename "$(dirname "$directory")")"
@@ -188,11 +209,17 @@ count_statuses() {
 # RESTART_LINES in the caller's scope.
 parse_restarts() {
     RESTART_COUNT=0 RESTART_LINES=""
-    local line
+    local line ids
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         RESTART_LINES+="  ${line}"$'\n'
-        [[ "$line" == "Submitted batch job"* ]] && RESTART_COUNT=$((RESTART_COUNT + 1))
+        # Count individual replicas (not sbatch submissions) so the figure
+        # matches dry-run mode: restart_failed prints one
+        # "Resubmitting <t> replicas [a,b,c]" line per transformation.
+        if [[ "$line" =~ replicas\ \[([^]]+)\] ]]; then
+            ids="${BASH_REMATCH[1]}"
+            RESTART_COUNT=$((RESTART_COUNT + $(awk -F',' '{print NF}' <<<"$ids")))
+        fi
     done <<<"$1"
 }
 
@@ -214,8 +241,13 @@ echo ""
 
 # ---- Process each directory ----
 
-GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_FAILED=0 GRAND_ERROR=0
+GRAND_COMPLETED=0 GRAND_ACTIVE=0 GRAND_FAILED=0 GRAND_ABANDONED=0 GRAND_ERROR=0
 GRAND_TOTAL=0 GRAND_RESTARTS=0 GRAND_SKIPPED=0
+# A dir is "complete" only if it has work AND all of it completed.  Any dir that
+# is not complete -- including one with 0 enumerable work so far -- keeps
+# ALL_COMPLETE false so the monitor cannot declare "all done" prematurely while
+# another monitored dir has not had its jobs enumerated yet.
+ALL_COMPLETE=true
 REPORT=""
 
 for DIR in "${DIRS[@]}"; do
@@ -252,12 +284,21 @@ for DIR in "${DIRS[@]}"; do
     GRAND_COMPLETED=$((GRAND_COMPLETED + COMPLETED))
     GRAND_ACTIVE=$((GRAND_ACTIVE + ACTIVE))
     GRAND_FAILED=$((GRAND_FAILED + FAILED))
+    GRAND_ABANDONED=$((GRAND_ABANDONED + ABANDONED))
     GRAND_ERROR=$((GRAND_ERROR + ERROR))
     GRAND_TOTAL=$((GRAND_TOTAL + TOTAL))
     GRAND_RESTARTS=$((GRAND_RESTARTS + RESTART_COUNT))
 
+    # This dir is in a terminal state only if it has work and every replica is
+    # either completed or abandoned (gave up after the restart cap).  Abandoned
+    # replicas count toward termination so the monitor does not loop forever on
+    # a permanently-failing replica, but they are surfaced separately below.
+    if ! ((TOTAL > 0 && COMPLETED + ABANDONED == TOTAL)); then
+        ALL_COMPLETE=false
+    fi
+
     # Build per-directory report.
-    R="[${DIR_NAME}] ${COMPLETED}/${TOTAL} completed, ${ACTIVE} active, ${FAILED} failed, ${ERROR} error"$'\n'
+    R="[${DIR_NAME}] ${COMPLETED}/${TOTAL} completed, ${ACTIVE} active, ${FAILED} failed, ${ABANDONED} abandoned, ${ERROR} error"$'\n'
     [[ -n "$RESTART_LINES" ]] && R+="${RESTART_LINES}"
     [[ -n "$ERROR_LINES" ]] && R+="${ERROR_LINES}"
     REPORT+="${R}"$'\n'
@@ -267,17 +308,22 @@ done
 # ---- All done? ----
 
 ALL_DONE=false
-if ((GRAND_SKIPPED == 0 && GRAND_TOTAL > 0 && GRAND_COMPLETED == GRAND_TOTAL)); then
+if [[ "$ALL_COMPLETE" == true ]] && ((GRAND_SKIPPED == 0 && GRAND_TOTAL > 0)); then
     ALL_DONE=true
 fi
 
 # ---- Email ----
 
-SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active, ${GRAND_FAILED} failed, ${GRAND_ERROR} error"
+SUMMARY="${GRAND_COMPLETED}/${GRAND_TOTAL} completed, ${GRAND_ACTIVE} active, ${GRAND_FAILED} failed, ${GRAND_ABANDONED} abandoned, ${GRAND_ERROR} error, ${GRAND_RESTARTS} restarted"
 
 if [[ "$ALL_DONE" == true ]]; then
-    SUBJECT="[OpenFE Monitor] All ${GRAND_TOTAL} jobs completed"
-    BODY="All jobs completed."$'\n\n'"${REPORT}"
+    if ((GRAND_ABANDONED > 0)); then
+        SUBJECT="[OpenFE Monitor] Done with ${GRAND_ABANDONED} abandoned (of ${GRAND_TOTAL})"
+        BODY="All replicas reached a terminal state, but ${GRAND_ABANDONED} were abandoned"$'\n'"after exhausting their restart attempts -- investigate these."$'\n\n'"${REPORT}"
+    else
+        SUBJECT="[OpenFE Monitor] All ${GRAND_TOTAL} jobs completed"
+        BODY="All jobs completed."$'\n\n'"${REPORT}"
+    fi
 else
     SUBJECT="[OpenFE Monitor] ${SUMMARY}"
     BODY="$(date)"$'\n\n'"${REPORT}"
@@ -289,7 +335,9 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "Subject: ${SUBJECT}"
     echo "$BODY"
 else
-    send_email "$SUBJECT" "$BODY" "$EMAIL"
+    # A flaky mail command must not abort the monitor before it self-resubmits.
+    send_email "$SUBJECT" "$BODY" "$EMAIL" ||
+        echo "Warning: send_email failed; continuing without aborting the monitor." >&2
 fi
 
 # ---- Self-resubmit or exit ----
@@ -299,14 +347,28 @@ if [[ "$ALL_DONE" == true ]]; then
     exit 0
 fi
 
+# All monitored directories are valid but contain no enumerable work (nothing
+# submitted yet).  The monitor cannot create initial jobs, so resubmitting would
+# loop forever emailing "0/0"; exit instead and let the user submit jobs.
+if ((GRAND_TOTAL == 0 && GRAND_SKIPPED == 0)); then
+    echo "No enumerable work found in any monitored directory; nothing to monitor."
+    echo "Submit jobs first (e.g. quickrun.sh), then restart the monitor. Not resubmitting."
+    exit 0
+fi
+
 ARGS=(-d "${DIRS[@]}" -e "$EMAIL" -i "$INTERVAL")
 [[ "$DRY_RUN" == true ]] && ARGS+=(-n)
 
 if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY RUN] Would resubmit: sbatch --chdir ${SCRIPTS_DIR} --begin=now+${INTERVAL}hour --dependency=singleton ${SCRIPTS_DIR}/monitor.sbatch ${ARGS[*]}"
+    echo "[DRY RUN] Would resubmit: sbatch --chdir ${SCRIPTS_DIR} --begin=now+${INTERVAL}hour --dependency=singleton --mail-user=${EMAIL} ${SCRIPTS_DIR}/monitor.sbatch ${ARGS[*]}"
 else
     echo "Resubmitting for next check in ${INTERVAL} hour(s)..."
-    sbatch --chdir "$SCRIPTS_DIR" --begin="now+${INTERVAL}hour" --dependency=singleton "${SCRIPTS_DIR}/monitor.sbatch" "${ARGS[@]}"
+    # Ensure the relative #SBATCH --output=logs/... path exists for the next job
+    # (SLURM opens it at launch, before the script body runs), and pass
+    # --mail-user explicitly since the #SBATCH directive cannot expand $EMAIL.
+    mkdir -p "${SCRIPTS_DIR}/logs"
+    sbatch --chdir "$SCRIPTS_DIR" --begin="now+${INTERVAL}hour" --dependency=singleton \
+        --mail-user="$EMAIL" "${SCRIPTS_DIR}/monitor.sbatch" "${ARGS[@]}"
 fi
 
 echo "Done."
