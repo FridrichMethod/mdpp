@@ -173,6 +173,7 @@ def _propka_variants(
         ``None`` to keep OpenMM's default selection.
     """
     overrides: dict[tuple[str, str, str], str] = {}
+    labels: dict[tuple[str, str, str], str] = {}
     for residue in nonstandard:
         table = _PROTONATED_VARIANT if residue.is_protonated_at(pH) else _DEPROTONATED_VARIANT
         variant = table.get(residue.residue_type)
@@ -182,9 +183,29 @@ def _propka_variants(
                 residue.label,
             )
             continue
-        overrides[(residue.chain_id, str(residue.res_num), residue.residue_type)] = variant
-        logger.info("Applying PROPKA protonation %s -> %s", residue.label, variant)
-    return [overrides.get((res.chain.id, res.id, res.name)) for res in topology.residues()]
+        key = (residue.chain_id, str(residue.res_num), residue.residue_type)
+        overrides[key] = variant
+        labels[key] = residue.label
+
+    matched: set[tuple[str, str, str]] = set()
+    variants: list[str | None] = []
+    for res in topology.residues():
+        key = (res.chain.id, res.id, res.name)
+        if overrides.get(key) is not None:
+            matched.add(key)
+        variants.append(overrides.get(key))
+
+    for key in matched:
+        logger.info("Applying PROPKA protonation %s -> %s", labels[key], overrides[key])
+    unmatched = set(overrides) - matched
+    if unmatched:
+        logger.warning(
+            "%d PROPKA override(s) matched no topology residue (chain/residue id "
+            "mismatch); protonation NOT applied: %s",
+            len(unmatched),
+            sorted(labels[key] for key in unmatched),
+        )
+    return variants
 
 
 def fix_pdb(
@@ -196,9 +217,8 @@ def fix_pdb(
 ) -> None:
     """Fix a PDB file by adding missing residues, atoms, and hydrogens.
 
-    Removes heterogens (excluding water by default), identifies missing
-    residues and atoms, then adds them back along with hydrogens at the
-    specified pH.
+    Removes all heterogens including water, identifies missing residues and
+    atoms, then adds them back along with hydrogens at the specified pH.
 
     Runs PROPKA to check for residues whose environment-shifted pKa predicts
     a different protonation state than the model-pKa default used by PDBFixer,

@@ -35,7 +35,11 @@ def slice_trajectory(
     stop: int | None = None,
     stride: int | None = None,
 ) -> md.Trajectory:
-    """Slice a trajectory by frame range with validation.
+    """Slice a trajectory by frame range.
+
+    Out-of-range ``start``/``stop`` are clamped per standard Python slice
+    semantics, and a zero ``stride`` raises ``ValueError`` ("slice step cannot
+    be zero").
 
     Args:
         traj: Input trajectory.

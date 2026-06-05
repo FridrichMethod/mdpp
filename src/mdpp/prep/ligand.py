@@ -42,9 +42,14 @@ def constraint_minimization(mol: Chem.Mol, *, max_iters: int = 5000) -> Chem.Mol
         max_iters: Maximum number of minimization iterations.
 
     Returns:
-        The molecule with optimized hydrogen positions.
+        The molecule with optimized hydrogen positions (modified in place).
+
+    Raises:
+        ValueError: If UFF parameters are unavailable for this molecule.
     """
     ff = AllChem.UFFGetMoleculeForceField(mol, confId=0)
+    if ff is None:
+        raise ValueError("UFF parameters unavailable for this molecule; cannot minimize.")
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum() != 1:
             ff.AddFixedPoint(atom.GetIdx())
