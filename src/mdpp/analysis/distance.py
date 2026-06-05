@@ -228,10 +228,13 @@ def compute_minimum_distance(
     indices_1 = select_atom_indices(traj.topology, group1)
     indices_2 = select_atom_indices(traj.topology, group2)
 
-    pairs = np.array(
-        [(i, j) for i in indices_1 for j in indices_2],
-        dtype=np.int_,
-    )
+    # Vectorised Cartesian product (row-major: i varies slowest), matching the
+    # ``for i in indices_1 for j in indices_2`` ordering while avoiding a
+    # pure-Python O(|g1| * |g2|) comprehension and yielding a clean (0, 2)
+    # shape for empty selections.
+    i_col = np.repeat(indices_1, indices_2.size)
+    j_col = np.tile(indices_2, indices_1.size)
+    pairs = np.column_stack((i_col, j_col)).astype(np.int_, copy=False)
     all_distances = _compute_pairwise_distances(
         traj,
         pairs,
