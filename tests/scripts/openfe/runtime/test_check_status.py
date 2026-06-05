@@ -134,7 +134,7 @@ class TestCompletedReplica:
 
 
 class TestNullEstimate:
-    """Replica with null estimate/uncertainty shows failed."""
+    """Replica with a null estimate/uncertainty and no active job shows failed."""
 
     def test_null_estimate_is_failed(
         self, slurm_env: dict[str, Path], openfe_workspace: dict[str, Path]
@@ -146,8 +146,12 @@ class TestNullEstimate:
 
         rows = _parse_rows(result.stdout)
         assert len(rows) == 1
+        # A null/empty estimate deliberately falls through to the queue check
+        # (it usually means the result is mid-write while the job is still
+        # running). With no matching active job it is classified failed with
+        # the generic "incomplete" message, same as a missing result.
         assert rows[0]["status"] == "failed"
-        assert "null estimate/uncertainty" in rows[0]["info"]
+        assert "incomplete" in rows[0]["info"]
 
 
 class TestNoResultNoJob:
