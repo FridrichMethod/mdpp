@@ -91,6 +91,13 @@ echo "=== Found ${#SUBDIRS[@]} subdirectories, transferring with $JOBS parallel 
 LOGDIR="$LOCAL_DIR/.transfer_logs"
 mkdir -p "$LOGDIR"
 
+# --append-verify optimizes the dominant workload: large, append-only
+# trajectory files (.xtc/.trr) that only grow on the cluster, transferred by
+# appending the new tail and checksum-verifying the whole file. CAVEAT: it
+# assumes existing local files are prefixes of the remote ones. An ancillary
+# file (.tpr/.gro/index/log) rewritten in place at the SAME size will NOT be
+# re-fetched. Re-run into a clean LOCAL_DIR (or drop --append-verify) if such
+# files may have changed.
 RSYNC_OPTS=(-ahP --append-verify)
 [[ -n "$DRY_RUN" ]] && RSYNC_OPTS+=("$DRY_RUN")
 

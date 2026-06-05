@@ -60,8 +60,23 @@ PIDS=()
 SUBDIRS=()
 FAILED=()
 RUNNING=0
+NEXT_WAIT=0
 declare -A WAITED
 declare -A PID_NAME
+
+# Reap the oldest still-running launched job (FIFO) and record its status.
+# Uses `wait <pid>` rather than `wait -n -p VAR`, which is bash >= 5.1 only and
+# silently breaks the throttle on RHEL8-class bash 4.4 found on many HPC nodes.
+# FIFO reaping is sufficient to enforce the -j concurrency cap.
+reap_one() {
+    local pid="${PIDS[${NEXT_WAIT}]}"
+    if ! wait "${pid}"; then
+        FAILED+=("${PID_NAME[${pid}]}")
+    fi
+    WAITED[${pid}]=1
+    NEXT_WAIT=$((NEXT_WAIT + 1))
+    RUNNING=$((RUNNING - 1))
+}
 
 # Discover simulation directories by locating ${PRODUCTION}.tpr recursively.
 mapfile -t SIM_DIRS < <(find "${TARGET_DIR}" -name "${PRODUCTION}.tpr" -type f -printf '%h\n' | sort -u)
@@ -70,13 +85,7 @@ for subdir in "${SIM_DIRS[@]}"; do
     [[ -d "${subdir}" ]] || continue
 
     while [[ ${MAX_JOBS} -gt 0 && ${RUNNING} -ge ${MAX_JOBS} ]]; do
-        DONE_PID=""
-        if ! wait -n -p DONE_PID; then
-            [[ -n "${DONE_PID}" ]] && WAITED[${DONE_PID}]=1 && FAILED+=("${PID_NAME[${DONE_PID}]}")
-        else
-            [[ -n "${DONE_PID}" ]] && WAITED[${DONE_PID}]=1
-        fi
-        RUNNING=$((RUNNING - 1))
+        reap_one
     done
 
     label="${subdir#"${TARGET_DIR}"/}"

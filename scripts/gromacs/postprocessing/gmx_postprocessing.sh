@@ -9,9 +9,18 @@ mkdir -p tmp
 cp index.ndx tmp/
 cp "${PRODUCTION}".gro "${PRODUCTION}".edr "${PRODUCTION}".tpr tmp/
 
-ln -s "$(realpath "${PRODUCTION}.xtc")" tmp/
+ln -sf "$(realpath "${PRODUCTION}.xtc")" tmp/
 
 cd tmp
+
+# The SOLU (solute) group is consumed below for complex extraction but is not
+# created by this script; it must already exist in index.ndx (the CHARMM-GUI
+# default, or add it via the commented-out `gmx select` block above). Fail
+# early with a clear message rather than mid-pipeline if it is missing.
+grep -q '\[ SOLU \]' index.ndx || {
+    printf 'Error: index.ndx must contain a SOLU group (CHARMM-GUI default).\n' >&2
+    exit 1
+}
 
 # gmx select \
 #     -s "${PRODUCTION}.tpr" \
