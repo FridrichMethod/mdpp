@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from mdpp._dtype import resolve_dtype
 from mdpp._types import DtypeArg
+from mdpp.core.trajectory import trajectory_time_ps
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,7 @@ class DSSPResult:
     """Per-frame secondary structure assignments.
 
     Attributes:
+        time_ps: Per-frame time values in picoseconds, of shape ``(n_frames,)``.
         assignments: Character array of shape ``(n_frames, n_residues)``
             with DSSP codes (``"H"``, ``"E"``, ``"C"`` when simplified, or
             full 8-state codes otherwise).
@@ -28,16 +30,23 @@ class DSSPResult:
             of ``frequency``.
     """
 
+    time_ps: NDArray[np.floating]
     assignments: NDArray[np.str_]
     residue_ids: NDArray[np.int_]
     frequency: NDArray[np.floating]
     categories: list[str]
+
+    @property
+    def time_ns(self) -> NDArray[np.floating]:
+        """Return frame times in nanoseconds."""
+        return self.time_ps / 1000.0
 
 
 def compute_dssp(
     traj: md.Trajectory,
     *,
     simplified: bool = True,
+    timestep_ps: float | None = None,
     dtype: DtypeArg = None,
 ) -> DSSPResult:
     """Compute per-residue secondary structure assignments across frames.
@@ -46,6 +55,8 @@ def compute_dssp(
         traj: Input trajectory.
         simplified: If ``True``, use 3-state classification (H=helix,
             E=sheet, C=coil). Otherwise use the full 8-state DSSP codes.
+        timestep_ps: Optional fixed timestep to enforce for the time axis.
+            If provided, time values are ``np.arange(n_frames) * timestep_ps``.
         dtype: Output float dtype for frequency array. If ``None``, uses
             the package default.
 
@@ -72,6 +83,7 @@ def compute_dssp(
         frequency[:, cat_index] = np.mean(assignments == cat, axis=0)
 
     return DSSPResult(
+        time_ps=trajectory_time_ps(traj, timestep_ps=timestep_ps, dtype=resolved),
         assignments=assignments,
         residue_ids=residue_ids,
         frequency=frequency,
