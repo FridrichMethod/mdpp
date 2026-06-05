@@ -9,11 +9,13 @@ Provides five backends for pairwise distances between atom pairs:
 - ``jax`` -- JAX/XLA vectorised operations on GPU/CPU.
 
 All backends share the same positional signature ``(traj, pairs)`` and
-return a floating-point numpy array of shape ``(n_frames, n_pairs)``
-in the backend's **native** dtype (float32 for mdtraj / GPU backends,
-float64 for numba).  The public :func:`compute_distances` wrapper
-casts with ``copy=False`` so no redundant copy is made when the
-resolved user dtype already matches.
+return a floating-point numpy array of shape ``(n_frames, n_pairs)`` in
+the backend's **native** dtype (float32 for every backend in this
+module).  Unlike the numba RMSD/DCCM kernels, this numba distance kernel
+stores its result as float32 (promoting only the intermediate math to
+``double``) to halve memory at large ``n_frames * n_pairs``.  The public
+:func:`compute_distances` wrapper casts with ``copy=False`` so no
+redundant copy is made when the resolved user dtype already matches.
 
 The mdtraj backend additionally accepts a keyword-only ``periodic``
 argument for minimum image convention; non-mdtraj backends do not
@@ -72,6 +74,31 @@ def _validate_pairs(n_atoms: int, pairs: NDArray[np.int_]) -> None:
         )
 
 
+@njit(parallel=True, cache=True)
+def _distances_numba_kernel(
+    xyz: NDArray[np.float32], pairs: NDArray[np.int_]
+) -> NDArray[np.floating]:  # pragma: no cover - JIT-compiled
+    """Numba-parallel non-periodic pairwise distance kernel.
+
+    Defined at module scope (not nested inside :func:`distances_numba`) so a
+    single ``Dispatcher`` persists across calls and reuses its in-memory
+    compiled signature cache instead of reloading the on-disk artifact each
+    invocation.
+    """
+    n_frames = xyz.shape[0]
+    n_pairs = pairs.shape[0]
+    out = np.empty((n_frames, n_pairs), dtype=np.float32)
+    for f in prange(n_frames):
+        for k in range(n_pairs):
+            i = pairs[k, 0]
+            j = pairs[k, 1]
+            dx = float(xyz[f, i, 0]) - float(xyz[f, j, 0])
+            dy = float(xyz[f, i, 1]) - float(xyz[f, j, 1])
+            dz = float(xyz[f, i, 2]) - float(xyz[f, j, 2])
+            out[f, k] = np.sqrt(dx * dx + dy * dy + dz * dz)
+    return out
+
+
 def distances_mdtraj(
     traj: md.Trajectory,
     pairs: NDArray[np.int_],
@@ -126,25 +153,7 @@ def distances_numba(
         ValueError: If any pair index is out of range.
     """
     _validate_pairs(traj.n_atoms, pairs)
-
-    @njit(parallel=True, cache=True)
-    def _kernel(
-        xyz: NDArray[np.float32], pairs: NDArray[np.int_]
-    ) -> NDArray[np.floating]:  # pragma: no cover - JIT-compiled
-        n_frames = xyz.shape[0]
-        n_pairs = pairs.shape[0]
-        out = np.empty((n_frames, n_pairs), dtype=np.float32)
-        for f in prange(n_frames):
-            for k in range(n_pairs):
-                i = pairs[k, 0]
-                j = pairs[k, 1]
-                dx = float(xyz[f, i, 0]) - float(xyz[f, j, 0])
-                dy = float(xyz[f, i, 1]) - float(xyz[f, j, 1])
-                dz = float(xyz[f, i, 2]) - float(xyz[f, j, 2])
-                out[f, k] = np.sqrt(dx * dx + dy * dy + dz * dz)
-        return out
-
-    return _kernel(traj.xyz, pairs)
+    return _distances_numba_kernel(traj.xyz, pairs)
 
 
 @clean_cupy_cache

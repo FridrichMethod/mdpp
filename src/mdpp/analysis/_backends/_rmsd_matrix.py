@@ -104,14 +104,17 @@ class RMSDMatrixBackendFn(Protocol):
 
     All registered backends return a symmetric ``(n_frames, n_frames)``
     floating-point numpy array of RMSD values (in nm) computed over
-    the selected ``atom_indices``.  Backends return their **native**
-    dtype (float32 for the GPU backends, float64 for numba and
-    mdtraj); the public :func:`compute_rmsd_matrix` wrapper then
-    casts with ``copy=False`` to the user-selected dtype, which is a
-    no-op when the dtypes already match.  Requiring a specific
-    floating dtype here would force every backend to produce a
-    redundant ~N^2-sized copy purely for the type contract -- a real
-    problem at 120k frames where one float64 matrix is 115 GB.
+    the selected ``atom_indices``.  Every backend returns **float32**:
+    the GPU and mdtraj backends inherit mdtraj's float32 coordinate
+    precision, and the numba kernel accumulates the QCP solve in
+    float64 but stores the O(N^2) result matrix as float32 to halve its
+    footprint (57 GB instead of 115 GB at 120k frames).  The public
+    :func:`compute_rmsd_matrix` wrapper then casts with ``copy=False``
+    to the user-selected dtype, which is a no-op when the dtypes
+    already match.  Requiring a specific floating dtype here would force
+    every backend to produce a redundant ~N^2-sized copy purely for the
+    type contract -- a real problem at 120k frames where one float64
+    matrix is 115 GB.
     """
 
     def __call__(
