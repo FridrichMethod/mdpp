@@ -5,13 +5,25 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 import mdtraj as md
 from Bio.PDB import Select
 
 from mdpp._types import StrPath
 
+if TYPE_CHECKING:
+    from openmm.app import Topology
+
 logger = logging.getLogger(__name__)
+
+# OpenMM Modeller.addHydrogens variant names used to apply PROPKA-predicted
+# protonation. A residue is overridden only where PROPKA disagrees with the
+# model-pKa default (PropkaResult.get_nonstandard); every other residue keeps
+# OpenMM's default pH-based selection. Residue types not listed here (e.g.
+# termini "N+"/"C-") are left to OpenMM and logged.
+_PROTONATED_VARIANT: dict[str, str] = {"ASP": "ASH", "GLU": "GLH", "HIS": "HIP"}
+_DEPROTONATED_VARIANT: dict[str, str] = {"LYS": "LYN", "CYS": "CYX", "HIS": "HIE"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +148,52 @@ class ChainSelect(Select):
         return int(chain.id in self.chain_ids)
 
 
-def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None:
+def _propka_variants(
+    topology: Topology,
+    nonstandard: tuple[PropkaResidue, ...],
+    pH: float,
+) -> list[str | None]:
+    """Build a per-residue protonation variant list for ``Modeller.addHydrogens``.
+
+    Only residues in ``nonstandard`` (where PROPKA disagrees with the model-pKa
+    default) are overridden to PROPKA's predicted state; every other residue
+    maps to ``None`` so OpenMM's default pH-based rule applies. Residues whose
+    type has no supported variant (e.g. termini ``N+``/``C-``) are skipped and
+    logged.
+
+    Args:
+        topology: OpenMM topology the variant list must align with (one entry
+            per residue, in topology order).
+        nonstandard: Residues whose PROPKA-predicted protonation differs from
+            the model-pKa default.
+        pH: pH at which protonation states are evaluated.
+
+    Returns:
+        One entry per topology residue: the OpenMM variant name to force, or
+        ``None`` to keep OpenMM's default selection.
+    """
+    overrides: dict[tuple[str, str, str], str] = {}
+    for residue in nonstandard:
+        table = _PROTONATED_VARIANT if residue.is_protonated_at(pH) else _DEPROTONATED_VARIANT
+        variant = table.get(residue.residue_type)
+        if variant is None:
+            logger.warning(
+                "PROPKA protonation for %s has no OpenMM variant; keeping default.",
+                residue.label,
+            )
+            continue
+        overrides[(residue.chain_id, str(residue.res_num), residue.residue_type)] = variant
+        logger.info("Applying PROPKA protonation %s -> %s", residue.label, variant)
+    return [overrides.get((res.chain.id, res.id, res.name)) for res in topology.residues()]
+
+
+def fix_pdb(
+    pdb_path: StrPath,
+    fixed_pdb_path: StrPath,
+    pH: float = 7.0,
+    *,
+    protonation: Literal["model", "propka"] = "model",
+) -> None:
     """Fix a PDB file by adding missing residues, atoms, and hydrogens.
 
     Removes heterogens (excluding water by default), identifies missing
@@ -151,6 +208,14 @@ def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None
         pdb_path: Path to the input PDB file.
         fixed_pdb_path: Path where the fixed PDB will be written.
         pH: pH value for hydrogen placement.
+        protonation: Protonation policy. ``"model"`` (default) uses PDBFixer's
+            built-in model pKa values. ``"propka"`` keeps the model default for
+            most residues but overrides the residues where PROPKA disagrees
+            (``PropkaResult.get_nonstandard``) with PROPKA's predicted state,
+            applied via OpenMM ``Modeller`` variants. Supported overrides are
+            ASP/GLU/LYS/HIS/CYS (a neutral histidine uses the HIE tautomer);
+            unsupported residue types (e.g. termini) keep the default and are
+            logged.
     """
     result = run_propka(pdb_path)
     nonstandard = result.get_nonstandard(pH)
@@ -169,7 +234,7 @@ def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None
             lines,
         )
 
-    from openmm.app import PDBFile
+    from openmm.app import Modeller, PDBFile
     from pdbfixer import PDBFixer
 
     fixer = PDBFixer(filename=str(pdb_path))
@@ -177,10 +242,19 @@ def fix_pdb(pdb_path: StrPath, fixed_pdb_path: StrPath, pH: float = 7.0) -> None
     fixer.findMissingResidues()
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
-    fixer.addMissingHydrogens(pH=pH)
+
+    if protonation == "propka" and nonstandard:
+        # Apply PROPKA-predicted states for the disagreeing residues; OpenMM's
+        # default pH rule still handles every other residue (None variant).
+        modeller = Modeller(fixer.topology, fixer.positions)
+        modeller.addHydrogens(pH=pH, variants=_propka_variants(modeller.topology, nonstandard, pH))
+        topology, positions = modeller.topology, modeller.positions
+    else:
+        fixer.addMissingHydrogens(pH=pH)
+        topology, positions = fixer.topology, fixer.positions
 
     with Path(fixed_pdb_path).open("w") as f:
-        PDBFile.writeFile(fixer.topology, fixer.positions, f)
+        PDBFile.writeFile(topology, positions, f)
 
 
 def strip_solvent(
