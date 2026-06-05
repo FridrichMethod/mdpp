@@ -324,12 +324,21 @@ def _dbscan_label(
 # Private helpers
 # ---------------------------------------------------------------------------
 
+# Row-block size for chunked medoid reduction; caps peak memory at
+# ``_MEDOID_CHUNK * |members|`` instead of the full ``|members|^2`` submatrix.
+_MEDOID_CHUNK = 1024
+
 
 def _validate_rmsd_matrix(rmsd_matrix: NDArray[np.floating]) -> None:
     """Validate that *rmsd_matrix* is a finite, square, 2-D array."""
     if rmsd_matrix.ndim != 2 or rmsd_matrix.shape[0] != rmsd_matrix.shape[1]:
         raise ValueError(f"rmsd_matrix must be a square 2-D array, got shape {rmsd_matrix.shape}")
-    if rmsd_matrix.size > 0 and not np.isfinite(rmsd_matrix).all():
+    # Reduce to a scalar before the finiteness test instead of materialising a
+    # full N^2 boolean temporary (8 GB at 90k frames).  RMSD entries are
+    # non-negative and bounded (a few nm), so the float32 sum stays far below
+    # float32 max and cannot overflow to Inf falsely, while any NaN/Inf entry
+    # still propagates through the reduction and is caught.
+    if rmsd_matrix.size > 0 and not np.isfinite(rmsd_matrix.sum()):
         raise ValueError("rmsd_matrix contains NaN or Inf values")
 
 
@@ -338,12 +347,29 @@ def _compute_medoids(
     labels: NDArray[np.int_],
     n_clusters: int,
 ) -> NDArray[np.int_]:
-    """Compute medoid frame index per cluster from the RMSD matrix."""
+    """Compute medoid frame index per cluster from the RMSD matrix.
+
+    The medoid is the member minimising the total intra-cluster distance.
+    Rather than materialising the full ``(|members|, |members|)`` submatrix --
+    which approaches a complete N^2 copy for DBSCAN's dominant cluster and
+    breaks the module's documented O(n) auxiliary-memory guarantee -- the
+    per-member row sums are reduced in fixed-size row chunks, capping peak
+    extra memory at ``_MEDOID_CHUNK * |members|``.
+    """
     medoids = np.empty(n_clusters, dtype=np.int_)
     for k in range(n_clusters):
         members = np.where(labels == k)[0]
-        sub_matrix = rmsd_matrix[np.ix_(members, members)]
-        medoids[k] = members[np.argmin(sub_matrix.sum(axis=1))]
+        if members.size == 0:
+            # Defensive: all current RMSD-matrix callers produce gap-free
+            # labels, but guard against a future caller passing a label gap so
+            # np.argmin is never handed an empty array.
+            medoids[k] = 0
+            continue
+        sums = np.empty(members.size, dtype=np.float64)
+        for start in range(0, members.size, _MEDOID_CHUNK):
+            rows = members[start : start + _MEDOID_CHUNK]
+            sums[start : start + _MEDOID_CHUNK] = rmsd_matrix[np.ix_(rows, members)].sum(axis=1)
+        medoids[k] = members[np.argmin(sums)]
     return medoids
 
 
@@ -415,6 +441,12 @@ def _make_feature_result(
         sq_dists = _pairwise_sq_distances(feature_matrix, centers)
         for k in range(n_clusters):
             members = np.where(labels == k)[0]
+            if members.size == 0:
+                # Empty cluster (e.g. n_clusters > distinct samples; sklearn
+                # emits a ConvergenceWarning). Fall back to the global frame
+                # nearest to center k so medoid_frames stays a valid index.
+                medoids[k] = int(np.argmin(sq_dists[:, k]))
+                continue
             medoids[k] = members[np.argmin(sq_dists[members, k])]
     return FeatureClusteringResult(
         labels=labels.astype(np.int_, copy=False),

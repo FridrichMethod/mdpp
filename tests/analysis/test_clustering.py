@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 
 import mdtraj as md
 import numpy as np
@@ -663,6 +664,22 @@ class TestKMeans:
         result = KMeans(n_clusters=3, random_state=None)(clustered_features)
         assert isinstance(result, FeatureClusteringResult)
         assert result.n_clusters == 3
+
+    def test_empty_cluster_does_not_raise(self) -> None:
+        """Degenerate data (n_clusters > distinct points) yields empty clusters.
+
+        The medoid loop must fall back to a valid frame index instead of
+        raising ``np.argmin`` on an empty member array.
+        """
+        # 6 samples at only 2 distinct locations; 5 requested clusters forces
+        # empty clusters (sklearn emits a ConvergenceWarning).
+        features = np.array([[0.0, 0.0]] * 3 + [[5.0, 5.0]] * 3, dtype=np.float32)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = KMeans(n_clusters=5, random_state=0)(features)
+        assert result.medoid_frames.shape == (5,)
+        assert np.all(result.medoid_frames >= 0)
+        assert np.all(result.medoid_frames < features.shape[0])
 
 
 # ---------------------------------------------------------------------------
