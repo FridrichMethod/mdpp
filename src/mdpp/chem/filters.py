@@ -33,15 +33,18 @@ def get_framework(
 
     Returns:
         The scaffold in the same type as the input (SMILES string or Mol).
+
+    Raises:
+        ValueError: If a SMILES input string cannot be parsed.
     """
     if isinstance(mol, str):
+        parsed = Chem.MolFromSmiles(mol)
+        if parsed is None:
+            raise ValueError(f"Invalid SMILES: {mol!r}")
+        scaffold = MurckoScaffold.GetScaffoldForMol(parsed)
         if generic:
-            return Chem.MolToSmiles(
-                MurckoScaffold.MakeScaffoldGeneric(
-                    MurckoScaffold.GetScaffoldForMol(Chem.MolFromSmiles(mol))
-                )
-            )
-        return MurckoScaffold.MurckoScaffoldSmilesFromSmiles(mol)
+            scaffold = MurckoScaffold.MakeScaffoldGeneric(scaffold)
+        return Chem.MolToSmiles(scaffold)
 
     if generic:
         return MurckoScaffold.MakeScaffoldGeneric(MurckoScaffold.GetScaffoldForMol(mol))

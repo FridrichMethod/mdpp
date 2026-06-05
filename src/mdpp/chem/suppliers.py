@@ -24,12 +24,14 @@ class MolSupplier:
     ``rdkit.Chem.PandasTools`` for small files and CSV/XLSX formats.
 
     Examples:
-        >>> supplier = MolSupplier("molecules.sdf")
-        >>> for mol in supplier:
-        ...     print(Chem.MolToSmiles(mol))
+        >>> with MolSupplier("molecules.sdf") as supplier:
+        ...     for mol in supplier:
+        ...         print(Chem.MolToSmiles(mol))
 
     Note:
         Molecule ordering is not guaranteed when *multithreaded* is True.
+        Use as a context manager (or call :meth:`close`) so any underlying
+        gzip / text file handle is released deterministically.
     """
 
     _THREAD_NUM: int = 0
@@ -50,6 +52,9 @@ class MolSupplier:
                 is not available for the format.
         """
         ext = os.path.splitext(file)[1].lower()
+        # File handles opened here (gzip streams, the .smr text file) that the
+        # RDKit supplier does not own; closed by close()/__exit__.
+        self._handles: list[Any] = []
 
         match ext, multithreaded:
             case ".sdf", False:
@@ -63,15 +68,16 @@ class MolSupplier:
                     **kwargs,
                 )
             case ".sdfgz", False:
+                fh = gzip.open(file)  # noqa: SIM115 - lifetime tied to close()/__exit__
+                self._handles.append(fh)
                 # RDKit stubs only document the str overload; the supplier
                 # accepts a file-like object at runtime.
-                self.mol_supplier = Chem.SDMolSupplier(  # type: ignore[call-overload]
-                    gzip.open(file),  # noqa: SIM115
-                    **kwargs,
-                )
+                self.mol_supplier = Chem.SDMolSupplier(fh, **kwargs)  # type: ignore[call-overload]
             case ".sdfgz", True:
+                fh = gzip.open(file)  # noqa: SIM115 - lifetime tied to close()/__exit__
+                self._handles.append(fh)
                 self.mol_supplier = Chem.MultithreadedSDMolSupplier(  # type: ignore[call-overload]
-                    gzip.open(file),  # noqa: SIM115
+                    fh,
                     numWriterThreads=self._THREAD_NUM,
                     sizeInputQueue=self._QUEUE_SIZE,
                     sizeOutputQueue=self._QUEUE_SIZE,
@@ -82,10 +88,9 @@ class MolSupplier:
             case ".mae", True:
                 raise TypeError("Multithreading is not supported for .mae files.")
             case ".maegz", False:
-                self.mol_supplier = Chem.MaeMolSupplier(
-                    gzip.open(file),  # noqa: SIM115
-                    **kwargs,
-                )
+                fh = gzip.open(file)  # noqa: SIM115 - lifetime tied to close()/__exit__
+                self._handles.append(fh)
+                self.mol_supplier = Chem.MaeMolSupplier(fh, **kwargs)
             case ".maegz", True:
                 raise TypeError("Multithreading is not supported for .maegz files.")
             case ".smi", False:
@@ -101,6 +106,7 @@ class MolSupplier:
                 )
             case ".smr", False:
                 self._smr_fh = open(file, encoding="utf-8")  # noqa: SIM115
+                self._handles.append(self._smr_fh)
                 # The supplier attribute is duck-typed across RDKit suppliers
                 # and a generator; mypy infers the first branch's type only.
                 self.mol_supplier = (  # type: ignore[assignment]
@@ -110,6 +116,27 @@ class MolSupplier:
                 raise TypeError(
                     "Unsupported file format. Expected .sdf, .sdfgz, .mae, .maegz, .smi, or .smr."
                 )
+
+    def close(self) -> None:
+        """Close any file handles opened by this supplier.
+
+        Idempotent: safe to call multiple times. RDKit suppliers constructed
+        from a path manage their own handle and are unaffected.
+        """
+        for handle in self._handles:
+            try:
+                handle.close()
+            except (OSError, ValueError):
+                logger.debug("Failed to close a MolSupplier handle.", exc_info=True)
+        self._handles = []
+
+    def __enter__(self) -> Self:
+        """Enter the runtime context and return the supplier."""
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """Close file handles on exit from the runtime context."""
+        self.close()
 
     def __iter__(self) -> Self:
         """Return the iterator."""

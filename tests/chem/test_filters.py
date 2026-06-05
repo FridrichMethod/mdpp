@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from rdkit import Chem
 
 from mdpp.chem.filters import get_framework, is_pains
@@ -30,6 +31,14 @@ class TestGetFramework:
         scaffold_smi = Chem.MolToSmiles(scaffold)
         benzene_smi = Chem.MolToSmiles(benzene)
         assert scaffold_smi == benzene_smi
+
+    def test_invalid_smiles_raises(self):
+        with pytest.raises(ValueError, match="Invalid SMILES"):
+            get_framework("not_a_valid_smiles")
+
+    def test_invalid_smiles_raises_generic(self):
+        with pytest.raises(ValueError, match="Invalid SMILES"):
+            get_framework("not_a_valid_smiles", generic=True)
 
 
 class TestIsPains:
