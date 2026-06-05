@@ -67,15 +67,16 @@ if [[ "${FILE}" != *.json ]]; then
     exit 1
 fi
 
-# Start CUDA MPS so that multiple CUDA contexts (needed by openmmtools
-# ContextCache) can coexist on Exclusive_Process mode GPUs.
-export CUDA_MPS_PIPE_DIRECTORY="/tmp/nvidia-mps-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-$$}}-${SLURM_ARRAY_TASK_ID:-0}"
-export CUDA_MPS_LOG_DIRECTORY="/tmp/nvidia-mps-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-$$}}-${SLURM_ARRAY_TASK_ID:-0}"
-mkdir -p "${CUDA_MPS_PIPE_DIRECTORY}" "${CUDA_MPS_LOG_DIRECTORY}"
-if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
-    nvidia-cuda-mps-control -d
-    trap 'echo quit | nvidia-cuda-mps-control' EXIT
-fi
+# NOTE: We deliberately do NOT start a per-job CUDA MPS control daemon here.
+# MPS's control daemon is effectively a per-node/per-user singleton; when two
+# array tasks land on the same node, the competing per-job daemons collide and
+# OpenMM reports "No compatible CUDA device is available" -- empirically every
+# job that shares a node with another concurrent task fails, while a job alone
+# on its node succeeds.  MPS is also unnecessary here: --gpu_cmode=shared puts
+# the GPU in Default compute mode, which already lets a single openfe process
+# hold the multiple CUDA contexts openmmtools ContextCache needs.  (MPS would
+# only be required to share an Exclusive_Process GPU across multiple processes,
+# which is not our case -- each job is a single process with its own GPU.)
 
 filename=$(basename "${FILE}" .json)
 run_dir="${RESULTS_DIR}/${filename}/replica_${SLURM_ARRAY_TASK_ID:-0}"
