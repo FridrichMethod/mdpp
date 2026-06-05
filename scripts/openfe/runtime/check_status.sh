@@ -313,8 +313,11 @@ mark_restart() {
 }
 
 # Check status of a single (transform_name, replica_id) pair.
+# $5 (churn) is the count of active jobs that could not be attributed to a
+# transformation (__UNKNOWN__, i.e. an array mid-requeue after preemption);
+# when >0 we defer the terminal "abandoned" classification.
 process_one() {
-    local tname="$1" replica_id="$2" results_dir="$3" active_tsv="$4"
+    local tname="$1" replica_id="$2" results_dir="$3" active_tsv="$4" churn="${5:-0}"
 
     local c_green=$'\033[32m' c_blue=$'\033[34m'
     local c_red=$'\033[31m' c_yellow=$'\033[33m' c_reset=$'\033[0m'
@@ -360,14 +363,14 @@ process_one() {
         return
     fi
 
-    # 3. No active job.  If this replica has exhausted its restart attempts AND
-    #    has actually written a (failed) result, mark it "abandoned" (terminal)
-    #    and do NOT queue another restart -- this stops both endless resubmission
-    #    and an endless monitor loop.  Requiring a result file is important: a
-    #    preempted/requeuing job is only transiently invisible and has no result
-    #    (quickrun.sbatch removes it at each start and writes it only on
-    #    conclusion), so it must NOT be abandoned -- it falls through to "failed"
-    #    and is retried.  The cap check mirrors restart_failed exactly.
+    # 3. No active job.  If this replica has exhausted its restart attempts,
+    #    mark it "abandoned" (terminal) and do NOT queue another restart -- this
+    #    stops both endless resubmission and an endless monitor loop, including
+    #    for a replica that crashes BEFORE ever writing a result.  Abandonment is
+    #    deferred only while there is preemption churn (churn>0: an
+    #    unattributable __UNKNOWN__ array in the queue) so a capped replica that
+    #    is merely mid-requeue is not wrongly made terminal; it is abandoned on a
+    #    later pass once the queue settles.  The cap check mirrors restart_failed.
     local attempts_file max_attempts attempts
     attempts_file="$(dirname "$results_dir")/.openfe_restart_attempts.tsv"
     max_attempts="${OPENFE_MAX_RESTART_ATTEMPTS:-5}"
@@ -376,7 +379,7 @@ process_one() {
         attempts="$(awk -F'\t' -v t="$tname" -v r="$replica_id" \
             '$1 == t && $2 == r { c = $3 } END { print c + 0 }' "$attempts_file")"
     fi
-    if ((max_attempts > 0 && attempts >= max_attempts)) && [[ -s "$result_json" ]]; then
+    if ((max_attempts > 0 && attempts >= max_attempts && churn == 0)); then
         emit_status "$replica_dir" "$c_red" "abandoned" "$c_reset" "$replica_id" \
             "${progress} | gave up after ${attempts} failed attempts (cap ${max_attempts})"
         return
@@ -458,6 +461,11 @@ restart_failed() {
 
 build_active_jobs "$ROOT_ABS" >"$ACTIVE_FILE"
 
+# Count active jobs that could not be attributed to a transformation (an entire
+# array mid-requeue after preemption).  Used to (a) skip restarts and (b) defer
+# "abandoned" classification while the queue is churning.
+UNKNOWN_ACTIVE="$(awk -F'\t' '$1 == "__UNKNOWN__"' "$ACTIVE_FILE" | wc -l | tr -d '[:space:]')"
+
 shopt -s nullglob
 enumerate_work "$TRANSFORMS_DIR" "$RESULTS_DIR" "$ACTIVE_FILE" \
     >"${TMPDIR_MAIN}/work.tsv"
@@ -472,7 +480,7 @@ printf 'directory\tstatus\treplica\tinfo\n'
 
 # shellcheck disable=SC1083  # {1} {2} are GNU parallel placeholders
 _raw="$(parallel -j "$JOBS" -k --colsep '\t' \
-    process_one {1} {2} "$RESULTS_DIR" "$ACTIVE_FILE" \
+    process_one {1} {2} "$RESULTS_DIR" "$ACTIVE_FILE" "$UNKNOWN_ACTIVE" \
     <"${TMPDIR_MAIN}/work.tsv")" || true
 
 if [[ -n "$_raw" ]]; then
@@ -493,10 +501,9 @@ if [[ "$RESTART" == true && -s "$RESTART_FILE" ]]; then
     # Safety 1: if any active job could not be attributed to a transformation
     # (e.g. an entire array is mid-requeue after preemption), skip restarts
     # this cycle rather than risk duplicate submissions.  The next pass retries
-    # once the queue settles.
-    unknown_active="$(awk -F'\t' '$1 == "__UNKNOWN__"' "$ACTIVE_FILE" | wc -l)"
-    if ((unknown_active > 0)); then
-        echo "Skipping restarts this cycle: ${unknown_active} active job(s) could not be" \
+    # once the queue settles.  (UNKNOWN_ACTIVE is computed once near the top.)
+    if ((UNKNOWN_ACTIVE > 0)); then
+        echo "Skipping restarts this cycle: ${UNKNOWN_ACTIVE} active job(s) could not be" \
             "attributed to a transformation (likely mid-requeue after preemption)." >&2
     elif command -v flock >/dev/null 2>&1; then
         # Safety 2: serialize restarts via a per-user lock so a concurrent
