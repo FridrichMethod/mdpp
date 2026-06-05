@@ -58,12 +58,13 @@ def _parse_xvg_directive(line: str, meta: _XVGMetadata) -> None:
         meta.legends[int(legend_match.group(1))] = legend_match.group(2)
         return
 
-    lower = line.lower()
-    if "title" in lower:
+    tokens = line[1:].split()
+    key = tokens[0].lower() if tokens else ""
+    if key == "title":
         meta.title = _extract_quoted(line)
-    elif "xaxis" in lower and "label" in lower:
+    elif key == "xaxis" and "label" in tokens[1:2]:
         meta.xlabel = _extract_quoted(line)
-    elif "yaxis" in lower and "label" in lower:
+    elif key == "yaxis" and "label" in tokens[1:2]:
         meta.ylabel = _extract_quoted(line)
 
 
@@ -103,9 +104,7 @@ def read_xvg(
     resolved = resolve_dtype(dtype)
     meta, data_lines = _parse_xvg_lines(path)
 
-    data = np.loadtxt(data_lines, dtype=resolved)
-    if data.ndim == 1:
-        data = data.reshape(1, -1)
+    data = np.loadtxt(data_lines, dtype=resolved, ndmin=2)
 
     columns = _build_column_names(meta, data.shape[1])
     df = pd.DataFrame(data, columns=columns[: data.shape[1]])
