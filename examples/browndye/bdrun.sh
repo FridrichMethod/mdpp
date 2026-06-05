@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # bdrun.sh - run BrownDye and compute association-rate estimates.
 #
-# Prerequisite: run all cells of complex_pqr.ipynb (which writes
-# tmp/bdprep/intermediate/${CORE0}_${CORE1}_simulation.xml).
+# Prerequisite: run all cells of browndye_prep.ipynb (which writes
+# tmp/bdprep/intermediate/${CORE0}_${CORE1}_simulation.xml). Pass the same
+# CORE0/CORE1 used in the notebook, e.g. CORE0=protein CORE1=ligand bash bdrun.sh.
 #
 # Layout:
 #   tmp/bdrun/              main BrownDye simulation outputs
@@ -25,8 +26,8 @@ BD_BIN="${BD_BIN:-$BD_HOME/bin}"
 BD_AUX="${BD_AUX:-$BD_HOME/aux}"
 export PATH="$BD_BIN:$BD_AUX:$PATH"
 
-CORE0="${CORE0:-complex}"
-CORE1="${CORE1:-substrate}"
+CORE0="${CORE0:-protein}"
+CORE1="${CORE1:-ligand}"
 SIMULATION_XML="${SIMULATION_XML:-${CORE0}_${CORE1}_simulation.xml}"
 RESULTS_FILE="${RESULTS_FILE:-results.xml}"
 MODE="${MODE:-nam}"

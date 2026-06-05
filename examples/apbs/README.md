@@ -13,8 +13,9 @@ map (`.dx`) for three input cases, each parameterized end-to-end with
 - `protein.pdb` is a single protein chain (chain A).
 - `ligand.pdb` is a single small-molecule ligand (residue `l01`, chain B).
 - `complex.pdb` is the docked protein-ligand complex (chain A protein +
-  chain B ligand `l01`). It is the same complex used in
-  `examples/browndye/complex.pdb`.
+  chain B ligand `l01`); `protein.pdb` and `ligand.pdb` are split from it, so
+  the three components share one coordinate frame. The `examples/browndye/`
+  association example reuses these components' APBS outputs as its bodies.
 
 ## Pipeline
 
@@ -40,14 +41,11 @@ Every notebook follows the same shape and gathers all imports + constants +
 
 ### Why AmberTools for every case
 
-`examples/browndye/complex_pqr.ipynb` parameterizes its complex body with
-AmberTools but its protein-only substrate with PDB2PQR (PDB2PQR 3.7.1 has no
-ff19SB option). Here every case uses AmberTools so the PQR charges and radii are
+Every case uses AmberTools (rather than PDB2PQR) so the PQR charges and radii are
 produced by one consistent force field across the protein, ligand, and complex
-examples. The complex notebook reproduces the first APBS-calculation part of the
-browndye notebook (fix protein -> assign ligand -> Amber-parameterize ->
-solve APBS); the downstream BrownDye XML / trajectory steps live in
-`examples/browndye/`.
+examples. This APBS stage feeds the BrownDye association example:
+`examples/browndye/browndye_prep.ipynb` reuses any two components' `.pqr` / `.dx`
+outputs as its bodies, then builds and runs the BrownDye simulation.
 
 ## Running
 
@@ -83,3 +81,17 @@ files kept in each stage's `intermediate/` subfolder:
 The complex notebook exports `protein.pqr`, `ligand.pqr`, and `complex.pqr`
 but solves APBS for the **complex only** by default; uncomment the diagnostic
 lines in its Step 4 to also map the individual bodies.
+
+## Visualization
+
+Each folder ships a PyMOL (`.pml`) and ChimeraX (`.cxc`) script that loads its
+component's `tmp/ambertools/<name>.pqr` and `tmp/apbs/<name>.dx`, colors the
+molecular surface by electrostatic potential (red -> white -> blue over
+-5 .. +5 kT/e), and draws +/- 1 kT/e mesh contours. Run them from the component
+folder after the notebook has produced the `tmp/` outputs:
+
+```bash
+cd examples/apbs/protein && pymol viz_protein_apbs.pml   # or: chimerax viz_protein_apbs.cxc
+cd examples/apbs/ligand  && pymol viz_ligand_apbs.pml    # or: chimerax viz_ligand_apbs.cxc
+cd examples/apbs/complex && pymol viz_complex_apbs.pml   # or: chimerax viz_complex_apbs.cxc
+```

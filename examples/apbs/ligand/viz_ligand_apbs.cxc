@@ -1,0 +1,17 @@
+# Visualize the ligand APBS map in ChimeraX.
+#
+# Run from this directory (examples/apbs/ligand):
+#   chimerax viz_ligand_apbs.cxc
+
+open tmp/ambertools/ligand.pqr
+open tmp/apbs/ligand.dx
+
+style #1 stick
+surface #1
+
+color sample #1 map #2 palette red:white:blue range -5,5
+
+volume #2 style mesh level 1 color blue
+volume #2 style mesh level -1 color red
+
+view #1

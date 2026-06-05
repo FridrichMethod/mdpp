@@ -1,0 +1,17 @@
+# Visualize the protein APBS map in ChimeraX.
+#
+# Run from this directory (examples/apbs/protein):
+#   chimerax viz_protein_apbs.cxc
+
+open tmp/ambertools/protein.pqr
+open tmp/apbs/protein.dx
+
+cartoon #1
+surface #1
+
+color sample #1 map #2 palette red:white:blue range -5,5
+
+volume #2 style mesh level 1 color blue
+volume #2 style mesh level -1 color red
+
+view #1

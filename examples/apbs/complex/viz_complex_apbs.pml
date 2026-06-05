@@ -1,10 +1,10 @@
 # Visualize the full complex APBS map in PyMOL.
 #
-# Run from this directory:
+# Run from this directory (examples/apbs/complex):
 #   pymol viz_complex_apbs.pml
 
-load tmp/complex/ambertools/complex.pqr, complex
-load tmp/complex/apbs/complex.dx, complex_potential
+load tmp/ambertools/complex.pqr, complex
+load tmp/apbs/complex.dx, complex_potential
 
 show cartoon, complex
 show sticks, organic

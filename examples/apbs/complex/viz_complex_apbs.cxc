@@ -1,10 +1,10 @@
 # Visualize the full complex APBS map in ChimeraX.
 #
-# Run from this directory:
+# Run from this directory (examples/apbs/complex):
 #   chimerax viz_complex_apbs.cxc
 
-open tmp/complex/ambertools/complex.pqr
-open tmp/complex/apbs/complex.dx
+open tmp/ambertools/complex.pqr
+open tmp/apbs/complex.dx
 
 cartoon #1
 style #1 stick
