@@ -137,8 +137,12 @@ def compute_hbonds(
         periodic: Whether to apply periodic boundary conditions.
         sidechain_only: For ``"baker_hubbard"``, restrict to sidechain interactions.
         freq: For ``"baker_hubbard"``, minimum occupancy fraction for returned bonds.
-        distance_cutoff_nm: H...A distance cutoff used for presence matrix.
-        angle_cutoff_deg: D-H...A angle cutoff used for presence matrix.
+        distance_cutoff_nm: For ``"baker_hubbard"``, H...A distance cutoff used for
+            the geometric presence matrix. Recorded but unused for
+            ``"wernet_nilsson"``, which applies mdtraj's own cone criterion.
+        angle_cutoff_deg: For ``"baker_hubbard"``, D-H...A angle cutoff used for
+            the geometric presence matrix. Recorded but unused for
+            ``"wernet_nilsson"``, which applies mdtraj's own cone criterion.
         timestep_ps: Optional frame timestep override in ps.
         dtype: Output float dtype. If ``None``, uses the package default.
 
