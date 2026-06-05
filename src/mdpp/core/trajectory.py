@@ -131,7 +131,11 @@ def load_trajectory(
     )
 
     if start == 0 and stop is None:
-        return md.load(str(trajectory_path), top=top, stride=stride, atom_indices=atom_indices)
+        # Reuse the already-loaded Topology instead of ``top`` (a path) so
+        # md.load does not parse the topology file a second time.  mdtraj's
+        # _parse_topology returns a Topology object unchanged (no file I/O),
+        # and ``topology`` was loaded from the same file as ``top``.
+        return md.load(str(trajectory_path), top=topology, stride=stride, atom_indices=atom_indices)
 
     n_frames = len(range(start, stop, stride)) if stop is not None else None
     with md.open(str(trajectory_path)) as fh:
