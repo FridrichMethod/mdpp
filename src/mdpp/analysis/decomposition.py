@@ -239,6 +239,10 @@ def compute_pca(
         raise ValueError("n_components cannot exceed the feature dimension.")
 
     feature_mean = np.mean(feature_matrix, axis=0)
+    # Annotated explicitly: the standardized branch divides by a float64 scale,
+    # so without this mypy pins the variable to float64 from the first branch
+    # and rejects the plain-centered branch (which stays at the input dtype).
+    transformed: NDArray[np.floating]
     if standardize:
         feature_scale = np.std(feature_matrix, axis=0)
         feature_scale = np.where(feature_scale > 0.0, feature_scale, 1.0)
