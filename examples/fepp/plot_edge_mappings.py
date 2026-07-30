@@ -5,11 +5,9 @@ For every perturbation edge this draws ligand A and ligand B side by side using
 the *actual* mapping computed by ``fep_mapper`` (read from the .fmp by
 ``extract_edge_mappings.py``), the analog of OpenFE's per-edge ``mapping`` view.
 Atoms that disappear going A -> B are highlighted red on A; atoms that appear
-are highlighted green on B; the mapped common core is left plain. B's depiction
-is aligned to A over the shared core so the conserved scaffold lines up.
-
-The mapping depends only on the ligand pair (not the receptor), so the open and
-closed maps yield identical edge mappings.
+are highlighted green on B. Mapped-core atoms whose element, isotope, formal
+charge, or aromaticity changes are orange, and changed mapped-core bonds are
+blue. B's depiction is aligned to A over the shared core.
 
 Run under the mdpp env (its RDKit has the Cairo drawer):
 
@@ -37,9 +35,11 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry import Point3D
 
-# Highlight colors: deleted atoms (only in A) red, added atoms (only in B) green.
+# Highlight colors for dummy atoms and otherwise hidden mapped-core changes.
 DELETED_RGB = (0.96, 0.55, 0.55)
 ADDED_RGB = (0.55, 0.86, 0.55)
+CORE_ATOM_RGB = (1.0, 0.76, 0.30)
+CORE_BOND_RGB = (0.40, 0.66, 0.96)
 
 
 def heavy_mol(molblock: str) -> tuple[Chem.Mol, dict[int, int]]:
@@ -135,34 +135,144 @@ def aligned_mols(record: dict) -> tuple[Chem.Mol, Chem.Mol, dict[int, int], dict
     return mol_a, mol_b, map_a, map_b
 
 
+def core_changes(  # noqa: C901
+    record: dict,
+    mol_a: Chem.Mol,
+    mol_b: Chem.Mol,
+    map_a: dict[int, int],
+    map_b: dict[int, int],
+) -> dict[str, list[int] | int]:
+    """Classify mapped-core atom and bond changes for both ligands.
+
+    Args:
+        record: One edge record from the extractor JSON.
+        mol_a: Heavy-atom ligand A.
+        mol_b: Heavy-atom ligand B.
+        map_a: A all-atom to heavy-atom index map.
+        map_b: B all-atom to heavy-atom index map.
+
+    Returns:
+        Changed atom and bond indices on A/B plus the number of mapped bond
+        correspondences whose presence or attributes differ.
+
+    Raises:
+        ValueError: If the stored core mapping has mismatched, duplicated, or
+            out-of-range indices.
+    """
+    core_a = record["core_a"]
+    core_b = record["core_b"]
+    if len(core_a) != len(core_b):
+        raise ValueError("core_a and core_b must have equal length")
+    if len(set(core_a)) != len(core_a) or len(set(core_b)) != len(core_b):
+        raise ValueError("core atom indices must be unique on each ligand")
+    full_a = Chem.MolFromMolBlock(record["molblock_a"], removeHs=False)
+    full_b = Chem.MolFromMolBlock(record["molblock_b"], removeHs=False)
+    if full_a is None or full_b is None:
+        raise ValueError("failed to parse a core-mapping MOL block")
+    if any(index < 1 or index > full_a.GetNumAtoms() for index in core_a):
+        raise ValueError("core_a contains an out-of-range atom index")
+    if any(index < 1 or index > full_b.GetNumAtoms() for index in core_b):
+        raise ValueError("core_b contains an out-of-range atom index")
+
+    heavy_pairs = [
+        (map_a[a - 1], map_b[b - 1])
+        for a, b in zip(core_a, core_b)
+        if (a - 1) in map_a and (b - 1) in map_b
+    ]
+
+    def atom_signature(atom: Chem.Atom) -> tuple[int, int, int, bool]:
+        return (
+            atom.GetAtomicNum(),
+            atom.GetIsotope(),
+            atom.GetFormalCharge(),
+            atom.GetIsAromatic(),
+        )
+
+    changed_atoms_a: list[int] = []
+    changed_atoms_b: list[int] = []
+    for atom_a, atom_b in heavy_pairs:
+        if atom_signature(mol_a.GetAtomWithIdx(atom_a)) != atom_signature(
+            mol_b.GetAtomWithIdx(atom_b)
+        ):
+            changed_atoms_a.append(atom_a)
+            changed_atoms_b.append(atom_b)
+
+    def bond_signature(bond: Chem.Bond | None) -> tuple[float, bool, str] | None:
+        if bond is None:
+            return None
+        return (bond.GetBondTypeAsDouble(), bond.GetIsAromatic(), str(bond.GetStereo()))
+
+    changed_bonds_a: list[int] = []
+    changed_bonds_b: list[int] = []
+    changed_bond_count = 0
+    for pair_index, (a1, b1) in enumerate(heavy_pairs):
+        for a2, b2 in heavy_pairs[pair_index + 1 :]:
+            bond_a = mol_a.GetBondBetweenAtoms(a1, a2)
+            bond_b = mol_b.GetBondBetweenAtoms(b1, b2)
+            if bond_signature(bond_a) == bond_signature(bond_b):
+                continue
+            changed_bond_count += 1
+            if bond_a is not None:
+                changed_bonds_a.append(bond_a.GetIdx())
+            if bond_b is not None:
+                changed_bonds_b.append(bond_b.GetIdx())
+    return {
+        "atoms_a": changed_atoms_a,
+        "atoms_b": changed_atoms_b,
+        "bonds_a": changed_bonds_a,
+        "bonds_b": changed_bonds_b,
+        "bond_change_count": changed_bond_count,
+    }
+
+
 def edge_panel(record: dict, *, size: int = 480):
-    """Render one A|B edge panel with dummy (changing) heavy atoms highlighted.
+    """Render one A|B panel with dummy and mapped-core changes highlighted.
 
     Args:
         record: One edge dict from the extractor JSON.
         size: Per-panel pixel size (square).
 
     Returns:
-        ``(image, n_deleted, n_added)``: the RGBA two-panel drawing plus the
-        number of highlighted (heavy-atom) deleted/added atoms.
+        RGBA drawing and counts for deleted atoms, added atoms, changed core
+        atoms, and changed core bonds.
     """
     mol_a, mol_b, map_a, map_b = aligned_mols(record)
     hl_a = [map_a[i - 1] for i in record["dummy_a"] if (i - 1) in map_a]
     hl_b = [map_b[i - 1] for i in record["dummy_b"] if (i - 1) in map_b]
+    changes = core_changes(record, mol_a, mol_b, map_a, map_b)
+    core_atoms_a = changes["atoms_a"]
+    core_atoms_b = changes["atoms_b"]
+    core_bonds_a = changes["bonds_a"]
+    core_bonds_b = changes["bonds_b"]
+    assert isinstance(core_atoms_a, list)
+    assert isinstance(core_atoms_b, list)
+    assert isinstance(core_bonds_a, list)
+    assert isinstance(core_bonds_b, list)
     drawer = rdMolDraw2D.MolDraw2DCairo(2 * size, size, size, size)
-    drawer.drawOptions().legendFontSize = 20
+    drawer.drawOptions().legendFontSize = 20  # type: ignore[assignment]
     drawer.DrawMolecules(
         [mol_a, mol_b],
         legends=[record["name_a"], record["name_b"]],
-        highlightAtoms=[hl_a, hl_b],
+        highlightAtoms=[hl_a + core_atoms_a, hl_b + core_atoms_b],
         highlightAtomColors=[
-            dict.fromkeys(hl_a, DELETED_RGB),
-            dict.fromkeys(hl_b, ADDED_RGB),
+            {**dict.fromkeys(core_atoms_a, CORE_ATOM_RGB), **dict.fromkeys(hl_a, DELETED_RGB)},
+            {**dict.fromkeys(core_atoms_b, CORE_ATOM_RGB), **dict.fromkeys(hl_b, ADDED_RGB)},
+        ],
+        highlightBonds=[core_bonds_a, core_bonds_b],
+        highlightBondColors=[
+            dict.fromkeys(core_bonds_a, CORE_BOND_RGB),
+            dict.fromkeys(core_bonds_b, CORE_BOND_RGB),
         ],
     )
     drawer.FinishDrawing()
     img = mpimg.imread(io.BytesIO(drawer.GetDrawingText()), format="png")
-    return img, len(hl_a), len(hl_b)
+    return (
+        img,
+        len(hl_a),
+        len(hl_b),
+        len(core_atoms_a),
+        changes["bond_change_count"],
+    )
 
 
 def render(json_path: Path, pdf_path: Path, png_path: Path) -> int:
@@ -184,11 +294,12 @@ def render(json_path: Path, pdf_path: Path, png_path: Path) -> int:
 
     panels = []
     for record in records:
-        img, n_del, n_add = edge_panel(record)
+        img, n_del, n_add, n_core_atoms, n_core_bonds = edge_panel(record)
         header = (
             f"{record['name_a']} -> {record['name_b']}   "
             f"sim={record['similarity']:.2f}   "
-            f"-{n_del} / +{n_add} heavy atoms"
+            f"-{n_del}/+{n_add} dummy; "
+            f"{n_core_atoms} core atoms; {n_core_bonds} core bonds"
         )
         panels.append((header, img))
 
@@ -212,7 +323,7 @@ def render(json_path: Path, pdf_path: Path, png_path: Path) -> int:
     for ax in axes.flat[len(panels) :]:
         ax.axis("off")
     fig.suptitle(
-        f"FEP+ per-edge atom mappings: {stem} ({len(panels)} edges; identical for open/closed)",
+        f"FEP+ per-edge atom mappings: {stem} ({len(panels)} edges)",
         fontsize=15,
         y=0.999,
     )

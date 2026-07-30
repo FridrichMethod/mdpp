@@ -22,6 +22,7 @@ dependencies = [
     "mplplots @ git+https://github.com/FridrichMethod/mplplots.git",
     "numba",
     "nglview",
+    "networkx",
     "numpy",
     "pandas",
     "panedr",

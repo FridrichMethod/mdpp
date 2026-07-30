@@ -21,12 +21,39 @@ Run under Schrodinger's Python:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 from rdkit import Chem
 from schrodinger.application.scisol.packages.fep import graph as fepgraph
 from schrodinger.rdkit.rdkit_adapter import to_rdkit
+
+
+def mapping_fingerprint(records: list[dict]) -> str:
+    """Hash the graph's atom mappings without coordinates or FMP filename.
+
+    Args:
+        records: Deterministically ordered mapping records.
+
+    Returns:
+        Lowercase SHA-256 of ligand names, mapped/dummy atom indices, and
+        mapper similarity values.
+    """
+    payload = [
+        {
+            "name_a": record["name_a"],
+            "name_b": record["name_b"],
+            "similarity": record["similarity"],
+            "core_a": record["core_a"],
+            "core_b": record["core_b"],
+            "dummy_a": record["dummy_a"],
+            "dummy_b": record["dummy_b"],
+        }
+        for record in records
+    ]
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def extract(fmp: Path, out_json: Path) -> int:
@@ -67,7 +94,18 @@ def extract(fmp: Path, out_json: Path) -> int:
         })
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(json.dumps({"fmp": fmp.stem, "edges": records}, indent=1))
+    out_json.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "fmp": fmp.stem,
+                "mapping_fingerprint": mapping_fingerprint(records),
+                "edges": records,
+            },
+            indent=1,
+        )
+        + "\n"
+    )
     return len(records)
 
 

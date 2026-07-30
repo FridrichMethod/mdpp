@@ -60,13 +60,25 @@ def parse_edges(edge_file: Path) -> list[tuple[str, str]]:
         List of ``(ligA, ligB)`` ligand-name pairs, one per perturbation edge.
 
     Raises:
-        ValueError: If the file contains no parseable edges.
+        ValueError: If a nonblank line is malformed, an edge is invalid or
+            duplicated, or the file contains no edges.
     """
     edges: list[tuple[str, str]] = []
-    for line in edge_file.read_text().splitlines():
+    seen: set[frozenset[str]] = set()
+    for line_number, line in enumerate(edge_file.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
         match = EDGE_LINE.match(line)
-        if match:
-            edges.append((match["a"], match["b"]))
+        if match is None:
+            raise ValueError(f"{edge_file}: malformed edge line {line_number}: {line!r}")
+        source, target = match["a"], match["b"]
+        if source == target:
+            raise ValueError(f"{edge_file}: self-edge on line {line_number}: {source}")
+        pair = frozenset((source, target))
+        if pair in seen:
+            raise ValueError(f"{edge_file}: duplicate ligand pair on line {line_number}")
+        seen.add(pair)
+        edges.append((source, target))
     if not edges:
         raise ValueError(f"no edges parsed from {edge_file}")
     return edges
@@ -167,14 +179,20 @@ def ligand_image(sdf_path: Path, size: int = THUMB_PX, zoom: float = MAX_ZOOM) -
         A matplotlib OffsetImage of the ligand's 2D structure.
 
     Raises:
-        ValueError: If the SDF cannot be parsed.
+        ValueError: If the SDF cannot be parsed or its title does not match its
+            filename.
     """
     mol = Chem.MolFromMolFile(str(sdf_path), removeHs=True)
     if mol is None:
         raise ValueError(f"failed to parse {sdf_path}")
+    title = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
+    if title != sdf_path.stem:
+        raise ValueError(
+            f"{sdf_path}: SDF title {title!r} does not match filename {sdf_path.stem!r}"
+        )
     mol = Draw.PrepareMolForDrawing(mol)  # 2D coords + wedging
     drawer = rdMolDraw2D.MolDraw2DCairo(size, size)
-    drawer.drawOptions().clearBackground = False
+    drawer.drawOptions().clearBackground = False  # type: ignore[assignment]
     drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     png = drawer.GetDrawingText()
@@ -205,6 +223,11 @@ def plot_map(
     edges = parse_edges(edge_file)
     graph = nx.DiGraph()
     graph.add_edges_from(edges)
+    if not nx.is_weakly_connected(graph):
+        raise ValueError(f"perturbation graph is disconnected: {edge_file}")
+    missing_sdfs = sorted(name for name in graph if not (ligand_dir / f"{name}.sdf").is_file())
+    if missing_sdfs:
+        raise ValueError(f"missing ligand SDFs for map nodes: {missing_sdfs}")
 
     # A thumbnail spans THUMB_PX*zoom points; the axes span (2 + 2*AXIS_MARGIN)
     # data units over the *smaller* figure dimension (the square thumbnails are
@@ -247,15 +270,14 @@ def plot_map(
     label_offset = THUMB_PX * zoom / 2.0 / points_per_unit + 0.02
     for name, (x, y) in pos.items():
         sdf = ligand_dir / f"{name}.sdf"
-        if sdf.exists():
-            box = AnnotationBbox(
-                ligand_image(sdf, zoom=zoom),
-                (x, y),
-                frameon=True,
-                pad=0.1,
-                bboxprops={"edgecolor": "0.3", "boxstyle": "round"},
-            )
-            ax.add_artist(box)
+        box = AnnotationBbox(
+            ligand_image(sdf, zoom=zoom),
+            (x, y),
+            frameon=True,
+            pad=0.1,
+            bboxprops={"edgecolor": "0.3", "boxstyle": "round"},
+        )
+        ax.add_artist(box)
         ax.text(
             x,
             y - label_offset,
@@ -279,6 +301,7 @@ def plot_map(
     ax.set_xlim(-1.0 - AXIS_MARGIN, 1.0 + AXIS_MARGIN)
     ax.set_ylim(-1.0 - AXIS_MARGIN, 1.0 + AXIS_MARGIN)
     fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return output
