@@ -8,6 +8,7 @@ SCHRODINGER="$(realpath -m "${SCHRODINGER:-/apps/schrodinger2025-4}")"
 WORK_DIR="$(realpath -m "${FEPP_WORK_DIR:-${SCRIPT_DIR}/tmp}")"
 
 CONFORMATIONS=("open")
+WORKFLOW="paired"
 HOST="localhost"
 SUBHOST="localhost"
 JOBNAME_BASE=""
@@ -41,6 +42,11 @@ require_value() {
 }
 
 usage() {
+    local conformation_default="${CONFORMATIONS[0]}"
+    local jobname_default="${JOBNAME_BASE:-fepp}"
+    if [[ "${#CONFORMATIONS[@]}" -eq 2 ]]; then
+        conformation_default="both"
+    fi
     cat <<EOF
 Usage: ${0##*/} [options]
 
@@ -49,10 +55,13 @@ explicit. Each job runs in tmp/runs/<jobname>/ and records a read-only manifest
 before launch.
 
 Options:
-  -c, --conformation NAME   open | closed | both (default: open).
+      --workflow MODE       paired | single (default: ${WORKFLOW}).
+                            paired retains the matched open/closed cohort;
+                            single requires exactly one conformation.
+  -c, --conformation NAME   open | closed | both (default: ${conformation_default}).
   -H, --host HOST           Job-control main host (default: ${HOST}).
   -S, --subhost SUBHOST     GPU subhost(s) (default: ${SUBHOST}).
-  -j, --jobname-base NAME   Job-name prefix (default: fepp).
+  -j, --jobname-base NAME   Job-name prefix (default: ${jobname_default}).
   -p, --prepare             Prepare only; requires --repeats 1.
       --repeats N           Independent repeats per state (default: ${REPEATS}).
       --seed-base N         First open seed; closed starts at N+1
@@ -82,6 +91,14 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --workflow)
+            require_value "$1" "${2-}"
+            case "$2" in
+                paired | single) WORKFLOW="$2" ;;
+                *) die "workflow must be paired or single; got '$2'" ;;
+            esac
+            shift 2
+            ;;
         -c | --conformation)
             require_value "$1" "${2-}"
             case "$2" in
@@ -239,21 +256,40 @@ awk -v value="${SALT_MOLAR}" 'BEGIN { exit !(value >= 0) }' || die "salt-molar m
 if [[ -n "${JOBNAME_BASE}" && ! "${JOBNAME_BASE}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     die "jobname-base may contain only letters, digits, dot, underscore, and hyphen"
 fi
+if [[ "${WORKFLOW}" == "single" ]]; then
+    [[ "${#CONFORMATIONS[@]}" -eq 1 ]] ||
+        die "single workflow requires exactly one conformation (open or closed)"
+    [[ "${ALLOW_MICROSTATE_MISMATCH}" -eq 0 ]] ||
+        die "--allow-microstate-mismatch applies only to the paired workflow"
+fi
 
 build_check=(
     "${SCRIPT_DIR}/build_fepp_inputs.sh"
     --check
-    -c both
-    --his267-state "${HIS267_STATE}"
-    --ph "${PREP_PH}"
-    --rmsd "${PREP_RMSD}"
-    --topology "${TOPOLOGY}"
+    -c
 )
+if [[ "${WORKFLOW}" == "paired" ]]; then
+    build_check+=(
+        both
+        --his267-state "${HIS267_STATE}"
+        --ph "${PREP_PH}"
+        --rmsd "${PREP_RMSD}"
+        --topology "${TOPOLOGY}"
+    )
+else
+    build_check+=(
+        "${CONFORMATIONS[0]}"
+        --his267-state "${HIS267_STATE}"
+        --ph "${PREP_PH}"
+        --rmsd "${PREP_RMSD}"
+        --topology "${TOPOLOGY}"
+    )
+fi
 if [[ "${ALLOW_MICROSTATE_MISMATCH}" -eq 1 ]]; then
     build_check+=(--allow-microstate-mismatch)
 fi
 mkdir -p "${WORK_DIR}/runs"
-cohort_paired_inputs_sha256=""
+cohort_inputs_sha256=""
 for conf in "${CONFORMATIONS[@]}"; do
     if [[ "${conf}" == "open" ]]; then
         state_seed_offset=0
@@ -286,7 +322,7 @@ for conf in "${CONFORMATIONS[@]}"; do
         # The launched input is then immutable with respect to later rebuilds.
         exec {build_lock_fd}<"${WORK_DIR}"
         flock -x "${build_lock_fd}"
-        echo "Verifying paired input provenance before snapshotting ${jobname}..."
+        echo "Verifying ${WORKFLOW} input provenance before snapshotting ${jobname}..."
         FEPP_BUILD_LOCK_HELD=1 "${build_check[@]}"
         [[ ! -e "${run_dir}" ]] || die "run directory already exists: ${run_dir}"
         staged_run_dir="$(mktemp -d "${WORK_DIR}/runs/.${jobname}.XXXXXX")"
@@ -298,8 +334,6 @@ for conf in "${CONFORMATIONS[@]}"; do
         map_mappings="${staged_run_dir}/input_map_mappings.json"
         ligand_bundle="${staged_run_dir}/input_ligands.maegz"
         ligand_validation="${staged_run_dir}/input_ligand_validation.json"
-        receptor_microstates="${staged_run_dir}/input_receptor_microstates.json"
-        paired_inputs="${staged_run_dir}/input_paired_inputs.tsv"
         snapshot_sources=(
             "${source_map_file}"
             "${source_map_edge}"
@@ -307,8 +341,6 @@ for conf in "${CONFORMATIONS[@]}"; do
             "${source_map_mappings}"
             "${WORK_DIR}/ligands.maegz"
             "${WORK_DIR}/ligand_validation.json"
-            "${WORK_DIR}/receptor_microstates.json"
-            "${WORK_DIR}/paired_inputs.tsv"
         )
         snapshot_targets=(
             "${map_file}"
@@ -317,20 +349,35 @@ for conf in "${CONFORMATIONS[@]}"; do
             "${map_mappings}"
             "${ligand_bundle}"
             "${ligand_validation}"
-            "${receptor_microstates}"
-            "${paired_inputs}"
         )
+        if [[ "${WORKFLOW}" == "paired" ]]; then
+            receptor_microstates="${staged_run_dir}/input_receptor_microstates.json"
+            paired_inputs="${staged_run_dir}/input_paired_inputs.tsv"
+            snapshot_sources+=(
+                "${WORK_DIR}/receptor_microstates.json"
+                "${WORK_DIR}/paired_inputs.tsv"
+            )
+            snapshot_targets+=("${receptor_microstates}" "${paired_inputs}")
+        else
+            state_inputs="${staged_run_dir}/input_state_inputs.tsv"
+            snapshot_sources+=("${WORK_DIR}/state_inputs_${conf}.tsv")
+            snapshot_targets+=("${state_inputs}")
+        fi
         for index in "${!snapshot_sources[@]}"; do
             [[ -s "${snapshot_sources[index]}" ]] ||
                 die "missing provenance input: ${snapshot_sources[index]}"
             cp -- "${snapshot_sources[index]}" "${snapshot_targets[index]}"
         done
         chmod 0444 "${snapshot_targets[@]}"
-        paired_inputs_sha256="$(sha256sum "${paired_inputs}" | awk '{print $1}')"
-        if [[ -z "${cohort_paired_inputs_sha256}" ]]; then
-            cohort_paired_inputs_sha256="${paired_inputs_sha256}"
-        elif [[ "${paired_inputs_sha256}" != "${cohort_paired_inputs_sha256}" ]]; then
-            die "paired inputs changed while snapshotting this launch cohort"
+        if [[ "${WORKFLOW}" == "paired" ]]; then
+            inputs_sha256="$(sha256sum "${paired_inputs}" | awk '{print $1}')"
+        else
+            inputs_sha256="$(sha256sum "${state_inputs}" | awk '{print $1}')"
+        fi
+        if [[ -z "${cohort_inputs_sha256}" ]]; then
+            cohort_inputs_sha256="${inputs_sha256}"
+        elif [[ "${inputs_sha256}" != "${cohort_inputs_sha256}" ]]; then
+            die "input cohort changed while snapshotting this launch cohort"
         fi
 
         cmd=(
@@ -366,7 +413,13 @@ for conf in "${CONFORMATIONS[@]}"; do
         [[ "${atom_mapping_fingerprint}" =~ ^[0-9a-f]{64}$ ]] ||
             die "snapshot atom-mapping fingerprint is malformed"
         {
-            printf 'schema_version\t1\n'
+            if [[ "${WORKFLOW}" == "paired" ]]; then
+                printf 'schema_version\t1\n'
+                printf 'workflow_type\tpaired_open_closed\n'
+            else
+                printf 'schema_version\t2\n'
+                printf 'workflow_type\tsingle_rbfe\n'
+            fi
             printf 'created_utc\t%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             printf 'schrodinger_root\t%s\n' "${SCHRODINGER}"
             printf 'suite_release\t%s\n' "${suite_release}"
@@ -390,7 +443,10 @@ for conf in "${CONFORMATIONS[@]}"; do
             printf 'input_prep_ph\t%s\n' "${PREP_PH}"
             printf 'input_prep_rmsd_A\t%s\n' "${PREP_RMSD}"
             printf 'input_map_topology\t%s\n' "${TOPOLOGY}"
-            printf 'input_allow_microstate_mismatch\t%s\n' "${ALLOW_MICROSTATE_MISMATCH}"
+            if [[ "${WORKFLOW}" == "paired" ]]; then
+                printf 'input_allow_microstate_mismatch\t%s\n' \
+                    "${ALLOW_MICROSTATE_MISMATCH}"
+            fi
             printf 'source_map_path\t%s\n' "${source_map_file}"
             printf 'map_sha256\t%s\n' "$(sha256sum "${map_file}" | awk '{print $1}')"
             printf 'edge_sha256\t%s\n' "$(sha256sum "${map_edge}" | awk '{print $1}')"
@@ -403,9 +459,13 @@ for conf in "${CONFORMATIONS[@]}"; do
                 "$(sha256sum "${ligand_bundle}" | awk '{print $1}')"
             printf 'ligand_validation_sha256\t%s\n' \
                 "$(sha256sum "${ligand_validation}" | awk '{print $1}')"
-            printf 'receptor_microstates_sha256\t%s\n' \
-                "$(sha256sum "${receptor_microstates}" | awk '{print $1}')"
-            printf 'paired_inputs_sha256\t%s\n' "${paired_inputs_sha256}"
+            if [[ "${WORKFLOW}" == "paired" ]]; then
+                printf 'receptor_microstates_sha256\t%s\n' \
+                    "$(sha256sum "${receptor_microstates}" | awk '{print $1}')"
+                printf 'paired_inputs_sha256\t%s\n' "${inputs_sha256}"
+            else
+                printf 'state_inputs_sha256\t%s\n' "${inputs_sha256}"
+            fi
             printf 'command\t%s\n' "${command_text% }"
         } >"${staged_run_dir}/manifest.tsv"
         chmod 0444 "${staged_run_dir}/manifest.tsv"

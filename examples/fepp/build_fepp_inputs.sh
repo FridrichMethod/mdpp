@@ -429,6 +429,50 @@ for conf in "${CONFORMATIONS[@]}"; do
         rm -rf -- "${stage}"
         trap - EXIT
     fi
+
+    state_mapping_fingerprint="$(
+        "${SCHRODINGER}/run" python3 -c \
+            'import json, sys; print(json.load(open(sys.argv[1]))["mapping_fingerprint"])' \
+            "${map_mappings}"
+    )"
+    [[ "${state_mapping_fingerprint}" =~ ^[0-9a-f]{64}$ ]] ||
+        die "${conf} atom-mapping fingerprint is malformed"
+    state_inputs="${WORK_DIR}/state_inputs_${conf}.tsv"
+    state_sidecar="${state_inputs}.provenance"
+    state_payload="$(
+        printf 'schema_version\t1\n'
+        printf 'build_schema\t%s\n' "${BUILD_SCHEMA}"
+        printf 'suite_release\t%s\n' "${SUITE_ID}"
+        printf 'state\t%s\n' "${conf}"
+        printf 'receptor_sha256\t%s\n' "$(file_hash "${receptor}")"
+        printf 'receptor_provenance_sha256\t%s\n' \
+            "$(file_hash "${receptor}.provenance")"
+        printf 'pose_viewer_sha256\t%s\n' "$(file_hash "${pv}")"
+        printf 'pose_viewer_provenance_sha256\t%s\n' \
+            "$(file_hash "${pv}.provenance")"
+        printf 'ligand_bundle_sha256\t%s\n' "$(file_hash "${ligands_mae}")"
+        printf 'ligand_validation_sha256\t%s\n' "$(file_hash "${validation_report}")"
+        printf 'map_sha256\t%s\n' "$(file_hash "${map_fmp}")"
+        printf 'edge_sha256\t%s\n' "$(file_hash "${map_edge}")"
+        printf 'map_provenance_sha256\t%s\n' "$(file_hash "${map_sidecar}")"
+        printf 'atom_mapping_fingerprint\t%s\n' "${state_mapping_fingerprint}"
+        printf 'atom_mapping_json_sha256\t%s\n' "$(file_hash "${map_mappings}")"
+    )"
+    state_fingerprint="$(printf '%s' "${state_payload}" | text_hash)"
+    if ! require_current_or_build \
+        "${conf} state input manifest" "${state_fingerprint}" \
+        "${state_sidecar}" "${state_inputs}"; then
+        staged_state="$(mktemp "${WORK_DIR}/.${conf}-state-inputs.XXXXXX")"
+        trap 'rm -f -- "${staged_state}"' EXIT
+        printf '%s\n' "${state_payload}" >"${staged_state}"
+        mv "${staged_state}" "${state_inputs}"
+        write_sidecar \
+            "${state_sidecar}" "${state_fingerprint}" \
+            "single-state FEP+ input cohort for ${conf}" \
+            "receptor, pose-viewer, ligand, map, edge, and atom-mapping artifacts" \
+            "${state_inputs}"
+        trap - EXIT
+    fi
 done
 
 if [[ " ${CONFORMATIONS[*]} " == *" open "* && " ${CONFORMATIONS[*]} " == *" closed "* ]]; then
@@ -497,6 +541,6 @@ else
     echo "Done. Provenance-tracked inputs are under: ${WORK_DIR}"
 fi
 for conf in "${CONFORMATIONS[@]}"; do
-    echo "  [${conf}] receptor_${conf}.mae  ${conf}_pv.mae  ${conf}_map.{fmp,edge}"
+    echo "  [${conf}] receptor_${conf}.mae  ${conf}_pv.mae  ${conf}_map.{fmp,edge}  state_inputs_${conf}.tsv"
 done
-echo "Inspect: \$SCHRODINGER/run -FROM scisol fmp_info.py -f ${WORK_DIR}/open_map.fmp"
+echo "Inspect: \$SCHRODINGER/run -FROM scisol fmp_info.py -f ${WORK_DIR}/${CONFORMATIONS[0]}_map.fmp"

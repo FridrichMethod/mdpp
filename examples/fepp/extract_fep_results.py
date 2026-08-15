@@ -23,7 +23,7 @@ from pathlib import Path
 
 from analyze_fep_results import ParsedEdgeFile, read_edge_file
 
-PROTOCOL_FIELDS = (
+COMMON_PROTOCOL_FIELDS = (
     "suite_release",
     "forcefield",
     "custom_charge_mode",
@@ -37,24 +37,41 @@ PROTOCOL_FIELDS = (
     "input_prep_ph",
     "input_prep_rmsd_A",
     "input_map_topology",
-    "input_allow_microstate_mismatch",
     "edge_sha256",
     "atom_mapping_fingerprint",
     "ligand_bundle_sha256",
     "ligand_validation_sha256",
+)
+PAIRED_PROTOCOL_FIELDS = (
+    *COMMON_PROTOCOL_FIELDS,
+    "input_allow_microstate_mismatch",
     "receptor_microstates_sha256",
     "paired_inputs_sha256",
 )
-SNAPSHOT_HASH_FIELDS = {
+SINGLE_PROTOCOL_FIELDS = (
+    *COMMON_PROTOCOL_FIELDS,
+    "workflow_type",
+    "state_inputs_sha256",
+)
+PROTOCOL_FIELDS = PAIRED_PROTOCOL_FIELDS
+COMMON_SNAPSHOT_HASH_FIELDS = {
     "map_sha256": "input_map.fmp",
     "edge_sha256": "input_map.edge",
     "map_provenance_sha256": "input_map.provenance",
     "atom_mapping_json_sha256": "input_map_mappings.json",
     "ligand_bundle_sha256": "input_ligands.maegz",
     "ligand_validation_sha256": "input_ligand_validation.json",
+}
+PAIRED_SNAPSHOT_HASH_FIELDS = {
+    **COMMON_SNAPSHOT_HASH_FIELDS,
     "receptor_microstates_sha256": "input_receptor_microstates.json",
     "paired_inputs_sha256": "input_paired_inputs.tsv",
 }
+SINGLE_SNAPSHOT_HASH_FIELDS = {
+    **COMMON_SNAPSHOT_HASH_FIELDS,
+    "state_inputs_sha256": "input_state_inputs.tsv",
+}
+SNAPSHOT_HASH_FIELDS = PAIRED_SNAPSHOT_HASH_FIELDS
 QC_VENDOR_FIELDS = {
     "qc_convergence": "convergence",
     "qc_ligand_rmsd": "ligand RMSD",
@@ -64,16 +81,27 @@ QC_VENDOR_FIELDS = {
 QC_RATINGS = {"Good", "Fair", "Bad", "N/A"}
 EDGE_LINE = re.compile(r"^\s*\S+:\S+\s*#\s*(?P<a>\S+)\s*->\s*(?P<b>\S+)\s*$")
 MAX_SEED = 2147483647
-REQUIRED_MANIFEST_FIELDS = {
+COMMON_REQUIRED_MANIFEST_FIELDS = {
     "schema_version",
     "state",
     "seed",
     "jobname",
     "prepare_only",
-    *PROTOCOL_FIELDS,
-    *SNAPSHOT_HASH_FIELDS,
+    *COMMON_PROTOCOL_FIELDS,
+    *COMMON_SNAPSHOT_HASH_FIELDS,
 }
-NORMALIZED_FIELDS = [
+PAIRED_REQUIRED_MANIFEST_FIELDS = {
+    *COMMON_REQUIRED_MANIFEST_FIELDS,
+    "input_allow_microstate_mismatch",
+    "receptor_microstates_sha256",
+    "paired_inputs_sha256",
+}
+SINGLE_REQUIRED_MANIFEST_FIELDS = {
+    *COMMON_REQUIRED_MANIFEST_FIELDS,
+    "workflow_type",
+    "state_inputs_sha256",
+}
+COMMON_NORMALIZED_FIELDS = [
     "schema_version",
     "engine",
     "protocol_fingerprint",
@@ -89,6 +117,9 @@ NORMALIZED_FIELDS = [
     "input_atom_mapping_json_sha256",
     "input_ligand_bundle_sha256",
     "input_ligand_validation_sha256",
+]
+PAIRED_NORMALIZED_FIELDS = [
+    *COMMON_NORMALIZED_FIELDS,
     "input_receptor_microstates_sha256",
     "input_paired_inputs_sha256",
     "vendor_edge_table_sha256",
@@ -102,6 +133,23 @@ NORMALIZED_FIELDS = [
     "unit",
     "sign_convention",
 ]
+SINGLE_NORMALIZED_FIELDS = [
+    *COMMON_NORMALIZED_FIELDS[:2],
+    "workflow_type",
+    *COMMON_NORMALIZED_FIELDS[2:],
+    "input_state_inputs_sha256",
+    "vendor_edge_table_sha256",
+    *QC_VENDOR_FIELDS,
+    "state",
+    "edge_id",
+    "source",
+    "target",
+    "ddg",
+    "standard_uncertainty",
+    "unit",
+    "sign_convention",
+]
+NORMALIZED_FIELDS = PAIRED_NORMALIZED_FIELDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +166,8 @@ class RunMetadata:
     input_lineage: dict[str, str]
     expected_edge_pairs: frozenset[tuple[str, str]]
     expected_mapping_fingerprint: str
+    workflow_type: str
+    normalized_schema_version: int
 
 
 def _sha256(path: Path) -> str:
@@ -159,9 +209,6 @@ def _read_manifest_values(manifest: Path) -> tuple[dict[str, str], bytes]:
         if key in values:
             raise ValueError(f"{manifest}: row {row_number}: duplicate key {key!r}")
         values[key] = value
-    missing = sorted(REQUIRED_MANIFEST_FIELDS - values.keys())
-    if missing:
-        raise ValueError(f"{manifest}: missing required fields: {missing}")
     return values, raw_bytes
 
 
@@ -207,6 +254,49 @@ def _read_paired_input_values(path: Path) -> dict[str, str]:
         "suite_release",
         "allow_microstate_mismatch",
     }
+    for field in hash_fields:
+        if not _is_sha256(values[field]):
+            raise ValueError(f"{path}: {field} must be a lowercase SHA-256")
+    return values
+
+
+def _read_state_input_values(path: Path) -> dict[str, str]:
+    """Read the builder's strict one-receptor cohort manifest."""
+    required = {
+        "schema_version",
+        "build_schema",
+        "suite_release",
+        "state",
+        "receptor_sha256",
+        "receptor_provenance_sha256",
+        "pose_viewer_sha256",
+        "pose_viewer_provenance_sha256",
+        "ligand_bundle_sha256",
+        "ligand_validation_sha256",
+        "map_sha256",
+        "edge_sha256",
+        "map_provenance_sha256",
+        "atom_mapping_fingerprint",
+        "atom_mapping_json_sha256",
+    }
+    values: dict[str, str] = {}
+    for row_number, line in enumerate(path.read_text().splitlines(), start=1):
+        columns = line.split("\t")
+        if len(columns) != 2 or not all(column.strip() for column in columns):
+            raise ValueError(f"{path}: row {row_number}: expected two nonempty TSV fields")
+        key, value = (column.strip() for column in columns)
+        if key in values:
+            raise ValueError(f"{path}: row {row_number}: duplicate key {key!r}")
+        values[key] = value
+    missing = sorted(required - values.keys())
+    extra = sorted(values.keys() - required)
+    if missing or extra:
+        raise ValueError(f"{path}: state-input fields differ; missing={missing}, extra={extra}")
+    if values["schema_version"] != "1":
+        raise ValueError(f"{path}: unsupported schema_version {values['schema_version']!r}")
+    if values["state"] not in {"open", "closed"}:
+        raise ValueError(f"{path}: unsupported state {values['state']!r}")
+    hash_fields = required - {"schema_version", "build_schema", "suite_release", "state"}
     for field in hash_fields:
         if not _is_sha256(values[field]):
             raise ValueError(f"{path}: {field} must be a lowercase SHA-256")
@@ -348,6 +438,57 @@ def _validate_snapshot_lineage(
     return lineage, expected_edge_pairs
 
 
+def _validate_single_snapshot_lineage(
+    manifest: Path,
+    values: dict[str, str],
+    *,
+    state: str,
+    suite_release: str,
+) -> tuple[dict[str, str], frozenset[tuple[str, str]]]:
+    """Verify exact one-state run snapshots and their cohort manifest."""
+    for field in {*SINGLE_SNAPSHOT_HASH_FIELDS, "atom_mapping_fingerprint"}:
+        if not _is_sha256(values[field]):
+            raise ValueError(f"{manifest}: {field} must be a lowercase SHA-256")
+    for field, filename in SINGLE_SNAPSHOT_HASH_FIELDS.items():
+        snapshot = manifest.parent / filename
+        if not snapshot.is_file():
+            raise FileNotFoundError(f"run snapshot not found: {snapshot}")
+        if _sha256(snapshot) != values[field]:
+            raise ValueError(f"{manifest}: {field} does not match {snapshot.name}")
+
+    state_path = manifest.parent / SINGLE_SNAPSHOT_HASH_FIELDS["state_inputs_sha256"]
+    state_inputs = _read_state_input_values(state_path)
+    if " ".join(state_inputs["suite_release"].split()) != suite_release:
+        raise ValueError(f"{state_path}: Suite release does not match the run manifest")
+    if state_inputs["state"] != state:
+        raise ValueError(f"{state_path}: state does not match the run manifest")
+    expected_values = {
+        "ligand_bundle_sha256": values["ligand_bundle_sha256"],
+        "ligand_validation_sha256": values["ligand_validation_sha256"],
+        "map_sha256": values["map_sha256"],
+        "edge_sha256": values["edge_sha256"],
+        "map_provenance_sha256": values["map_provenance_sha256"],
+        "atom_mapping_fingerprint": values["atom_mapping_fingerprint"],
+        "atom_mapping_json_sha256": values["atom_mapping_json_sha256"],
+    }
+    for field, expected in expected_values.items():
+        if state_inputs[field] != expected:
+            raise ValueError(f"{state_path}: {field} does not match the run snapshot")
+
+    expected_edge_pairs = _read_snapshot_edge_pairs(manifest, values)
+    lineage = {
+        "input_map_sha256": values["map_sha256"],
+        "input_edge_sha256": values["edge_sha256"],
+        "input_map_provenance_sha256": values["map_provenance_sha256"],
+        "input_atom_mapping_fingerprint": values["atom_mapping_fingerprint"],
+        "input_atom_mapping_json_sha256": values["atom_mapping_json_sha256"],
+        "input_ligand_bundle_sha256": values["ligand_bundle_sha256"],
+        "input_ligand_validation_sha256": values["ligand_validation_sha256"],
+        "input_state_inputs_sha256": values["state_inputs_sha256"],
+    }
+    return lineage, expected_edge_pairs
+
+
 def _read_vendor_qc(path: Path) -> dict[tuple[str, str], dict[str, str]]:
     """Read official categorical per-edge QC ratings, mapping blanks to N/A."""
     with path.open(newline="") as handle:
@@ -373,6 +514,25 @@ def _read_vendor_qc(path: Path) -> dict[tuple[str, str], dict[str, str]]:
     return qc_by_pair
 
 
+def _manifest_contract(
+    manifest: Path,
+    values: dict[str, str],
+) -> tuple[set[str], tuple[str, ...], str, int]:
+    """Return required fields, protocol fields, workflow, and result schema."""
+    schema_version = values.get("schema_version")
+    if schema_version == "1":
+        workflow_type = "paired_open_closed"
+        if values.get("workflow_type", workflow_type) != workflow_type:
+            raise ValueError(f"{manifest}: schema 1 requires workflow_type={workflow_type!r}")
+        return PAIRED_REQUIRED_MANIFEST_FIELDS, PAIRED_PROTOCOL_FIELDS, workflow_type, 2
+    if schema_version == "2":
+        workflow_type = "single_rbfe"
+        if values.get("workflow_type") != workflow_type:
+            raise ValueError(f"{manifest}: schema 2 requires workflow_type={workflow_type!r}")
+        return SINGLE_REQUIRED_MANIFEST_FIELDS, SINGLE_PROTOCOL_FIELDS, workflow_type, 3
+    raise ValueError(f"{manifest}: unsupported schema_version {schema_version!r}")
+
+
 def _read_manifest(
     manifest: Path,
     *,
@@ -382,8 +542,12 @@ def _read_manifest(
 ) -> RunMetadata:
     """Read and validate scientific run identity from a launcher manifest."""
     values, raw_bytes = _read_manifest_values(manifest)
-    if values["schema_version"] != "1":
-        raise ValueError(f"{manifest}: unsupported schema_version {values['schema_version']!r}")
+    required_fields, protocol_fields, workflow_type, normalized_schema_version = _manifest_contract(
+        manifest, values
+    )
+    missing = sorted(required_fields - values.keys())
+    if missing:
+        raise ValueError(f"{manifest}: missing required fields: {missing}")
     if values["state"] != state:
         raise ValueError(
             f"{manifest}: state {values['state']!r} does not match requested {state!r}"
@@ -408,14 +572,22 @@ def _read_manifest(
             f"{manifest}: Suite release differs from extraction installation: "
             f"{values['suite_release']!r} != {suite_release!r}"
         )
-    protocol = {field: values[field] for field in PROTOCOL_FIELDS}
+    protocol = {field: values[field] for field in protocol_fields}
     protocol["suite_release"] = suite_release
-    input_lineage, expected_edge_pairs = _validate_snapshot_lineage(
-        manifest,
-        values,
-        state=state,
-        suite_release=suite_release,
-    )
+    if workflow_type == "paired_open_closed":
+        input_lineage, expected_edge_pairs = _validate_snapshot_lineage(
+            manifest,
+            values,
+            state=state,
+            suite_release=suite_release,
+        )
+    else:
+        input_lineage, expected_edge_pairs = _validate_single_snapshot_lineage(
+            manifest,
+            values,
+            state=state,
+            suite_release=suite_release,
+        )
     protocol_json = json.dumps(protocol, sort_keys=True, separators=(",", ":"))
     return RunMetadata(
         manifest_sha256=hashlib.sha256(raw_bytes).hexdigest(),
@@ -428,6 +600,8 @@ def _read_manifest(
         input_lineage=input_lineage,
         expected_edge_pairs=expected_edge_pairs,
         expected_mapping_fingerprint=values["atom_mapping_fingerprint"],
+        workflow_type=workflow_type,
+        normalized_schema_version=normalized_schema_version,
     )
 
 
@@ -504,13 +678,13 @@ def _read_completed_edges(
     return parsed
 
 
-def _extract_completed_mapping_fingerprint(
+def _extract_fmp_fingerprints(
     fmp: Path,
     *,
     runner: Path,
     output: Path,
-) -> str:
-    """Extract and validate the actual mapping fingerprint in a completed FMP."""
+) -> tuple[str, str]:
+    """Extract and validate mapping and environment fingerprints from an FMP."""
     script = Path(__file__).with_name("extract_edge_mappings.py")
     command = [
         str(runner),
@@ -525,21 +699,23 @@ def _extract_completed_mapping_fingerprint(
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(
-            "completed-FMP atom-mapping extraction failed with exit code "
-            f"{completed.returncode}: {detail}"
+            f"FMP provenance extraction failed with exit code {completed.returncode}: {detail}"
         )
     if not output.is_file():
-        raise RuntimeError(f"atom-mapping extractor did not create expected file: {output}")
+        raise RuntimeError(f"FMP provenance extractor did not create expected file: {output}")
     try:
         payload = json.loads(output.read_text())
     except json.JSONDecodeError as exc:
-        raise ValueError(f"{output}: invalid completed-FMP mapping JSON") from exc
+        raise ValueError(f"{output}: invalid FMP provenance JSON") from exc
     if not isinstance(payload, dict) or payload.get("schema_version") != 2:
         raise ValueError(f"{output}: expected mapping schema_version 2")
-    fingerprint = payload.get("mapping_fingerprint")
-    if not isinstance(fingerprint, str) or not _is_sha256(fingerprint):
+    mapping_fingerprint = payload.get("mapping_fingerprint")
+    if not isinstance(mapping_fingerprint, str) or not _is_sha256(mapping_fingerprint):
         raise ValueError(f"{output}: mapping_fingerprint must be a lowercase SHA-256")
-    return fingerprint
+    environment_fingerprint = payload.get("environment_fingerprint")
+    if not isinstance(environment_fingerprint, str) or not _is_sha256(environment_fingerprint):
+        raise ValueError(f"{output}: environment_fingerprint must be a lowercase SHA-256")
+    return mapping_fingerprint, environment_fingerprint
 
 
 def extract(
@@ -587,15 +763,34 @@ def extract(
             export_root=export_root,
             source_fmp_sha256=source_fmp_sha256,
         )
-        completed_mapping_fingerprint = _extract_completed_mapping_fingerprint(
-            fmp,
+        input_map = manifest.parent / SNAPSHOT_HASH_FIELDS["map_sha256"]
+        input_mapping_fingerprint, input_environment_fingerprint = _extract_fmp_fingerprints(
+            input_map,
             runner=runner,
-            output=tmp_dir / "completed_mappings.json",
+            output=tmp_dir / "input_mappings.json",
         )
+        completed_mapping_fingerprint, completed_environment_fingerprint = (
+            _extract_fmp_fingerprints(
+                fmp,
+                runner=runner,
+                output=tmp_dir / "completed_mappings.json",
+            )
+        )
+        if input_mapping_fingerprint != run.expected_mapping_fingerprint:
+            raise ValueError(
+                "immutable input FMP atom mapping does not match its mapping snapshot: "
+                f"{input_mapping_fingerprint} != {run.expected_mapping_fingerprint}"
+            )
         if completed_mapping_fingerprint != run.expected_mapping_fingerprint:
             raise ValueError(
                 "completed FMP atom mapping does not match its immutable input snapshot: "
                 f"{completed_mapping_fingerprint} != {run.expected_mapping_fingerprint}"
+            )
+        if completed_environment_fingerprint != input_environment_fingerprint:
+            raise ValueError(
+                "completed FMP receptor/environment does not match its immutable "
+                "input-map snapshot: "
+                f"{completed_environment_fingerprint} != {input_environment_fingerprint}"
             )
         parsed = _read_completed_edges(
             vendor_csv,
@@ -605,12 +800,17 @@ def extract(
         vendor_edge_table_sha256 = _sha256(vendor_csv)
         qc_by_pair = _read_vendor_qc(vendor_csv)
         normalized_tmp = tmp_dir / "normalized.csv"
+        normalized_fields = (
+            PAIRED_NORMALIZED_FIELDS
+            if run.normalized_schema_version == 2
+            else SINGLE_NORMALIZED_FIELDS
+        )
         with normalized_tmp.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=NORMALIZED_FIELDS)
+            writer = csv.DictWriter(handle, fieldnames=normalized_fields)
             writer.writeheader()
             for edge_index, edge in enumerate(parsed.edges):
-                writer.writerow({
-                    "schema_version": 2,
+                row = {
+                    "schema_version": run.normalized_schema_version,
                     "engine": "fep_plus",
                     "protocol_fingerprint": run.protocol_fingerprint,
                     "protocol_json": run.protocol_json,
@@ -629,7 +829,10 @@ def extract(
                     "standard_uncertainty": f"{edge.uncertainty:.17g}",
                     "unit": "kcal/mol",
                     "sign_convention": "target_minus_source",
-                })
+                }
+                if run.normalized_schema_version == 3:
+                    row["workflow_type"] = run.workflow_type
+                writer.writerow(row)
         read_edge_file(
             normalized_tmp,
             expected_state=state,
@@ -645,7 +848,7 @@ def extract(
             label: output.with_name(f"{output.stem}.vendor_{label}.csv") for label in vendor_exports
         }
         provenance = {
-            "schema_version": 2,
+            "schema_version": 3,
             "publication_status": "complete_commit_marker",
             "normalized_result": str(output.resolve()),
             "normalized_result_sha256": _sha256(normalized_tmp),
@@ -656,11 +859,15 @@ def extract(
             "run_id": run.run_id,
             "run_seed": run.seed,
             "state": state,
+            "workflow_type": run.workflow_type,
+            "normalized_schema_version": run.normalized_schema_version,
             "suite_release": run.suite_release,
             "scientific_protocol": run.protocol,
             "protocol_fingerprint": run.protocol_fingerprint,
             "input_lineage": run.input_lineage,
             "completed_atom_mapping_fingerprint": completed_mapping_fingerprint,
+            "input_environment_fingerprint": input_environment_fingerprint,
+            "completed_environment_fingerprint": completed_environment_fingerprint,
             "adapter": "fmp2excel.py -csv -cycle-closure",
             "statistical_fields": ["bennett_ddg", "bennett_ddg_error"],
             "ignored_as_statistical_inputs": ["pred_dg", "ccc_ddg", "ccc_ddg_error"],

@@ -26,6 +26,7 @@ import json
 from pathlib import Path
 
 from rdkit import Chem
+from schrodinger import structure
 from schrodinger.application.scisol.packages.fep import graph as fepgraph
 from schrodinger.rdkit.rdkit_adapter import to_rdkit
 
@@ -54,6 +55,30 @@ def mapping_fingerprint(records: list[dict]) -> str:
     ]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def environment_fingerprint(environment_structures: list) -> str:
+    """Hash the ordered receptor, membrane, and solvent structures.
+
+    Args:
+        environment_structures: Ordered FEP graph environment structures;
+            entries may be ``None``.
+
+    Returns:
+        Lowercase SHA-256 of length-prefixed Maestro CT serializations and
+        explicit positional markers.
+    """
+    digest = hashlib.sha256(b"fepp-fmp-environment-v1\0")
+    digest.update(len(environment_structures).to_bytes(8, "big"))
+    for environment_structure in environment_structures:
+        if environment_structure is None:
+            digest.update(b"N")
+            continue
+        payload = structure.write_ct_to_string(environment_structure).encode()
+        digest.update(b"S")
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
 
 
 def extract(fmp: Path, out_json: Path) -> int:
@@ -100,6 +125,7 @@ def extract(fmp: Path, out_json: Path) -> int:
                 "schema_version": 2,
                 "fmp": fmp.stem,
                 "mapping_fingerprint": mapping_fingerprint(records),
+                "environment_fingerprint": environment_fingerprint(graph.environment_struc),
                 "edges": records,
             },
             indent=1,

@@ -13,6 +13,10 @@ import pytest
 FEPP_DIR = Path(__file__).parents[3] / "examples" / "fepp"
 BUILD_SCRIPT = FEPP_DIR / "build_fepp_inputs.sh"
 RUN_SCRIPT = FEPP_DIR / "run_fep_plus.sh"
+SINGLE_BUILD_SCRIPT = FEPP_DIR / "rbfe" / "build_inputs.sh"
+SINGLE_RUN_SCRIPT = FEPP_DIR / "rbfe" / "run_fep_plus.sh"
+PAIRED_BUILD_SCRIPT = FEPP_DIR / "rbfe_open_closed" / "build_inputs.sh"
+PAIRED_RUN_SCRIPT = FEPP_DIR / "rbfe_open_closed" / "run_fep_plus.sh"
 
 
 def write_executable(path: Path, content: str) -> None:
@@ -290,6 +294,105 @@ def test_launcher_records_explicit_protocol_and_unique_repeat_seeds(
         if line.startswith("seed\t")
     }
     assert seeds == {"4000", "4001", "4002", "4003"}
+
+
+def test_standalone_entry_point_needs_only_one_receptor_and_no_paired_artifacts(
+    fake_workflow: tuple[dict[str, str], Path, Path, Path],
+) -> None:
+    env, inputs, work, log = fake_workflow
+    (inputs / "protein_closed.pdb").unlink()
+
+    built = run_script(SINGLE_BUILD_SCRIPT, env, "-c", "both")
+    assert built.returncode == 0, built.stderr
+    assert count_commands(log, "prepwizard ") == 1
+    assert (work / "state_inputs_open.tsv").is_file()
+    assert not (work / "receptor_microstates.json").exists()
+    assert not (work / "paired_inputs.tsv").exists()
+
+    launched = run_script(
+        SINGLE_RUN_SCRIPT,
+        env,
+        "--workflow",
+        "paired",
+        "-c",
+        "both",
+        "--repeats",
+        "2",
+        "--seed-base",
+        "6000",
+        "--jobname-base",
+        "standalone",
+    )
+    assert launched.returncode == 0, launched.stderr
+    run_dirs = sorted((work / "runs").iterdir())
+    assert [path.name for path in run_dirs] == [
+        "standalone_open_r01",
+        "standalone_open_r02",
+    ]
+    for path in run_dirs:
+        names = {item.name for item in path.iterdir()}
+        assert "input_state_inputs.tsv" in names
+        assert "input_receptor_microstates.json" not in names
+        assert "input_paired_inputs.tsv" not in names
+        manifest = dict(
+            line.split("\t", 1) for line in (path / "manifest.tsv").read_text().splitlines()
+        )
+        assert manifest["schema_version"] == "2"
+        assert manifest["workflow_type"] == "single_rbfe"
+        assert manifest["state"] == "open"
+        assert "state_inputs_sha256" in manifest
+        assert "paired_inputs_sha256" not in manifest
+        assert "receptor_microstates_sha256" not in manifest
+
+
+def test_workflow_wrappers_enforce_modes_and_separate_default_namespaces(
+    fake_workflow: tuple[dict[str, str], Path, Path, Path],
+) -> None:
+    env, _, work, _ = fake_workflow
+    built = run_script(PAIRED_BUILD_SCRIPT, env, "-c", "open")
+    assert built.returncode == 0, built.stderr
+
+    single_help = run_script(SINGLE_RUN_SCRIPT, env, "--help")
+    assert single_help.returncode == 0, single_help.stderr
+    assert "default: single" in single_help.stdout
+    assert "default: open" in single_help.stdout
+    assert "default: fepp_rbfe" in single_help.stdout
+    paired_help = run_script(PAIRED_RUN_SCRIPT, env, "--help")
+    assert paired_help.returncode == 0, paired_help.stderr
+    assert "default: paired" in paired_help.stdout
+    assert "default: both" in paired_help.stdout
+    assert "default: fepp_open_closed" in paired_help.stdout
+
+    single = run_script(SINGLE_RUN_SCRIPT, env, "--workflow", "paired", "-c", "both")
+    assert single.returncode == 0, single.stderr
+    paired = run_script(PAIRED_RUN_SCRIPT, env, "--workflow", "single", "-c", "open")
+    assert paired.returncode == 0, paired.stderr
+
+    run_dirs = sorted(path.name for path in (work / "runs").iterdir())
+    assert run_dirs == [
+        "fepp_open_closed_closed_r01",
+        "fepp_open_closed_open_r01",
+        "fepp_rbfe",
+    ]
+    manifests = {
+        path.name: dict(
+            line.split("\t", 1) for line in (path / "manifest.tsv").read_text().splitlines()
+        )
+        for path in (work / "runs").iterdir()
+    }
+    assert manifests["fepp_rbfe"]["workflow_type"] == "single_rbfe"
+    assert manifests["fepp_rbfe"]["state"] == "open"
+    for name in ("fepp_open_closed_open_r01", "fepp_open_closed_closed_r01"):
+        assert manifests[name]["workflow_type"] == "paired_open_closed"
+
+
+def test_standalone_launcher_rejects_both_conformations(
+    fake_workflow: tuple[dict[str, str], Path, Path, Path],
+) -> None:
+    env, _, _, _ = fake_workflow
+    result = run_script(RUN_SCRIPT, env, "--workflow", "single", "-c", "both")
+    assert result.returncode != 0
+    assert "single workflow requires exactly one conformation" in result.stderr
 
 
 def test_seeds_are_state_stable_across_separate_launches(

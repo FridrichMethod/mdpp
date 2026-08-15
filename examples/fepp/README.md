@@ -1,17 +1,32 @@
-# FEP+ relative binding: LplA open versus closed
+# FEP+ examples: single-state RBFE and open versus closed
 
-This example builds and analyzes two native Schrödinger FEP+ relative-binding
-free-energy (RBFE) networks for the open and closed LplA conformations. The
-ligand identities, chemistry, aligned poses, and receptor coordinates originate
-from [`../openfe/rbfe_open_closed.ipynb`](../openfe/rbfe_open_closed.ipynb);
+This directory has two explicit workflows corresponding to the two OpenFE
+analysis patterns:
+
+| Workflow | Receptor calculations | Identifiable result | Entry point |
+|---|---:|---|---|
+| Standard RBFE | One conformation, many ligands | `G_i - G_r` within that receptor state | [`rbfe/`](rbfe/) |
+| Open versus closed | Matched ligand networks in both conformations | `(G_open,i-G_open,r) - (G_closed,i-G_closed,r)` | [`rbfe_open_closed/`](rbfe_open_closed/) |
+
+The workflow directories contain the user-facing commands and focused
+documentation. The scripts in this directory are the shared implementation;
+they are not duplicated analysis stacks.
+
+Both workflows use the same versioned LplA input cohort. The ligand identities,
+chemistry, aligned poses, and receptor coordinates originate from
+[`../openfe/rbfe_open_closed.ipynb`](../openfe/rbfe_open_closed.ipynb);
 protein preparation, OPLS parameterization, mapping, and simulation are native
-FEP+ operations.
+FEP+ operations. The one-conformation FEPP workflow is therefore a one-state
+projection of that paired cohort. It is not exactly pose-matched to
+[`../openfe/rbfe.ipynb`](../openfe/rbfe.ipynb), whose standalone input
+construction always takes ligand poses from the open complex; in particular,
+the paired cohort selects closed-complex poses for Ch5 and M5.
 
 The workflow produces pre-run input maps, but no completed production
 `*_out.fmp` is versioned with this example. Consequently, it is capable of a
 correct FEP+ analysis but does not yet contain a numerical open/closed result.
 
-## What the calculation identifies
+## What the paired calculation identifies
 
 Let `G_{s,i}` be the standard binding free energy of ligand `i` in state `s`,
 where `s` is open or closed. A directed FEP+ edge is interpreted as
@@ -80,7 +95,10 @@ fepp/
 |-- build_fepp_inputs.sh
 |-- run_fep_plus.sh
 |-- extract_fep_results.py
+|-- analyze_rbfe_results.py
 |-- analyze_fep_results.py
+|-- rbfe/                        # one-conformation workflow
+|-- rbfe_open_closed/            # matched open/closed workflow
 |-- extract_edge_mappings.py
 |-- plot_edge_mappings.py
 |-- plot_fep_map.py
@@ -88,6 +106,7 @@ fepp/
     |-- ligand_validation.json
     |-- receptor_{open,closed}.mae
     |-- receptor_microstates.json
+    |-- state_inputs_{open,closed}.tsv
     |-- paired_inputs.tsv
     |-- ligands.maegz
     |-- {open,closed}_pv.mae
@@ -146,12 +165,14 @@ Useful variants are:
 ```
 
 A one-state build cannot perform the paired microstate comparison and emits a
-warning. Production launch always checks the paired build. The
-`--allow-microstate-mismatch` escape hatch is deliberately explicit because a
-mismatched protonation state changes the scientific comparison. A launch from
-such a build must repeat the same option; the policy is then recorded in the
-manifest and normalized protocol fingerprint. This option never permits a
-missing, added, or changed receptor residue or a heavy-atom
+warning. The direct launcher defaults to the paired-cohort contract, while
+`--workflow single` checks and snapshots only the selected state. Prefer the
+entry points under `rbfe/` and `rbfe_open_closed/` so this choice is explicit.
+The `--allow-microstate-mismatch` escape hatch is deliberately explicit
+because a mismatched protonation state changes the scientific comparison. A
+launch from such a build must repeat the same option; the policy is then
+recorded in the manifest and normalized protocol fingerprint. This option
+never permits a missing, added, or changed receptor residue or a heavy-atom
 composition/connectivity change; those mismatches always fail.
 
 Inspect a map with a release-independent Suite command:
@@ -261,8 +282,13 @@ It also requires the launch manifest, checks its state, job name, seed, Suite
 release, and production-versus-prepare status. It verifies every exact run
 snapshot against the manifest, cross-checks the edge and canonical-mapping
 snapshots, and requires the completed FMP export to contain exactly that edge
-set and the exact original core/dummy atom-mapping fingerprint. The strict
-paired-input snapshot is parsed and cross-checked against the current state.
+set, the exact original core/dummy atom-mapping fingerprint, and the same
+ordered receptor/membrane/solvent environment fingerprint as the immutable
+input map. The environment fingerprint uses Suite-serialized Maestro CT data,
+so a renamed or swapped open/closed output is rejected. It parses and
+cross-checks the workflow-specific cohort snapshot: `input_state_inputs.tsv`
+for standalone RBFE, or `input_paired_inputs.tsv` plus the receptor-microstate
+report for the paired workflow.
 It embeds the complete input lineage, canonical scientific-protocol
 fingerprint, manifest hash, source-FMP hash, and raw vendor edge-table hash in
 the normalized schema. The adjacent `manifest.tsv` is the default when
@@ -274,7 +300,11 @@ atomically installed last as the bundle's completion marker. A missing marker
 means publication was interrupted and the sibling bundle should not be used.
 The analyzer enforces this contract: it takes the same lock in shared mode,
 reads one immutable byte snapshot, and verifies the completion marker, CSV
-hash, protocol, run identity, mapping fingerprint, and input lineage.
+hash, protocol, run identity, mapping and environment fingerprints, and input
+lineage. New publications use commit-marker schema 3. Legacy normalized-v2
+exports with a schema-2 marker remain readable for backward compatibility but
+do not prove receptor/environment identity; re-extract their source FMP before
+production use. Normalized-v3 standalone results require marker schema 3.
 
 The statistical fit intentionally does not use `pred_dg`, `ccc_ddg`, or
 `ccc_ddg_error`. The first two are cycle-closure-derived quantities;
@@ -285,6 +315,27 @@ edge table's convergence, ligand-RMSD, and REST-exchange ratings as diagnostics,
 not as replacements for independent repeats. Official `Good`, `Fair`, `Bad`,
 and `N/A` ratings are also retained in the normalized rows and summarized in
 `analysis.json`; they are warnings, not an automatic edge-exclusion rule.
+
+## Analyze a single receptor state
+
+The standalone workflow fits the raw Bennett network without inventing a
+second receptor leg:
+
+```bash
+conda run -n mdpp python3 analyze_rbfe_results.py \
+  --input tmp/results/open_r01.csv \
+  --input tmp/results/open_r02.csv \
+  --input tmp/results/open_r03.csv \
+  --state open --reference LA_AMP \
+  --output-dir tmp/results/open_rbfe
+```
+
+It reports `G_i-G_r`, the complete gauge-conditioned covariance, all pairwise
+reference-invariant contrasts, edge residuals, cycle diagnostics, repeat
+heterogeneity, vendor QC, and exact run/input provenance. A negative value
+means stronger predicted binding than the reference. The reference row is
+`0 +/- 0` only because it fixes the additive gauge. See [`rbfe/`](rbfe/) for
+the complete standalone workflow.
 
 ## Analyze paired states
 
@@ -372,10 +423,21 @@ conda run -n mdpp python3 analyze_fep_results.py \
 If `a_r +/- u_a` is independent of the RBFE networks, the anchored values are
 `Q_i = D_i^{(r)} + a_r`, and the covariance gains the required rank-one term
 `u_a^2 1 1^T`. An apo conformational free energy
-alone is not silently reinterpreted as a ligand binding anchor.
+alone is not silently reinterpreted as a ligand binding anchor. Before use,
+verify that the anchor matches the receptor basin and microstate, temperature,
+standard state, and thermodynamic quantity, and that its simulations are
+independent of the RBFE networks. Preserve its citation, method, and state
+definition alongside the hash-bound anchor file.
 
 ## Scientific limitations to resolve before publication
 
+- **A starting structure is not automatically a thermodynamic state.** Calling
+  a run "open" or "closed" is state-specific only if the receptor remains in
+  the intended conformational basin, or if explicit state-defining restraints
+  and their corrections are used. Measure receptor CV/RMSD basin occupancy;
+  ligand RMSD and REST-exchange ratings do not establish receptor-state
+  stability. Otherwise interpret results as protocol- and
+  initial-conformation-conditioned RBFE values.
 - **Protocol comparison, not engine-only validation.** FEP+ and OpenFE use
   different preparation, force fields, charge assignment, solvent/sampling
   protocols, and possibly perturbation graphs. Agreement is useful; a

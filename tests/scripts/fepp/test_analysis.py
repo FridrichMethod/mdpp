@@ -238,10 +238,13 @@ def test_open_closed_double_difference_covariance_and_anchor(tmp_path: Path) -> 
     )
 
     output_dir = tmp_path / "analysis_bundle"
+    output_dir.mkdir()
+    (output_dir / "relative_free_energies.csv").write_text("stale single result\n")
     analysis.write_outputs(anchored, anchored_tables, output_dir=output_dir)
     marker = json.loads((output_dir / "analysis.provenance.json").read_text())
     assert marker["publication_status"] == "complete_commit_marker"
     assert output_dir.with_name("analysis_bundle.lock").is_file()
+    assert not (output_dir / "relative_free_energies.csv").exists()
     for filename, digest in marker["files"].items():
         assert hashlib.sha256((output_dir / filename).read_bytes()).hexdigest() == digest
 
@@ -450,19 +453,22 @@ if [[ "${1-}" == "python3" && "$(basename "${2-}")" == "extract_edge_mappings.py
     shift 2
     output=""
     while [[ $# -gt 0 ]]; do
-        if [[ "$1" == "-o" ]]; then
-            output="$2"
-            shift 2
-        else
-            shift
-        fi
+        case "$1" in
+            -f) shift 2 ;;
+            -o) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
     done
-    if [[ "${FAKE_WRONG_MAPPING:-0}" == "1" ]]; then
+    fingerprint="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    environment="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    if [[ "${FAKE_WRONG_MAPPING:-0}" == "1" && "${output}" == *completed_mappings.json ]]; then
         fingerprint="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    else
-        fingerprint="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     fi
-    printf '{"schema_version":2,"mapping_fingerprint":"%s","edges":[]}\n' "${fingerprint}" >"${output}"
+    if [[ "${FAKE_WRONG_ENVIRONMENT:-0}" == "1" && "${output}" == *completed_mappings.json ]]; then
+        environment="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    fi
+    printf '{"schema_version":2,"mapping_fingerprint":"%s","environment_fingerprint":"%s","edges":[]}\n' \
+        "${fingerprint}" "${environment}" >"${output}"
     exit 0
 fi
 output=""
@@ -588,9 +594,11 @@ fi
     assert parsed.run_manifest_sha256 == hashlib.sha256(manifest.read_bytes()).hexdigest()
     provenance_path = output.with_suffix(".csv.provenance.json")
     assert provenance_path.is_file()
-    assert json.loads(provenance_path.read_text())["publication_status"] == (
-        "complete_commit_marker"
-    )
+    provenance = json.loads(provenance_path.read_text())
+    assert provenance["schema_version"] == 3
+    assert provenance["publication_status"] == "complete_commit_marker"
+    assert provenance["input_environment_fingerprint"] == "c" * 64
+    assert provenance["completed_environment_fingerprint"] == "c" * 64
     assert output.with_suffix(".csv.lock").is_file()
     assert output.with_name("open.vendor_edges.csv").is_file()
 
@@ -638,6 +646,19 @@ fi
     assert wrong_mapping.returncode != 0
     assert "completed FMP atom mapping does not match" in wrong_mapping.stderr
     assert not wrong_mapping_output.exists()
+
+    wrong_environment_output = tmp_path / "wrong_environment.csv"
+    wrong_environment_env = dict(os.environ, FAKE_WRONG_ENVIRONMENT="1")
+    wrong_environment = subprocess.run(
+        [*command[:-1], str(wrong_environment_output)],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=wrong_environment_env,
+    )
+    assert wrong_environment.returncode != 0
+    assert "completed FMP receptor/environment does not match" in wrong_environment.stderr
+    assert not wrong_environment_output.exists()
 
     (suite / "version.txt").unlink()
     missing_release_output = tmp_path / "missing_release.csv"
