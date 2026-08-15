@@ -17,6 +17,7 @@ isomesh complex_pos_mesh, complex_potential, 1.0
 isomesh complex_neg_mesh, complex_potential, -1.0
 color blue, complex_pos_mesh
 color red, complex_neg_mesh
+cmd.flag("ignore",'complex','clear');cmd.rebuild('complex')
 
 orient complex
 zoom complex, 8
