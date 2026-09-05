@@ -106,3 +106,66 @@ def test_notebook_cells_compile_without_stale_outputs(notebook: str) -> None:
             compile("".join(cell["source"]), f"{notebook}:cell{index}", "exec")
             assert not cell["outputs"]
             assert cell["execution_count"] is None
+
+
+@pytest.mark.parametrize("notebook", ["rbfe", "rbfe_open_closed"])
+def test_network_cell_tracks_active_mapper_list_parameters_and_versions(
+    notebook: str, tmp_path: Path
+) -> None:
+    """Changing the actual mapper selection must not reuse a default-config cache."""
+    nb = json.loads((EXAMPLES / f"{notebook}.ipynb").read_text())
+    ligand = tmp_path / "A.sdf"
+    ligand.write_text("charged ligand")
+    calls = []
+
+    @dataclass
+    class Mapper:
+        name: str
+        distance: float = 0.9
+
+        def to_json(self) -> str:
+            return json.dumps({"name": self.name, "distance": self.distance})
+
+    class Network:
+        def to_graphml(self) -> str:
+            return "cached graph"
+
+    def planner(**kwargs: object) -> Network:
+        calls.append(kwargs)
+        return Network()
+
+    first, second = Mapper("lomap"), Mapper("kartograf")
+    namespace = {
+        "input_digest": UTILS.input_digest,
+        "charged_sdfs": [ligand],
+        "mappers": [first, second],
+        "scorer": str,
+        "network_planner": planner,
+        "SOFTWARE_VERSIONS": {"lomap2": "3.2.1", "kartograf": "1.2.0"},
+        "NETWORK_DIR": tmp_path,
+        "openfe": SimpleNamespace(
+            LigandNetwork=SimpleNamespace(from_graphml=lambda _graph: Network())
+        ),
+        "charged_ligands": [object()],
+        "plot_atommapping_network": lambda _network: None,
+    }
+    code = compile("".join(nb["cells"][18]["source"]), f"{notebook}:network", "exec")
+    exec(code, namespace)
+    original_cache = namespace["LIGAND_NETWORK_PATH"]
+    exec(code, namespace)
+    assert len(calls) == 1
+
+    namespace["mappers"] = [second]
+    exec(code, namespace)
+    assert len(calls) == 2
+    assert namespace["LIGAND_NETWORK_PATH"] != original_cache
+    namespace["mappers"] = [second, first]
+    exec(code, namespace)
+    assert len(calls) == 3
+    assert namespace["LIGAND_NETWORK_PATH"] != original_cache
+    second.distance = 1.2
+    exec(code, namespace)
+    assert len(calls) == 4
+    namespace["SOFTWARE_VERSIONS"]["kartograf"] = "1.3.0"
+    exec(code, namespace)
+    assert len(calls) == 5
