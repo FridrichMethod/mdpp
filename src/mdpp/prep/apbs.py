@@ -18,7 +18,7 @@ text files. Run APBS itself by calling the ``apbs`` CLI separately.
 from __future__ import annotations
 
 import re
-from math import ceil
+from math import ceil, isclose, isfinite
 from pathlib import Path
 
 from mdpp._types import StrPath
@@ -36,8 +36,7 @@ _NA_PAULING_RADIUS_A: float = 1.8750
 _CL_PAULING_RADIUS_A: float = 1.8150
 
 _DEBYE_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"[Dd]ebye[- ]length[:\s]+([0-9.]+)"),
-    re.compile(r"[Gg]ot debye length\s+([0-9.]+)"),
+    re.compile(r"debye[- ]length[:\s]+(\S+)", re.IGNORECASE),
 )
 
 
@@ -75,9 +74,9 @@ def _read_pqr_atoms(pqr_path: Path) -> tuple[list[tuple[float, float, float]], l
 def _apbs_friendly_dime(length: float, spacing: float) -> int:
     """Round ``length`` up to the nearest APBS multigrid grid count.
 
-    APBS multigrid requires ``dime = c * 2**n + 1`` for small integers ``c``
-    and levels ``n``. We pick the smallest such number that covers
-    ``ceil(length / spacing) + 1``.
+    For the default multigrid level of four, APBS requires
+    ``dime = c * 32 + 1``. Round up so APBS does not reduce the requested
+    count and silently coarsen the grid.
 
     Args:
         length: edge length of the fine grid in Angstrom.
@@ -86,12 +85,9 @@ def _apbs_friendly_dime(length: float, spacing: float) -> int:
     Returns:
         APBS-compatible integer grid count.
     """
-    target = ceil(length / spacing) + 1
-    candidates = sorted({c * 2**n + 1 for c in range(1, 7) for n in range(1, 12)})
-    for candidate in candidates:
-        if candidate >= target:
-            return candidate
-    return candidates[-1]
+    if not isfinite(length) or not isfinite(spacing) or length <= 0 or spacing <= 0:
+        raise ValueError("Grid length and spacing must be finite and positive.")
+    return 32 * ceil(length / spacing / 32) + 1
 
 
 def write_apbs_input(
@@ -120,9 +116,10 @@ def write_apbs_input(
       resulting ``.dx`` feeds a BrownDye2 simulation that needs a finite
       Debye length for far-field electrostatics.
     - Larger grid padding (``fine_padding_a`` / ``coarse_padding_a``) than
-      pdb2pqr's ``fadd=20`` / ``cfac=1.7`` defaults so the outer grid
-      comfortably exceeds the BrownDye b-radius. ``dime`` is rounded up to
-      the nearest ``c * 2**n + 1`` value required by APBS multigrid.
+      pdb2pqr's ``fadd=20`` / ``cfac=1.7`` defaults. BrownDye still needs
+      adequate far-field grid coverage verified for the particular system;
+      fixed padding cannot guarantee coverage of its computed b-radius.
+      ``dime`` is rounded up to ``c * 32 + 1`` for four multigrid levels.
 
     Args:
         stem: PQR file stem (without extension). ``work_dir / "{stem}.pqr"``
@@ -198,10 +195,12 @@ quit
 
 
 def infer_debye_length(*apbs_logs: StrPath) -> float:
-    """Return the first Debye length (Angstrom) parsed from any APBS log.
+    """Return a consistent finite Debye length (Angstrom) from APBS logs.
 
-    Scans logs in argument order; returns as soon as a Debye length is
-    found in any one of them. Missing log files are skipped silently.
+    Scans all available logs and requires their reported Debye lengths to
+    agree within log-rounding tolerance. Missing log files are skipped.
+    This prevents mixing potentials computed at different ionic strengths
+    in a BrownDye system with a single solvent definition.
 
     Args:
         *apbs_logs: paths to one or more APBS log files.
@@ -211,15 +210,28 @@ def infer_debye_length(*apbs_logs: StrPath) -> float:
 
     Raises:
         RuntimeError: if no log contains a recognisable Debye length entry.
+        ValueError: if lengths disagree or are nonpositive/nonfinite.
     """
+    lengths: list[float] = []
     for raw_path in apbs_logs:
         path = Path(raw_path)
         if not path.is_file():
             continue
         text = path.read_text(errors="ignore")
         for pattern in _DEBYE_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                return float(match.group(1))
+            for match in pattern.finditer(text):
+                try:
+                    length = float(match.group(1))
+                except ValueError:
+                    continue
+                if not isfinite(length) or length <= 0:
+                    raise ValueError(
+                        f"Debye length must be finite and positive: {path} ({length})."
+                    )
+                lengths.append(length)
+    if lengths:
+        if any(not isclose(lengths[0], length, rel_tol=1e-3) for length in lengths[1:]):
+            raise ValueError(f"Inconsistent Debye lengths across APBS logs: {lengths}.")
+        return lengths[0]
     paths = [str(Path(p)) for p in apbs_logs]
     raise RuntimeError(f"Could not infer Debye length from any of: {paths}")

@@ -23,8 +23,9 @@ Every notebook follows the same shape and gathers all imports + constants +
 `tmp/` setup in its **top cell**:
 
 1. **Prepare**
-   - Protein: PropKa pKa check at the target pH, then PDBFixer adds missing
-     residues/atoms/hydrogens (`mdpp.prep.run_propka`, `mdpp.prep.fix_pdb`).
+   - Protein: PROPKA pKa predictions at the target pH, then PDBFixer adds missing
+     residues/atoms/hydrogens and applies supported PROPKA overrides (`mdpp.prep.run_propka`, `mdpp.prep.fix_pdb`). Explicit Amber residue
+     labels preserve protonation states when tleap rebuilds hydrogens.
    - Ligand: RDKit assigns bond orders from a SMILES template and writes an SDF
      (`mdpp.prep.assign_topology`); PDB files carry no bond-order information.
    - Complex: both of the above, after splitting chains with
@@ -37,14 +38,17 @@ Every notebook follows the same shape and gathers all imports + constants +
 1. **Solve APBS** -> `.dx`
    - `mdpp.prep.write_apbs_input` writes a multigrid `.in` sized from the
      PQR bounding box (physics defaults in `mdpp.prep.apbs`: 0.150 M NaCl,
-     pdie 2.0, sdie 78.54), then `apbs` produces the potential map.
+     pdie 2.0, sdie 78.54, 298 K), then `apbs` produces the potential map.
+     Each successful run publishes the matching PQR and `<stem>.settings.json`
+     with its DX and log in `tmp/apbs/`; BrownDye uses
+     it to check solvent consistency and recover matching dielectric values.
 
 ### Why AmberTools for every case
 
 Every case uses AmberTools (rather than PDB2PQR) so the PQR charges and radii are
 produced by one consistent force field across the protein, ligand, and complex
 examples. This APBS stage feeds the BrownDye association example:
-`examples/browndye/browndye_prep.ipynb` reuses any two components' `.pqr` / `.dx`
+`examples/browndye/browndye_prep.ipynb` reuses the disjoint protein and ligand `.pqr` / `.dx`
 outputs as its bodies, then builds and runs the BrownDye simulation.
 
 ## Running
@@ -95,3 +99,24 @@ cd examples/apbs/protein && pymol viz_protein_apbs.pml   # or: chimerax viz_prot
 cd examples/apbs/ligand  && pymol viz_ligand_apbs.pml    # or: chimerax viz_ligand_apbs.cxc
 cd examples/apbs/complex && pymol viz_complex_apbs.pml   # or: chimerax viz_complex_apbs.cxc
 ```
+
+## Scientific interpretation
+
+DX values are potential in kT/e. APBS total electrostatic energies are not
+binding free energies; use a consistent thermodynamic cycle and converged,
+compatible grids for energy comparisons. The ligand charge comes from the
+SMILES microstate, not an automated pH prediction. PROPKA uses the isolated
+protein in these examples; inspect its predictions and warnings, particularly
+for active sites, residues near the target pH and ligand-induced pKa shifts.
+
+Linear PB, mbondi3 radii and the chosen dielectrics are model assumptions.
+Quantitative work should compare finer grids (for example 0.5 versus 0.75 Å),
+larger boxes and plausible protonation/dielectric choices. Fixed box padding
+does not guarantee coverage of BrownDye's far field. Check repaired residues,
+ligand stereochemistry, total charge and Amber parameter warnings. The two
+ligand-containing notebooks select GAFF2 explicitly in `parmchk2 -s 2` as well
+as in antechamber and tleap.
+
+See the [APBS potential units](https://apbs.readthedocs.io/en/nathan-docs/using/input/elec/write.html),
+[APBS grid dimensions](https://apbs.readthedocs.io/en/nathan-docs/using/input/elec/dime.html),
+and [OpenMM protonation rules](https://docs.openmm.org/latest/api-python/generated/openmm.app.modeller.Modeller.html).

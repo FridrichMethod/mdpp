@@ -64,9 +64,9 @@ def test_dime_is_apbs_friendly(stem_in_tmp: tuple[str, Path]) -> None:
     out = write_apbs_input(stem, work)
     match = re.search(r"^\s*dime\s+(\d+)\s+(\d+)\s+(\d+)", out.read_text(), re.MULTILINE)
     assert match is not None
-    candidates = {c * 2**n + 1 for c in range(1, 7) for n in range(1, 12)}
     for value in match.groups():
-        assert int(value) in candidates
+        assert (int(value) - 1) % 32 == 0
+        assert int(value) >= 33
 
 
 def test_fglen_honours_fine_padding(stem_in_tmp: tuple[str, Path]) -> None:
@@ -118,7 +118,22 @@ def test_raises_on_missing_pqr(tmp_path: Path) -> None:
 
 def test_apbs_friendly_dime_rounds_up() -> None:
     """``_apbs_friendly_dime(length, spacing)`` rounds to next c*2**n+1."""
-    # 100 / 0.75 = 133.33 -> ceil + 1 = 135; smallest c*2**n+1 >= 135 is 161 (5*2**5+1).
+    # 100 / 0.75 = 133.33 intervals; round up to 160 intervals.
     assert _apbs_friendly_dime(100.0, DEFAULT_FINE_SPACING_A) == 161
-    # 1 / 1 -> target = 2; smallest candidate >= 2 is 3 (1*2**1+1).
-    assert _apbs_friendly_dime(1.0, 1.0) == 3
+    # Tiny boxes still need enough grid points for four multigrid levels.
+    assert _apbs_friendly_dime(1.0, 1.0) == 33
+
+
+@pytest.mark.parametrize("length", [1.0, 15.0, 23.0, 25.0, 100.0, 245.0, 25000.0])
+def test_dime_preserves_requested_spacing(length: float) -> None:
+    """APBS cannot round these counts down and coarsen the requested mesh."""
+    spacing = 0.5
+    count = _apbs_friendly_dime(length, spacing)
+    assert (count - 1) % 32 == 0
+    assert length / (count - 1) <= spacing
+
+
+@pytest.mark.parametrize("spacing", [0.0, -1.0, float("nan"), float("inf")])
+def test_dime_rejects_invalid_spacing(spacing: float) -> None:
+    with pytest.raises(ValueError, match="finite and positive"):
+        _apbs_friendly_dime(10.0, spacing)

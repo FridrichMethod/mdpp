@@ -71,16 +71,17 @@ class BrownDyeBody:
 class BrownDyeSolvent:
     """Solvent block parameters shared by all bodies in a BrownDye system.
 
-    BrownDye uses kT-units internally, so :attr:`dielectric` is the BrownDye
-    solvent dielectric (typically ``78.0``) and may differ from the APBS
-    ``sdie`` value used to compute the electrostatic grid.
+    Dielectric constants are dimensionless relative permittivities and
+    should match the APBS settings used for the electrostatic grids.
+    BrownDye's energy unit is k_B times 298 K; this does not rescale the
+    dielectric constant.
 
     Attributes:
         debye_length_a: Debye length in Angstrom (usually obtained from the
             APBS log via :func:`mdpp.prep.apbs.infer_debye_length`).
-        dielectric: BrownDye solvent dielectric (kT-units).
+        dielectric: Solvent relative permittivity, matching APBS ``sdie``.
         relative_viscosity: Relative solvent viscosity.
-        kT: Thermal energy unit (BrownDye uses ``kT = 1``).
+        kT: Thermal energy relative to k_B times 298 K (default one).
         desolvation_parameter: BrownDye desolvation scale factor.
         solvent_radius_a: Probe solvent radius in Angstrom.
     """

@@ -12,6 +12,7 @@ from mdpp.prep.protein import (
     PropkaResidue,
     PropkaResult,
     _propka_variants,
+    _set_amber_protonation_names,
     fix_pdb,
 )
 
@@ -126,3 +127,70 @@ def test_fix_pdb_propka_without_nonstandard_matches_model(
     out = tmp_path / "propka_empty.pdb"
     fix_pdb(glu_pdb, out, protonation="propka")
     assert "HE2" not in _atom_names(out)  # nothing to override -> model default
+
+
+@pytest.mark.parametrize(
+    ("name", "hydrogens", "expected"),
+    [
+        ("ASP", [], "ASP"),
+        ("ASP", ["HD2"], "ASH"),
+        ("GLU", [], "GLU"),
+        ("GLU", ["HE2"], "GLH"),
+        ("LYS", ["HZ1", "HZ2"], "LYN"),
+        ("LYS", ["HZ1", "HZ2", "HZ3"], "LYS"),
+        ("HIS", ["HD1"], "HID"),
+        ("HIS", ["HE2"], "HIE"),
+        ("HIS", ["HD1", "HE2"], "HIP"),
+        ("CYS", ["HG"], "CYS"),
+        ("CYS", [], "CYM"),
+    ],
+)
+def test_amber_names_encode_actual_protonation(
+    name: str, hydrogens: list[str], expected: str
+) -> None:
+    from openmm.app import Topology, element
+
+    topology = Topology()
+    residue = topology.addResidue(name, topology.addChain())
+    for hydrogen in hydrogens:
+        topology.addAtom(hydrogen, element.hydrogen, residue)
+    _set_amber_protonation_names(topology)
+    assert residue.name == expected
+
+
+def test_amber_names_distinguish_disulfides_from_thiolates() -> None:
+    from openmm.app import Topology, element
+
+    topology = Topology()
+    chain = topology.addChain()
+    residues = [topology.addResidue("CYS", chain) for _ in range(3)]
+    sulfurs = [topology.addAtom("SG", element.sulfur, residue) for residue in residues]
+    topology.addBond(sulfurs[0], sulfurs[1])
+    _set_amber_protonation_names(topology)
+    assert [r.name for r in residues] == ["CYX", "CYX", "CYM"]
+
+
+def test_amber_names_reject_unsupported_histidinate() -> None:
+    from openmm.app import Topology
+
+    topology = Topology()
+    topology.addResidue("HIS", topology.addChain())
+    with pytest.raises(ValueError, match="HIN is unsupported"):
+        _set_amber_protonation_names(topology)
+
+
+def test_fix_pdb_amber_output_retains_protonation_label(
+    glu_pdb: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = PropkaResult((PropkaResidue("GLU", 1, "A", 7.64, 4.50),))
+    monkeypatch.setattr("mdpp.prep.protein.run_propka", lambda _p: result)
+    out = tmp_path / "amber.pdb"
+    fix_pdb(glu_pdb, out, protonation="propka", residue_names="amber")
+    # Read the serialized records: reloading in OpenMM canonicalizes GLH to GLU.
+    residue_names = {
+        line[17:20].strip()
+        for line in out.read_text().splitlines()
+        if line.startswith(("ATOM", "HETATM"))
+    }
+    assert residue_names == {"GLH"}
+    assert "HE2" in _atom_names(out)
