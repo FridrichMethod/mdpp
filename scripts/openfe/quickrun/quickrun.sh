@@ -4,16 +4,19 @@ set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKING_DIR="."
-REPEATS=1
+REPEATS=3
 
 usage() {
     cat >&2 <<'EOF'
 Usage: quickrun.sh [-r N] [-h]
 
 Submit OpenFE quickrun jobs for all transformations in ./transformations/.
+Each array job runs all protocol_repeats stored in its JSON. The example
+notebooks use protocol_repeats=1, giving three independent repeats by default.
+A resumed array job continues the same repeat.
 
 Options:
-    -r, --repeats N    Number of repeats per transformation (default: 1)
+    -r, --repeats N    Number of repeats per transformation (default: 3)
     -h, --help         Show this help
 EOF
     exit 1
