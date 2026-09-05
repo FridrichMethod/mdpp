@@ -23,6 +23,11 @@ from mdpp.chem.similarity import (
     calc_sim,
 )
 from mdpp.chem.suppliers import MolSupplier
+from mdpp.chem.validation import (
+    normalized_isomeric_smiles,
+    read_ligand_templates,
+    validate_ligand_inputs,
+)
 
 __all__ = [
     "BUILTIN_DESC_NAMES",
@@ -43,4 +48,7 @@ __all__ = [
     "gen_fp",
     "get_framework",
     "is_pains",
+    "normalized_isomeric_smiles",
+    "read_ligand_templates",
+    "validate_ligand_inputs",
 ]

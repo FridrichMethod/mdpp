@@ -24,6 +24,15 @@ from mdpp.analysis.decomposition import (
 )
 from mdpp.analysis.distance import compute_distances, compute_minimum_distance
 from mdpp.analysis.dssp import compute_dssp
+from mdpp.analysis.fepp import (
+    CombinedEdge,
+    FEPNetworkResult,
+    FEPSelectivityResult,
+    combine_repeats,
+    compute_fep_network,
+    compute_fep_selectivity,
+    write_fep_selectivity,
+)
 from mdpp.analysis.fes import compute_fes_2d, compute_fes_from_projection
 from mdpp.analysis.hbond import compute_hbonds, format_hbond_triplets
 from mdpp.analysis.metrics import (
@@ -35,22 +44,34 @@ from mdpp.analysis.metrics import (
     compute_rmsf,
     compute_sasa,
 )
+from mdpp.analysis.rbfe import (
+    RBFEResult,
+    compute_rbfe,
+    write_rbfe,
+)
 
 __all__ = [
     "DBSCAN",
     "HDBSCAN",
+    "CombinedEdge",
+    "FEPNetworkResult",
+    "FEPSelectivityResult",
     "Gromos",
     "Hierarchical",
     "KMeans",
     "MiniBatchKMeans",
+    "RBFEResult",
     "RegularSpace",
     "average_rmsf_with_sem",
+    "combine_repeats",
     "compute_contact_frequency",
     "compute_contacts",
     "compute_dccm",
     "compute_delta_rmsf",
     "compute_distances",
     "compute_dssp",
+    "compute_fep_network",
+    "compute_fep_selectivity",
     "compute_fes_2d",
     "compute_fes_from_projection",
     "compute_hbonds",
@@ -58,6 +79,7 @@ __all__ = [
     "compute_native_contacts",
     "compute_pca",
     "compute_radius_of_gyration",
+    "compute_rbfe",
     "compute_rmsd",
     "compute_rmsd_matrix",
     "compute_rmsf",
@@ -67,4 +89,6 @@ __all__ = [
     "featurize_ca_distances",
     "format_hbond_triplets",
     "project_pca",
+    "write_fep_selectivity",
+    "write_rbfe",
 ]

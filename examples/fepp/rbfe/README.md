@@ -56,7 +56,7 @@ receptor-microstate and `paired_inputs.tsv` artifacts.
 Normalize each completed repeat with the exact launch manifest:
 
 ```bash
-$SCHRODINGER/run python3 ../extract_fep_results.py \
+conda run -n mdpp python3 ../extract_fep_results.py \
   ../tmp/runs/fepp_rbfe_open_r01/fepp_rbfe_open_r01_out.fmp \
   --manifest ../tmp/runs/fepp_rbfe_open_r01/manifest.tsv \
   --state open -o ../tmp/results/open_r01.csv

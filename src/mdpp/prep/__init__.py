@@ -8,6 +8,12 @@ from mdpp.prep.browndye import (
     write_contact_types,
     write_input_xml,
 )
+from mdpp.prep.fepp import (
+    compare_receptor_microstates,
+    compare_receptor_summaries,
+    enforce_receptor_microstate_policy,
+    summarize_receptor,
+)
 from mdpp.prep.ligand import assign_topology, constraint_minimization
 from mdpp.prep.protein import (
     ChainSelect,
@@ -28,7 +34,10 @@ __all__ = [
     "PropkaResult",
     "assign_topology",
     "build_input_xml",
+    "compare_receptor_microstates",
+    "compare_receptor_summaries",
     "constraint_minimization",
+    "enforce_receptor_microstate_policy",
     "extract_chain",
     "fix_pdb",
     "infer_debye_length",
@@ -37,6 +46,7 @@ __all__ = [
     "slice_trajectory",
     "strip_solvent",
     "subsample_trajectory",
+    "summarize_receptor",
     "write_apbs_input",
     "write_contact_types",
     "write_input_xml",

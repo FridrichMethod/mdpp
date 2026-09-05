@@ -2,6 +2,11 @@
 
 from mdpp.plots.clustering import plot_cluster_populations, plot_feature_clustering
 from mdpp.plots.contacts import contact_frequency_to_matrix, plot_contact_map
+from mdpp.plots.fepp import (
+    plot_fep_map,
+    plot_fep_mapping,
+    save_fep_mappings,
+)
 from mdpp.plots.fes import plot_fes
 from mdpp.plots.matrix import plot_dccm
 from mdpp.plots.molecules import draw_mol, draw_mols, get_highlight_bonds
@@ -39,6 +44,8 @@ __all__ = [
     "plot_distances",
     "plot_energy",
     "plot_feature_clustering",
+    "plot_fep_map",
+    "plot_fep_mapping",
     "plot_fes",
     "plot_hbond_counts",
     "plot_hbond_occupancy",
@@ -52,6 +59,7 @@ __all__ = [
     "plot_rmsf",
     "plot_rmsf_average",
     "plot_sasa",
+    "save_fep_mappings",
     "view_mol_3d",
     "view_traj_3d",
 ]

@@ -9,8 +9,9 @@ analysis patterns:
 | Open versus closed | Matched ligand networks in both conformations | `(G_open,i-G_open,r) - (G_closed,i-G_closed,r)` | [`rbfe_open_closed/`](rbfe_open_closed/) |
 
 The workflow directories contain the user-facing commands and focused
-documentation. The scripts in this directory are the shared implementation;
-they are not duplicated analysis stacks.
+documentation. Python scripts in this directory are thin command-line entry
+points: reusable reading, analysis, validation and plotting live in `mdpp`.
+The shell scripts retain the example-specific input preparation and launch orchestration.
 
 Both workflows use the same versioned LplA input cohort. The ligand identities,
 chemistry, aligned poses, and receptor coordinates originate from
@@ -25,6 +26,61 @@ the paired cohort selects closed-complex poses for Ch5 and M5.
 The workflow produces pre-run input maps, but no completed production
 `*_out.fmp` is versioned with this example. Consequently, it is capable of a
 correct FEP+ analysis but does not yet contain a numerical open/closed result.
+
+## Reusable Python API
+
+The example command names, options, default paths, CSV schemas and diagnostic
+outputs are preserved. Import the package APIs directly for other projects:
+
+| Package | Reusable functionality |
+| --- | --- |
+| `mdpp.core.fepp` | `extract_fep_results`, `extract_edge_mappings`, `read_fep_edges`, `fep_mapping_fingerprint` |
+| `mdpp.core.fepp_results` | `read_edge_file`, validated `Edge` / `ParsedEdgeFile` records and provenance checks |
+| `mdpp.analysis.fepp` | `combine_repeats`, `compute_fep_network`, `compute_fep_selectivity`, `write_fep_selectivity` |
+| `mdpp.analysis.rbfe` | `compute_rbfe`, `write_rbfe` |
+| `mdpp.chem.validation` | `read_ligand_templates`, `normalized_isomeric_smiles`, `validate_ligand_inputs` |
+| `mdpp.prep.fepp` | Receptor summaries, microstate comparison and comparison policy |
+| `mdpp.plots.fepp` | `plot_fep_map`, `plot_fep_mapping`, `save_fep_mappings` |
+
+```python
+from pathlib import Path
+
+from mdpp.analysis import compute_fep_selectivity, compute_rbfe, write_rbfe
+from mdpp.core import read_fep_edges
+from mdpp.plots import plot_fep_map
+
+# One normalized CSV and provenance sidecar per independent repeat.
+open_csvs = sorted(Path("runs/open").glob("replica_*/edges.csv"))
+closed_csvs = sorted(Path("runs/closed").glob("replica_*/edges.csv"))
+rbfe = compute_rbfe(open_csvs, state="open", reference="A7_AMP")
+write_rbfe(rbfe, output_dir="analysis/open")
+selectivity = compute_fep_selectivity(
+    open_csvs, closed_paths=closed_csvs, reference="A7_AMP", output_unit="kJ/mol"
+)
+
+# No file is saved or figure closed by the plot_* functions.
+ax = plot_fep_map(read_fep_edges("open_map.edge"), ligand_dir="inputs/ligands")
+ax.figure.savefig("network.png")
+```
+
+Compute functions return frozen, slotted result dataclasses. `FEPNetworkResult`
+provides node energies, the full covariance and network diagnostics;
+`RBFEResult` and `FEPSelectivityResult` contain `summary` and `tables` for the
+existing JSON/CSV reports. Explicit kcal/mol field names identify the network
+solver's energy units; report APIs also support kJ/mol.
+
+Schrödinger modules are imported only in standalone vendor workers. The normal
+mdpp APIs launch these bundled files with the requested Suite's interpreter, so
+Suite 2025-4's Python 3.11 does not import the Python 3.12+ mdpp package. The legacy
+Suite-facing example commands load the exact worker/validation source in this
+checkout; their implementations are included in build provenance fingerprints.
+No package API depends on the `examples/` directory or its input paths.
+
+The general ligand validator preserves phosphorus stereochemistry by default.
+This acyl-AMP example explicitly sets `ignore_phosphorus_stereo=True` for its
+representation-dependent phosphate tags and requires formal charge -1. Other
+ligand collections should use the default stereo policy and declare their own
+charge constraint when appropriate.
 
 ## What the paired calculation identifies
 
@@ -264,12 +320,12 @@ release-independent `fmp2excel.py` entry point and copies only the raw Bennett
 binding edge result and its reported uncertainty:
 
 ```bash
-$SCHRODINGER/run python3 extract_fep_results.py \
+conda run -n mdpp python3 extract_fep_results.py \
   tmp/runs/fepp_open_r01/fepp_open_r01_out.fmp \
   --manifest tmp/runs/fepp_open_r01/manifest.tsv \
   --state open -o tmp/results/open_r01.csv
 
-$SCHRODINGER/run python3 extract_fep_results.py \
+conda run -n mdpp python3 extract_fep_results.py \
   tmp/runs/fepp_closed_r01/fepp_closed_r01_out.fmp \
   --manifest tmp/runs/fepp_closed_r01/manifest.tsv \
   --state closed -o tmp/results/closed_r01.csv

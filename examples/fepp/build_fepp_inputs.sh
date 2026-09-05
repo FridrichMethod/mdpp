@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHRODINGER="$(realpath -m "${SCHRODINGER:-/apps/schrodinger2025-4}")"
 INPUT_DIR="$(realpath -m "${FEPP_INPUT_DIR:-${SCRIPT_DIR}/inputs}")"
 LIGAND_DIR="${INPUT_DIR}/ligands"
+MDPP_SOURCE_DIR="$(realpath -m "${SCRIPT_DIR}/../../src/mdpp")"
 WORK_DIR="$(realpath -m "${FEPP_WORK_DIR:-${SCRIPT_DIR}/tmp}")"
 
 PREP_PH="7.0"
@@ -133,7 +134,10 @@ done
 for helper in \
     "${SCRIPT_DIR}/validate_ligand_inputs.py" \
     "${SCRIPT_DIR}/compare_receptor_microstates.py" \
-    "${SCRIPT_DIR}/extract_edge_mappings.py"; do
+    "${SCRIPT_DIR}/extract_edge_mappings.py" \
+    "${MDPP_SOURCE_DIR}/chem/validation.py" \
+    "${MDPP_SOURCE_DIR}/prep/_fepp_receptor_worker.py" \
+    "${MDPP_SOURCE_DIR}/core/_fepp_mapping_worker.py"; do
     [[ -f "${helper}" ]] || die "required helper not found: ${helper}"
 done
 [[ -f "${INPUT_DIR}/ligands_amp_fep.smi" ]] ||
@@ -217,7 +221,8 @@ ligand_inputs_payload="$(
         "${BUILD_SCHEMA}" \
         "suite=${SUITE_ID}" \
         "smiles=$(file_hash "${INPUT_DIR}/ligands_amp_fep.smi")" \
-        "validator=$(file_hash "${SCRIPT_DIR}/validate_ligand_inputs.py")"
+        "validator=$(file_hash "${SCRIPT_DIR}/validate_ligand_inputs.py")" \
+        "validator_implementation=$(file_hash "${MDPP_SOURCE_DIR}/chem/validation.py")"
     for sdf in "${ligand_sdfs[@]}"; do
         printf 'sdf=%s %s\n' "$(file_hash "${sdf}")" "${sdf##*/}"
     done
@@ -330,6 +335,7 @@ if [[ " ${CONFORMATIONS[*]} " == *" open "* && " ${CONFORMATIONS[*]} " == *" clo
             "open=$(file_hash "${WORK_DIR}/receptor_open.mae")" \
             "closed=$(file_hash "${WORK_DIR}/receptor_closed.mae")" \
             "comparator=$(file_hash "${SCRIPT_DIR}/compare_receptor_microstates.py")" \
+            "comparator_implementation=$(file_hash "${MDPP_SOURCE_DIR}/prep/_fepp_receptor_worker.py")" \
             "allow_mismatch=${ALLOW_MICROSTATE_MISMATCH}" | text_hash
     )"
     comparison_args=(
@@ -400,6 +406,7 @@ for conf in "${CONFORMATIONS[@]}"; do
             "suite=${SUITE_ID}" \
             "pose_viewer=$(file_hash "${pv}")" \
             "mapping_extractor=$(file_hash "${SCRIPT_DIR}/extract_edge_mappings.py")" \
+            "mapping_implementation=$(file_hash "${MDPP_SOURCE_DIR}/core/_fepp_mapping_worker.py")" \
             "environment_structures=1" \
             "topology=${TOPOLOGY}" | text_hash
     )"

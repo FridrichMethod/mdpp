@@ -44,11 +44,11 @@ report.
 Normalize each open and closed repeat separately:
 
 ```bash
-$SCHRODINGER/run python3 ../extract_fep_results.py \
+conda run -n mdpp python3 ../extract_fep_results.py \
   ../tmp/runs/fepp_open_closed_open_r01/fepp_open_closed_open_r01_out.fmp \
   --state open -o ../tmp/results/open_r01.csv
 
-$SCHRODINGER/run python3 ../extract_fep_results.py \
+conda run -n mdpp python3 ../extract_fep_results.py \
   ../tmp/runs/fepp_open_closed_closed_r01/fepp_open_closed_closed_r01_out.fmp \
   --state closed -o ../tmp/results/closed_r01.csv
 ```

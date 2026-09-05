@@ -530,3 +530,46 @@ def test_workflow_fails_closed_without_suite_release_metadata(
         result = run_script(script, env)
         assert result.returncode != 0
         assert message in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("helper", "artifact"),
+    [
+        ("chem/validation.py", "ligand validation report"),
+        ("prep/_fepp_receptor_worker.py", "paired receptor microstate report"),
+        ("core/_fepp_mapping_worker.py", "open FEP map pair"),
+    ],
+)
+def test_build_invalidates_when_packaged_implementation_changes(
+    fake_workflow, tmp_path: Path, helper: str, artifact: str
+) -> None:
+    env, _, _, _ = fake_workflow
+    repository = tmp_path / "checkout"
+    examples = repository / "examples" / "fepp"
+    examples.mkdir(parents=True)
+    for name in (
+        "build_fepp_inputs.sh",
+        "validate_ligand_inputs.py",
+        "compare_receptor_microstates.py",
+        "extract_edge_mappings.py",
+    ):
+        shutil.copy2(FEPP_DIR / name, examples / name)
+    source = repository / "src" / "mdpp"
+    for relative in (
+        "chem/validation.py",
+        "prep/_fepp_receptor_worker.py",
+        "core/_fepp_mapping_worker.py",
+    ):
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(FEPP_DIR.parents[1] / "src" / "mdpp" / relative, target)
+    script = examples / "build_fepp_inputs.sh"
+    built = run_script(script, env)
+    assert built.returncode == 0, built.stderr
+    current = run_script(script, env, "--check")
+    assert current.returncode == 0, current.stderr
+    implementation = source / helper
+    implementation.write_text(implementation.read_text() + "\n# changed implementation\n")
+    stale = run_script(script, env, "--check")
+    assert stale.returncode != 0
+    assert f"stale or missing artifact: {artifact}" in stale.stderr

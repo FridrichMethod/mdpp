@@ -6,6 +6,8 @@ import mdtraj as md
 import numpy as np
 import pytest
 
+pytest_plugins = ["fepp_fixtures"]
+
 
 @pytest.fixture()
 def two_atom_trajectory() -> md.Trajectory:
