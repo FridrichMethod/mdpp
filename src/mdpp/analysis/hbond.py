@@ -75,7 +75,7 @@ def _presence_from_geometry(
     distances_nm = md.compute_distances(traj, ha_pairs, periodic=periodic)
     angles_rad = md.compute_angles(traj, triplets, periodic=periodic)
     angle_cutoff_rad = np.deg2rad(angle_cutoff_deg)
-    return (distances_nm <= distance_cutoff_nm) & (angles_rad >= angle_cutoff_rad)
+    return (distances_nm < distance_cutoff_nm) & (angles_rad > angle_cutoff_rad)
 
 
 def _triplets_from_wernet_nilsson(
@@ -138,10 +138,10 @@ def compute_hbonds(
         sidechain_only: For ``"baker_hubbard"``, restrict to sidechain interactions.
         freq: For ``"baker_hubbard"``, minimum occupancy fraction for returned bonds.
         distance_cutoff_nm: For ``"baker_hubbard"``, H...A distance cutoff used for
-            the geometric presence matrix. Recorded but unused for
+            candidate detection and the geometric presence matrix. Recorded but unused for
             ``"wernet_nilsson"``, which applies mdtraj's own cone criterion.
         angle_cutoff_deg: For ``"baker_hubbard"``, D-H...A angle cutoff used for
-            the geometric presence matrix. Recorded but unused for
+            candidate detection and the geometric presence matrix. Recorded but unused for
             ``"wernet_nilsson"``, which applies mdtraj's own cone criterion.
         timestep_ps: Optional frame timestep override in ps.
         dtype: Output float dtype. If ``None``, uses the package default.
@@ -166,6 +166,8 @@ def compute_hbonds(
                 exclude_water=exclude_water,
                 periodic=periodic,
                 sidechain_only=sidechain_only,
+                distance_cutoff=distance_cutoff_nm,
+                angle_cutoff=angle_cutoff_deg,
             ),
             dtype=np.int_,
         )

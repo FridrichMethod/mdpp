@@ -1199,3 +1199,24 @@ def test_benchmark_dbscan_backends_fast(n_frames: int, n_clusters: int) -> None:
         f"  numba={timings['numba']:.4f}s  sklearn={timings['sklearn']:.4f}s"
         f"  speedup={timings['sklearn'] / timings['numba']:.1f}x"
     )
+
+
+@pytest.mark.parametrize("method", ["ward", "centroid", "median"])
+def test_hierarchical_rejects_euclidean_only_linkages(method) -> None:
+    """Pairwise optimally fitted RMSD cannot assume Euclidean embedding."""
+    from mdpp.analysis.clustering import Hierarchical
+
+    distances = np.array([[0.0, 0.1, 0.3], [0.1, 0.0, 0.2], [0.3, 0.2, 0.0]])
+    with pytest.raises(ValueError, match="Euclidean"):
+        Hierarchical(linkage_method=method)(distances)
+
+
+def test_hierarchical_preserves_weighted_linkage() -> None:
+    """Weighted linkage operates on dissimilarities without Euclidean embedding."""
+    from mdpp.analysis.clustering import Hierarchical
+
+    distances = np.array([[0.0, 0.1, 0.4], [0.1, 0.0, 0.3], [0.4, 0.3, 0.0]])
+    result = Hierarchical(linkage_method="weighted", distance_threshold=0.15)(distances)
+    assert result.n_clusters == 2
+    assert result.labels[0] == result.labels[1]
+    assert result.labels[0] != result.labels[2]

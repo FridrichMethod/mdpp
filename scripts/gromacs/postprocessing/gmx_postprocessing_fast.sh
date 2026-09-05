@@ -47,9 +47,9 @@ gmx select \
     '
 
 # Center the trajectory
-# The trajectory is centered on protein chain A to maintain the integrity of the multimeric complex
-# This prevents the protein assembly from being artificially split by periodic boundary conditions
-# See https://gromacs.bioexcel.eu/t/protein-come-out-of-the-box-but-trjconv-command-didnt-fix-the-problem/3851/8
+# Center on chain A and make each molecule whole. This does not guarantee that
+# separate chains form the intended assembly; inspect multimer imaging and use
+# an explicit assembly/cluster group beforehand when needed.
 printf "Chain_A\nSOLU\n" | gmx trjconv \
     -s "${PRODUCTION}.tpr" \
     -f "${PRODUCTION}.xtc" \
@@ -82,9 +82,11 @@ printf "Chain_A_BB\nSystem\n" | gmx trjconv \
     -n index_complex.ndx \
     -fit rot+trans
 
-rm "${PRODUCTION}_complex_center.xtc"
+# Retain the unfitted trajectory for analyses that apply periodic geometry.
+# The fitted coordinates no longer have the same orientation as the box.
 
-# Smooth the trajectory
+# Smooth for visualization only; never use this output for fluctuation,
+# population, contact, or kinetic analysis.
 gmx filter \
     -s "${PRODUCTION}_complex_fit.tpr" \
     -f "${PRODUCTION}_complex_fit.xtc" \
