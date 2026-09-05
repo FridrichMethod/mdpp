@@ -85,3 +85,22 @@ def test_compute_radius_of_gyration_returns_timeseries(correlated_ca_trajectory)
     assert result.radius_gyration_nm.shape == (correlated_ca_trajectory.n_frames,)
     assert np.all(result.radius_gyration_nm > 0.0)
     assert result.time_ns.shape == (correlated_ca_trajectory.n_frames,)
+
+
+def test_compute_rmsd_preserves_coordinates_and_rmsf(two_atom_trajectory) -> None:
+    """RMSD must not recenter coordinates used by later fluctuation analyses."""
+    original = two_atom_trajectory.xyz.copy()
+    rmsf_before = compute_rmsf(two_atom_trajectory).rmsf_nm
+
+    compute_rmsd(two_atom_trajectory, atom_selection="name CA")
+
+    np.testing.assert_array_equal(two_atom_trajectory.xyz, original)
+    np.testing.assert_array_equal(compute_rmsf(two_atom_trajectory).rmsf_nm, rmsf_before)
+
+
+def test_compute_rmsd_fits_rigid_motion(two_atom_trajectory) -> None:
+    """Translations and rotations of one conformation should have zero RMSD."""
+    two_atom_trajectory.xyz[1] = [[2.0, 3.0, 0.0], [2.0, 4.0, 0.0]]
+    two_atom_trajectory.xyz[2] = [[-2.0, 0.0, 1.0], [-2.0, 0.0, 2.0]]
+    result = compute_rmsd(two_atom_trajectory, atom_selection="name CA")
+    np.testing.assert_allclose(result.rmsd_nm, 0.0, atol=1e-6)

@@ -502,8 +502,9 @@ class Hierarchical:
         internally.  At 120k frames this is ~57 GB.
 
     Args:
-        linkage_method: ``"average"``, ``"complete"``, or ``"single"``.
-            ``"ward"`` is not valid for RMSD matrices.
+        linkage_method: ``"average"``, ``"complete"``, ``"single"``, or ``"weighted"``.
+            ``"ward"``, ``"centroid"`` and ``"median"`` require Euclidean
+            distances, which pairwise optimally fitted RMSD does not guarantee.
         distance_threshold: Distance cutoff in nm.
         n_clusters: Fixed cluster count (overrides *distance_threshold*).
 
@@ -519,6 +520,11 @@ class Hierarchical:
     def __call__(self, rmsd_matrix: NDArray[np.floating]) -> ClusteringResult:
         """Cluster *rmsd_matrix* and return a :class:`ClusteringResult`."""
         _validate_rmsd_matrix(rmsd_matrix)
+        if self.linkage_method not in {"average", "complete", "single", "weighted"}:
+            raise ValueError(
+                "linkage_method must be average, complete, single, or weighted; "
+                "Euclidean linkage methods are not valid for general fitted RMSD matrices."
+            )
         if self.n_clusters is None and self.distance_threshold <= 0.0:
             raise ValueError(
                 f"distance_threshold must be positive, got {self.distance_threshold!r}"

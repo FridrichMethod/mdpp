@@ -139,13 +139,14 @@ def compute_rmsd(
     timestep_ps: float | None = None,
     dtype: DtypeArg = None,
 ) -> RMSDResult:
-    """Compute RMSD over time.
+    """Compute optimally superposed RMSD over time without modifying the input.
 
-    The trajectory should be aligned before calling this function
-    (see :func:`~mdpp.core.trajectory.align_trajectory`).
+    MDTraj fits each frame to the reference using the selected atoms, so prior
+    alignment is unnecessary. Molecules must already be whole across periodic
+    boundaries. The calculation is unweighted (each selected atom counts equally).
 
     Args:
-        traj: Input trajectory (pre-aligned).
+        traj: Input trajectory with whole molecules.
         atom_selection: Atoms used in RMSD calculation.
         reference_frame: Reference frame index for RMSD.
         timestep_ps: Optional time step in ps to override trajectory time.
@@ -157,12 +158,14 @@ def compute_rmsd(
     """
     resolved = resolve_dtype(dtype)
     atom_indices = select_atom_indices(traj.topology, atom_selection)
+    # md.rmsd centers its input in place. Work on a selected copy so a preceding
+    # CA alignment remains valid for subsequent RMSF/DCCM on the original data.
+    selected = traj.atom_slice(atom_indices)
     rmsd_nm = np.asarray(
         md.rmsd(
-            traj,
-            traj,
+            selected,
+            selected,
             frame=reference_frame,
-            atom_indices=atom_indices,
             precentered=False,
         ),
         dtype=resolved,

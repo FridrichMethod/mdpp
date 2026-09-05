@@ -28,7 +28,12 @@ class DistanceFeatures:
 
 @dataclass(frozen=True, slots=True)
 class TorsionFeatures:
-    """Backbone torsion features."""
+    """Backbone torsion features.
+
+    Label suffixes identify zero-based residue indices in the input trajectory,
+    not ordinal torsion columns. This keeps phi/psi pairs matched across termini
+    and chains, even when residue sequence numbers are repeated.
+    """
 
     values: NDArray[np.floating]
     labels: list[str]
@@ -111,8 +116,20 @@ def featurize_backbone_torsions(
         atom_indices = select_atom_indices(traj.topology, atom_selection)
         sliced = traj.atom_slice(atom_indices)
 
-    _, phi = md.compute_phi(sliced)
-    _, psi = md.compute_psi(sliced)
+    phi_atoms, phi = md.compute_phi(sliced)
+    psi_atoms, psi = md.compute_psi(sliced)
+    # The second atom belongs to the residue whose phi/psi is measured in
+    # both definitions: C(i-1)-N(i)-CA(i)-C(i), N(i)-CA(i)-C(i)-N(i+1).
+    # Map through the atom selection so labels retain input topology indices.
+    original_indices = (
+        np.arange(traj.n_atoms, dtype=np.int_) if atom_selection is None else atom_indices
+    )
+    phi_residues = [
+        traj.topology.atom(int(original_indices[atoms[1]])).residue.index for atoms in phi_atoms
+    ]
+    psi_residues = [
+        traj.topology.atom(int(original_indices[atoms[1]])).residue.index for atoms in psi_atoms
+    ]
 
     blocks: list[NDArray[np.floating]] = []
     labels: list[str] = []
@@ -123,19 +140,19 @@ def featurize_backbone_torsions(
     if sincos_embedding:
         if phi_count > 0:
             blocks.extend([np.cos(phi), np.sin(phi)])
-            labels.extend([f"cos(phi_{index})" for index in range(phi_count)])
-            labels.extend([f"sin(phi_{index})" for index in range(phi_count)])
+            labels.extend([f"cos(phi_{index})" for index in phi_residues])
+            labels.extend([f"sin(phi_{index})" for index in phi_residues])
         if psi_count > 0:
             blocks.extend([np.cos(psi), np.sin(psi)])
-            labels.extend([f"cos(psi_{index})" for index in range(psi_count)])
-            labels.extend([f"sin(psi_{index})" for index in range(psi_count)])
+            labels.extend([f"cos(psi_{index})" for index in psi_residues])
+            labels.extend([f"sin(psi_{index})" for index in psi_residues])
     else:
         if phi_count > 0:
             blocks.append(phi)
-            labels.extend([f"phi_{index}" for index in range(phi_count)])
+            labels.extend([f"phi_{index}" for index in phi_residues])
         if psi_count > 0:
             blocks.append(psi)
-            labels.extend([f"psi_{index}" for index in range(psi_count)])
+            labels.extend([f"psi_{index}" for index in psi_residues])
 
     if not blocks:
         raise ValueError("No phi/psi torsions were found for the selected atoms.")

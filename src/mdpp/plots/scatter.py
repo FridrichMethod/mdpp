@@ -73,7 +73,9 @@ def plot_ramachandran(
     """Plot a Ramachandran diagram from backbone torsion features.
 
     Expects ``torsions`` to have been computed with ``sincos_embedding=False``
-    so that raw phi/psi angles (in radians) are available.
+    so that raw phi/psi angles (in radians) are available. Only residues
+    with both angles are plotted; the residue index in each label is used
+    to pair the angles, rather than their position in the feature matrix.
 
     Args:
         torsions: TorsionFeatures from ``featurize_backbone_torsions``
@@ -91,8 +93,16 @@ def plot_ramachandran(
     """
     axis = get_axis(ax)
 
-    phi_cols = [i for i, label in enumerate(torsions.labels) if label.startswith("phi_")]
-    psi_cols = [i for i, label in enumerate(torsions.labels) if label.startswith("psi_")]
+    phi_cols = {
+        label.removeprefix("phi_"): i
+        for i, label in enumerate(torsions.labels)
+        if label.startswith("phi_")
+    }
+    psi_cols = {
+        label.removeprefix("psi_"): i
+        for i, label in enumerate(torsions.labels)
+        if label.startswith("psi_")
+    }
 
     if not phi_cols or not psi_cols:
         raise ValueError(
@@ -100,8 +110,11 @@ def plot_ramachandran(
             "Use featurize_backbone_torsions(sincos_embedding=False)."
         )
 
-    phi = torsions.values[:, phi_cols].ravel()
-    psi = torsions.values[:, psi_cols].ravel()
+    common_residues = [residue for residue in phi_cols if residue in psi_cols]
+    if not common_residues:
+        raise ValueError("Ramachandran plot requires residues with both phi and psi angles.")
+    phi = torsions.values[:, [phi_cols[residue] for residue in common_residues]].ravel()
+    psi = torsions.values[:, [psi_cols[residue] for residue in common_residues]].ravel()
 
     axis.scatter(np.degrees(phi), np.degrees(psi), s=s, alpha=alpha, color=color, edgecolors="none")
     axis.set_xlabel(r"$\phi$ (degrees)")
