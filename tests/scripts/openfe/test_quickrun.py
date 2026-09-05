@@ -48,7 +48,7 @@ def _sbatch_lines(slurm_env: dict[str, Path]) -> list[str]:
 
 
 class TestSingleTransformation:
-    """Single .json file in transformations/, default repeats=1."""
+    """Single .json file in transformations/, default repeats=3."""
 
     def test_sbatch_called_once(self, slurm_env: dict[str, Path], tmp_path: Path) -> None:
         (tmp_path / "transformations").mkdir()
@@ -69,7 +69,7 @@ class TestSingleTransformation:
         _run(slurm_env, cwd=tmp_path)
 
         line = _sbatch_lines(slurm_env)[0]
-        assert "--array=0-0" in line
+        assert "--array=0-2" in line
 
     def test_sbatch_args_contain_json_path(
         self, slurm_env: dict[str, Path], tmp_path: Path
