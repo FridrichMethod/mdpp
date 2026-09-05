@@ -214,6 +214,7 @@ def fix_pdb(
     pH: float = 7.0,
     *,
     protonation: Literal["model", "propka"] = "model",
+    residue_names: Literal["standard", "amber"] = "standard",
 ) -> None:
     """Fix a PDB file by adding missing residues, atoms, and hydrogens.
 
@@ -236,6 +237,17 @@ def fix_pdb(
             ASP/GLU/LYS/HIS/CYS (a neutral histidine uses the HIE tautomer);
             unsupported residue types (e.g. termini) keep the default and are
             logged.
+        residue_names: ``"amber"`` encodes the final hydrogen topology as
+            Amber protonation-state residue names (ASH/GLH/LYN/HID/HIE/HIP,
+            and CYM for a free thiolate versus CYX for a disulfide). This
+            preserves the selected states when tleap rebuilds hydrogens.
+            ``"standard"`` keeps the existing residue names.
+
+    Returns:
+        None. Writes the prepared PDB to ``fixed_pdb_path``.
+
+    Raises:
+        ValueError: If Amber naming encounters an unsupported histidine state.
     """
     result = run_propka(pdb_path)
     nonstandard = result.get_nonstandard(pH)
@@ -273,8 +285,45 @@ def fix_pdb(
         fixer.addMissingHydrogens(pH=pH)
         topology, positions = fixer.topology, fixer.positions
 
+    if residue_names == "amber":
+        _set_amber_protonation_names(topology)
+
     with Path(fixed_pdb_path).open("w") as f:
         PDBFile.writeFile(topology, positions, f)
+
+
+def _set_amber_protonation_names(topology: Topology) -> None:
+    """Encode an already hydrogenated topology for Amber template selection.
+
+    OpenMM's CYX hydrogen variant represents both a thiolate and a disulfide;
+    Amber distinguishes these by residue name, so inspect S-S connectivity.
+    """
+    disulfide_residues = {
+        atom.residue
+        for atom1, atom2 in topology.bonds()
+        if atom1.name == atom2.name == "SG" and atom1.residue is not atom2.residue
+        for atom in (atom1, atom2)
+    }
+    for residue in topology.residues():
+        names = {atom.name for atom in residue.atoms()}
+        if residue.name == "ASP":
+            residue.name = "ASH" if "HD2" in names else "ASP"
+        elif residue.name == "GLU":
+            residue.name = "GLH" if "HE2" in names else "GLU"
+        elif residue.name == "LYS":
+            residue.name = "LYS" if "HZ3" in names else "LYN"
+        elif residue.name == "HIS":
+            if not {"HD1", "HE2"} & names:
+                raise ValueError("Amber histidine requires HD1 or HE2; HIN is unsupported.")
+            residue.name = {
+                (True, True): "HIP",
+                (True, False): "HID",
+                (False, True): "HIE",
+            }[("HD1" in names, "HE2" in names)]
+        elif residue.name == "CYS":
+            residue.name = (
+                "CYX" if residue in disulfide_residues else "CYS" if "HG" in names else "CYM"
+            )
 
 
 def strip_solvent(
