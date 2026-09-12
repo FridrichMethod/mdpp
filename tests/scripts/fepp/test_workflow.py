@@ -253,6 +253,8 @@ def test_launcher_records_explicit_protocol_and_unique_repeat_seeds(
         "trial",
     )
     assert launched.returncode == 0, launched.stderr
+    assert "does not establish simulation completion" in launched.stdout
+    assert "wait_for_fep_plus.py" in launched.stdout
 
     fep_lines = [line for line in log.read_text().splitlines() if line.startswith("fep_plus ")]
     assert len(fep_lines) == 4
@@ -286,7 +288,21 @@ def test_launcher_records_explicit_protocol_and_unique_repeat_seeds(
         "input_paired_inputs.tsv",
     }
     assert all(snapshot_names <= {item.name for item in path.iterdir()} for path in run_dirs)
-    assert all("/runs/" in line and "/input_map.fmp" in line for line in fep_lines)
+    assert all(line.endswith(" working_map.fmp") for line in fep_lines)
+    assert all(str(work) not in line for line in fep_lines)
+    for path in run_dirs:
+        snapshot = path / "input_map.fmp"
+        working = path / "working_map.fmp"
+        assert working.read_bytes() == snapshot.read_bytes()
+        assert snapshot.stat().st_mode & 0o222 == 0
+        assert working.stat().st_mode & 0o200
+        working.write_text("native workflow may return an updated input map")
+        assert working.read_bytes() != snapshot.read_bytes()
+        manifest = dict(
+            line.split("\t", 1) for line in (path / "manifest.tsv").read_text().splitlines()
+        )
+        assert manifest["launch_map_file"] == "working_map.fmp"
+        assert manifest["launch_map_initial_sha256"] == manifest["map_sha256"]
     seeds = {
         line.split("\t", 1)[1]
         for path in run_dirs

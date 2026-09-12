@@ -52,7 +52,7 @@ Usage: ${0##*/} [options]
 
 Launch native FEP+ with the documented launcher-controlled protocol choices
 explicit. Each job runs in tmp/runs/<jobname>/ and records a read-only manifest
-before launch.
+before launch. Production launch returns after submission, not job completion.
 
 Options:
       --workflow MODE       paired | single (default: ${WORKFLOW}).
@@ -327,7 +327,9 @@ for conf in "${CONFORMATIONS[@]}"; do
         [[ ! -e "${run_dir}" ]] || die "run directory already exists: ${run_dir}"
         staged_run_dir="$(mktemp -d "${WORK_DIR}/runs/.${jobname}.XXXXXX")"
         trap 'rm -rf -- "${staged_run_dir}"' EXIT
-        launch_map_file="${run_dir}/input_map.fmp"
+        # Job Server stages relative inputs into scratch. The native workflow
+        # also returns its input map, so keep the immutable snapshot separate.
+        launch_map_file="working_map.fmp"
         map_file="${staged_run_dir}/input_map.fmp"
         map_edge="${staged_run_dir}/input_map.edge"
         map_provenance="${staged_run_dir}/input_map.provenance"
@@ -369,6 +371,8 @@ for conf in "${CONFORMATIONS[@]}"; do
             cp -- "${snapshot_sources[index]}" "${snapshot_targets[index]}"
         done
         chmod 0444 "${snapshot_targets[@]}"
+        cp -- "${map_file}" "${staged_run_dir}/${launch_map_file}"
+        chmod 0644 "${staged_run_dir}/${launch_map_file}"
         if [[ "${WORKFLOW}" == "paired" ]]; then
             inputs_sha256="$(sha256sum "${paired_inputs}" | awk '{print $1}')"
         else
@@ -448,6 +452,9 @@ for conf in "${CONFORMATIONS[@]}"; do
                     "${ALLOW_MICROSTATE_MISMATCH}"
             fi
             printf 'source_map_path\t%s\n' "${source_map_file}"
+            printf 'launch_map_file\t%s\n' "${launch_map_file}"
+            printf 'launch_map_initial_sha256\t%s\n' \
+                "$(sha256sum "${staged_run_dir}/${launch_map_file}" | awk '{print $1}')"
             printf 'map_sha256\t%s\n' "$(sha256sum "${map_file}" | awk '{print $1}')"
             printf 'edge_sha256\t%s\n' "$(sha256sum "${map_edge}" | awk '{print $1}')"
             printf 'map_provenance_sha256\t%s\n' \
@@ -481,5 +488,11 @@ for conf in "${CONFORMATIONS[@]}"; do
             cd "${run_dir}"
             "${cmd[@]}" 2>&1 | tee launcher.log
         )
+        if [[ "${PREPARE}" -eq 1 ]]; then
+            echo "Preparation command returned successfully; no simulation was submitted."
+        else
+            echo "Launcher returned; this does not establish simulation completion."
+            echo "Use the JobId in ${run_dir}/launcher.log with wait_for_fep_plus.py before export."
+        fi
     done
 done

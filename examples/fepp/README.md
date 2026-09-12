@@ -150,6 +150,7 @@ fepp/
 |-- compare_receptor_microstates.py
 |-- build_fepp_inputs.sh
 |-- run_fep_plus.sh
+|-- wait_for_fep_plus.py
 |-- extract_fep_results.py
 |-- analyze_rbfe_results.py
 |-- analyze_fep_results.py
@@ -261,6 +262,26 @@ ligands. Compare both the built `.edge` files and the extracted JSON
 
 ## Run FEP+
 
+For Suite 2025-4 with `JOB_SERVER` enabled, use Job Server staging. Do not
+add `-LOCAL`: that legacy option conflicts with this mode. A custom
+`SCHRODINGER_HOSTS` file does not configure Job Server's local storage. If the
+local server has not yet been configured and its default directory is missing,
+unwritable, or inside `$SCHRODINGER` (which Job Server rejects even if writable),
+choose persistent writable workspace storage before starting it:
+
+```bash
+mkdir -p "$PWD/tmp/jobserver"
+"$SCHRODINGER/jsc" local-server-dir --set "$PWD/tmp/jobserver"
+"$SCHRODINGER/jsc" local-server-start
+```
+
+This changes the user's local Job Server configuration. Reuse an already
+running server; do not relocate or restart one with active jobs. The installed
+`schrodinger.hosts` can point at an unavailable `$SCHRODINGER/scratch`; changing
+that hosts file is not a repair for Job Server storage. For local GPU execution,
+`-S localhost:1` is supported: the Suite detects local GPUs directly. Its GUI's
+`localhost-gpu` label is submitted to Job Control as `localhost`.
+
 First verify that each map prepares successfully:
 
 ```bash
@@ -295,7 +316,13 @@ Each repeat receives a unique job name, seed, and atomically published
 unchanged whether the states are launched together or separately. Every run
 directory contains read-only snapshots of the exact map, edge list, canonical
 mapping, ligand bundle, ligand-validation report, receptor-microstate report,
-shared paired-input manifest, and map provenance used by that job. One launcher
+shared paired-input manifest, and map provenance used by that job. Native FEP+
+receives a separate writable `working_map.fmp` copy by basename from the run
+directory; its initial checksum is recorded in the manifest. This is necessary
+because Job Server also returns the input map during cleanup: an absolute map
+path can cause `MMJOBBE_ERROR 23` during output staging after simulations have
+succeeded. Returned or updated working maps never overwrite the read-only
+`input_map.fmp` provenance snapshot. One launcher
 invocation requires every repeat/state snapshot to retain the same paired-input
 hash; a concurrent rebuild aborts the remaining cohort. Existing run
 directories are never silently overwritten. Three repeats are a starting
@@ -312,6 +339,37 @@ justify deviations. In particular, use matched ionic conditions when that is
 required by the intended cross-protocol comparison. Suite-internal settings
 not exposed here remain release-defined defaults, which is why the exact Suite
 release is part of the protocol fingerprint.
+
+The launcher remains asynchronous: exit code zero means only that the launch
+command returned successfully. Keep the unique `JobId` from each run's
+`launcher.log`. Before exporting, wait for the actual job and its download:
+
+```bash
+conda run -n mdpp python3 wait_for_fep_plus.py JOB_ID_FROM_LAUNCHER_LOG \
+  --jobname fepp_open_r01 --run-dir tmp/runs/fepp_open_r01
+```
+
+The waiter uses the Suite 2025-4 `jobcontrol.Job(job_id)` API (`get_job` is not
+available), refreshes the snapshot on every poll, and accesses `succeeded()`
+and `ExitStatus` only after `isComplete()`. It checks that `Job.Dir` matches
+the requested run directory, preventing a same-name job from validating stale
+output elsewhere. It requires `isDownloaded()` and a nonempty
+`<jobname>_out.fmp`, then prints a JSON receipt with its checksum.
+A timeout or lookup failure does not stop or resubmit the job; reconcile that
+same JobId before launching again. Execution success still requires the
+scientific validation below before estimates enter an analysis.
+
+A receptor-free smoke can use two 3D ligands and
+`run -FROM scisol fep_mapper.py pair.mae -e 0 -o pair`, followed by native
+`fep_plus pair.fmp -skip-leg complex -time 500` and the desired host options.
+Production time is in ps and the ordinary CLI minimum is 500 ps. Vacuum is
+skipped by default. Such a solvent-only run yields a solvent-leg transformation
+free energy, **not binding DDG**; do not feed it to `extract_fep_results.py` or
+substitute zero for its missing complex leg. Inspect
+`edge.get_leg_dg_by_name("solvent").val` and `.unc` in its output FMP instead.
+`edge.nodes` gives the directed from/to order; `edge.is_fep_completed` checks
+binding DDG and is not a completion criterion for this solvent-only smoke.
+The LplA workflow launchers above continue to run full binding calculations.
 
 ## Export raw FEP+ results
 
