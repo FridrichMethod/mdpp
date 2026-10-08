@@ -84,7 +84,7 @@ SLURM batch scripts (`.sbatch`) live alongside their `.sh` counterparts in each 
 | Script | Description |
 |---|---|
 | `quickrun/quickrun.sh` | Submit all `transformations/*.json` as SLURM array jobs |
-| `quickrun/quickrun.sbatch` | SLURM batch script: starts CUDA MPS, runs `openfe quickrun --resume` via Apptainer |
+| `quickrun/quickrun.sbatch` | SLURM batch script: runs `openfe quickrun --resume` via Apptainer on a `--gpu_cmode=shared` GPU |
 | `runtime/check_status.sh` | Check transformation replica status and optionally restart failed replicas |
 | `runtime/monitor.sbatch` | Periodic monitor: runs check_status, emails report, self-resubmits via SLURM |
 
@@ -117,5 +117,7 @@ results/<transformation_name>/replica_2/
 
 Jobs on the `owners` partition are automatically requeued when preempted.
 `quickrun.sbatch` uses `--resume` so requeued jobs continue from the last
-checkpoint instead of starting over. CUDA MPS is started automatically to
-work around Sherlock's `Exclusive_Process` GPU mode.
+checkpoint instead of starting over. The GPU is requested with
+`--gpu_cmode=shared` (Default compute mode), which already lets a single
+openfe process hold the multiple CUDA contexts openmmtools needs, so no
+per-job CUDA MPS daemon is started.
