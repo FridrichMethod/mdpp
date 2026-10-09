@@ -807,6 +807,56 @@ class TestAlignCornerCases:
         aligned = align_trajectory(traj, atom_selection="name CA", reference_frame=0)
         np.testing.assert_allclose(aligned.xyz, xyz, atol=1e-6)
 
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_collapsed_frames_translate_to_reference(self, inplace: bool) -> None:
+        """Frames with every atom at one point have no rotation; each moves onto the reference."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        res = topology.add_residue("ALA", chain, resSeq=1)
+        for name in ("N", "CA", "CB", "C"):
+            topology.add_atom(name, md.element.carbon, res)
+
+        points = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [-4.0, 5.0, 0.5]], dtype=np.float32)
+        xyz = np.repeat(points[:, None, :], topology.n_atoms, axis=1)
+        expected = np.broadcast_to(points[2], xyz.shape)
+
+        traj = md.Trajectory(xyz=xyz.copy(), topology=topology)
+        buffer = traj.xyz
+        aligned = align_trajectory(
+            traj, atom_selection="name CB", reference_frame=2, inplace=inplace
+        )
+
+        np.testing.assert_allclose(aligned.xyz, expected, atol=1e-6)
+        assert aligned.xyz.dtype == np.float32
+        if inplace:
+            assert aligned is traj
+            assert aligned.xyz is buffer
+        else:
+            np.testing.assert_array_equal(traj.xyz, xyz)
+
+    def test_collapsed_first_frame_alone_is_not_translation_only(self) -> None:
+        """A collapsed frame 0 does not make rotation undefined for the other frames."""
+        topology = md.Topology()
+        chain = topology.add_chain()
+        res = topology.add_residue("ALA", chain, resSeq=1)
+        for name in ("N", "CA", "CB", "C"):
+            topology.add_atom(name, md.element.carbon, res)
+
+        xyz = np.random.default_rng(0).normal(size=(3, topology.n_atoms, 3)).astype(np.float32)
+        xyz[0] = 0.3
+        traj = md.Trajectory(xyz=xyz.copy(), topology=topology)
+
+        try:
+            aligned = align_trajectory(traj, atom_selection="all", reference_frame=1)
+        except OverflowError:
+            return  # mdtraj >= 1.11.2 rejects a collapsed frame 0 instead of aligning it
+
+        centroids = xyz.mean(axis=1, keepdims=True)
+        translated = xyz - centroids + centroids[1]
+        aligned_rmsd = float(np.sqrt(np.mean((aligned.xyz[2] - aligned.xyz[1]) ** 2)))
+        translated_rmsd = float(np.sqrt(np.mean((translated[2] - translated[1]) ** 2)))
+        assert aligned_rmsd < translated_rmsd - 1e-3
+
     def test_two_frames(self) -> None:
         """Two-frame trajectory should align successfully."""
         topology = md.Topology()

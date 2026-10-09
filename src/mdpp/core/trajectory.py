@@ -272,6 +272,12 @@ def align_trajectory(
     topology and time are shared with the original trajectory.  This
     avoids the expensive ``deepcopy(topology)`` that ``traj[:]`` performs.
 
+    If every atom of every frame sits at a single point (for example a
+    single-atom system), no rotation is defined.  Such a trajectory is
+    aligned by translation only: each frame's selection centroid is moved
+    onto the reference frame's.  mdtraj >= 1.11.2 ``superpose`` rejects this
+    input with an ``OverflowError`` even though the alignment is trivial.
+
     Args:
         traj: Input trajectory.
         atom_selection: Atoms used for alignment.
@@ -285,6 +291,10 @@ def align_trajectory(
 
     Raises:
         ValueError: If ``reference_frame`` is out of range.
+        OverflowError: From mdtraj >= 1.11.2 ``superpose`` when frame 0 alone
+            collapses to a single point while other frames do not, or for
+            coordinates of extreme magnitude.  With ``inplace=True`` the
+            input coordinates may already be modified when this is raised.
     """
     if not 0 <= reference_frame < traj.n_frames:
         raise ValueError(
@@ -298,5 +308,10 @@ def align_trajectory(
         aligned.xyz = traj.xyz.copy()
 
     atom_indices = select_atom_indices(aligned.topology, atom_selection)
-    aligned.superpose(aligned, frame=reference_frame, atom_indices=atom_indices)
+    xyz = aligned.xyz
+    if np.all(xyz == xyz[:, :1, :]):
+        centroids = xyz[:, atom_indices, :].mean(axis=1, keepdims=True)
+        xyz += centroids[reference_frame] - centroids
+    else:
+        aligned.superpose(aligned, frame=reference_frame, atom_indices=atom_indices)
     return aligned
