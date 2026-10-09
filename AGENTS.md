@@ -269,7 +269,7 @@ SLURM submission scripts for running OpenFE RBFE transformations on Sherlock.
 
 - Analysis modules: `src/mdpp/analysis/<topic>.py`
 - Plot modules: `src/mdpp/plots/<topic>.py`
-- Helper utilities within a subpackage: `utils.py`
+- Helper utilities within a subpackage: `utils.py` (not `_common.py` or `helpers.py`)
 - MDP config templates: `scripts/gromacs/mdps/<ff>/<step>.mdp`
 - Shell scripts (not packaged): `scripts/<engine>/<category>/<script>.sh`
 - SLURM scripts: `scripts/<engine>/<category>/<script>.sbatch`
